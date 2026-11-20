@@ -82,8 +82,10 @@ def main():
 
     groups = {}
     groups["labels"] = embed([p for _, p in prompts["labels"]])
-    for g in ("subject", "empty", "beautiful", "ugly"):
-        groups[g] = embed(prompts[g])
+    for g, texts in prompts.items():
+        if g in ("labels",) or g.startswith("_"):
+            continue
+        groups[g] = embed(texts)
     np.savez_compressed(OUT / "text_embeds.npz", **groups)
     (OUT / "prompts.json").write_text(json.dumps(prompts, ensure_ascii=False, indent=1), "utf-8")
 
