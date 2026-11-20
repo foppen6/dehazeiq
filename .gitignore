@@ -9,3 +9,5 @@ packaging/ffmpeg/
 *.dmg
 dehazeiq-selftest.log
 .DS_Store
+packaging/models/
+packaging/_tmp_models/

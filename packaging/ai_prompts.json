@@ -1,0 +1,61 @@
+{
+  "_comment": "Textbeskrivningar som AI-modellen (CLIP) jämför bilderna med. Ändras de byggs modellpaketet om automatiskt.",
+  "labels": [
+    ["Sköldpadda", "a photo of a sea turtle swimming underwater"],
+    ["Dykare", "a photo of a scuba diver underwater"],
+    ["Rev och koraller", "a photo of a colorful coral reef underwater"],
+    ["Fiskstim", "a photo of a large school of fish underwater"],
+    ["Fisk", "a close-up photo of a fish underwater"],
+    ["Haj", "a photo of a shark underwater"],
+    ["Rocka", "a photo of a manta ray or stingray underwater"],
+    ["Bläckfisk", "a photo of an octopus or squid underwater"],
+    ["Manet", "a photo of a jellyfish"],
+    ["Muräna", "a photo of a moray eel"],
+    ["Nakensnäcka", "a macro photo of a nudibranch sea slug"],
+    ["Krabba och hummer", "a photo of a crab or lobster underwater"],
+    ["Sjöhäst", "a photo of a seahorse"],
+    ["Säl och delfin", "a photo of a seal or dolphin underwater"],
+    ["Vrak", "a photo of a shipwreck underwater"],
+    ["Grotta", "a photo of an underwater cave"],
+    ["Kelp och tång", "a photo of a kelp forest or seaweed underwater"],
+    ["Ytan underifrån", "a photo of the water surface seen from below with sun rays"],
+    ["Båt", "a photo of a boat on the sea"],
+    ["Strand", "a photo of a beach"],
+    ["Solnedgång", "a photo of a sunset over the sea"],
+    ["Berg", "a photo of mountains"],
+    ["Stad", "a photo of a city street"],
+    ["Människor", "a photo of smiling people"],
+    ["Landskap", "a photo of a wide natural landscape"]
+  ],
+  "subject": [
+    "a photo of an animal underwater",
+    "a photo of a fish",
+    "a photo of a sea turtle",
+    "a photo of a scuba diver",
+    "a photo of a shark or ray",
+    "a close-up photo of a sea creature",
+    "a photo of a colorful coral reef",
+    "a photo of a person",
+    "a photo of a boat",
+    "a beautiful landscape"
+  ],
+  "empty": [
+    "an empty blue underwater scene with nothing in it",
+    "murky green water full of particles",
+    "a plain sandy sea floor",
+    "a very dark photo",
+    "an accidental blurry photo of nothing",
+    "a photo of the inside of a boat or a camera bag",
+    "a photo of the ground or someone's feet"
+  ],
+  "beautiful": [
+    "a stunning award-winning professional underwater photograph",
+    "a beautiful cinematic shot with great composition",
+    "a sharp vivid nature documentary still"
+  ],
+  "ugly": [
+    "a boring amateur snapshot",
+    "a low quality blurry out of focus photo",
+    "a badly composed dull photo"
+  ]
+}
