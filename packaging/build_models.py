@@ -81,7 +81,11 @@ def main():
         return np.stack(vecs).astype(np.float32)
 
     groups = {}
-    groups["labels"] = embed([p for _, p in prompts["labels"]])
+    def embed_one(p):  # en etikett kan ha flera beskrivningar: medelvärdet
+        v = embed(p if isinstance(p, list) else [p]).mean(axis=0)
+        return v / np.linalg.norm(v)
+
+    groups["labels"] = np.stack([embed_one(p) for _, p in prompts["labels"]]).astype(np.float32)
     for g, texts in prompts.items():
         if g in ("labels",) or g.startswith("_"):
             continue

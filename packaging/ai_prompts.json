@@ -1,164 +1,246 @@
 {
-  "_comment": "Textbeskrivningar som AI-modellen (CLIP) jämför bilderna med. Ändras de byggs modellpaketet om automatiskt.",
-  "labels": [
-    [
-      "Sköldpadda",
-      "a photo of a sea turtle swimming underwater"
-    ],
-    [
-      "Dykare",
-      "a photo of a scuba diver underwater"
-    ],
-    [
-      "Rev och koraller",
-      "a photo of a colorful coral reef underwater"
-    ],
-    [
-      "Fiskstim",
-      "a photo of a large school of fish underwater"
-    ],
-    [
-      "Fisk",
-      "a close-up photo of a fish underwater"
-    ],
-    [
-      "Haj",
-      "a photo of a shark underwater"
-    ],
-    [
-      "Rocka",
-      "a photo of a manta ray or stingray underwater"
-    ],
-    [
-      "Bläckfisk",
-      "a photo of an octopus or squid underwater"
-    ],
-    [
-      "Manet",
-      "a photo of a jellyfish"
-    ],
-    [
-      "Muräna",
-      "a photo of a moray eel"
-    ],
-    [
-      "Nakensnäcka",
-      "a macro photo of a nudibranch sea slug"
-    ],
-    [
-      "Krabba och hummer",
-      "a photo of a crab or lobster underwater"
-    ],
-    [
-      "Sjöhäst",
-      "a photo of a seahorse"
-    ],
-    [
-      "Säl och delfin",
-      "a photo of a seal or dolphin underwater"
-    ],
-    [
-      "Vrak",
-      "a photo of a shipwreck underwater"
-    ],
-    [
-      "Grotta",
-      "a photo of an underwater cave"
-    ],
-    [
-      "Kelp och tång",
-      "a photo of a kelp forest or seaweed underwater"
-    ],
-    [
-      "Ytan underifrån",
-      "a photo of the water surface seen from below with sun rays"
-    ],
-    [
-      "Båt",
-      "a photo of a boat on the sea"
-    ],
-    [
-      "Strand",
-      "a photo of a beach"
-    ],
-    [
-      "Solnedgång",
-      "a photo of a sunset over the sea"
-    ],
-    [
-      "Berg",
-      "a photo of mountains"
-    ],
-    [
-      "Stad",
-      "a photo of a city street"
-    ],
-    [
-      "Människor",
-      "a photo of smiling people"
-    ],
-    [
-      "Landskap",
-      "a photo of a wide natural landscape"
-    ]
+ "_comment": "Textbeskrivningar som AI-modellen (CLIP) jämför bilderna med. Ändras de byggs modellpaketet om automatiskt. En etikett kan ha flera beskrivningar (lista) – medelvärdet används. Gruppen 'creature_labels' i koden avgör vilka som räknas som djur/motiv vid beskärning.",
+ "labels": [
+  [
+   "Sköldpadda",
+   "a photo of a sea turtle swimming underwater"
   ],
-  "subject": [
-    "a photo of an animal underwater",
-    "a photo of a fish",
-    "a photo of a sea turtle",
-    "a photo of a scuba diver",
-    "a photo of a shark or ray",
-    "a close-up photo of a sea creature",
-    "a photo of a colorful coral reef",
-    "a photo of a person",
-    "a photo of a boat",
-    "a beautiful landscape"
+  [
+   "Dykare",
+   "a photo of a scuba diver underwater"
   ],
-  "empty": [
-    "an empty blue underwater scene with nothing in it",
-    "murky green water full of particles",
-    "a plain sandy sea floor",
-    "a very dark photo",
-    "an accidental blurry photo of nothing",
-    "a photo of the inside of a boat or a camera bag",
-    "a photo of the ground or someone's feet"
+  [
+   "Rev och koraller",
+   "a photo of a colorful coral reef underwater"
   ],
-  "beautiful": [
-    "a stunning award-winning professional underwater photograph",
-    "a beautiful cinematic shot with great composition",
-    "a sharp vivid nature documentary still"
+  [
+   "Fiskstim",
+   "a photo of a large school of fish underwater"
   ],
-  "ugly": [
-    "a boring amateur snapshot",
-    "a low quality blurry out of focus photo",
-    "a badly composed dull photo"
+  [
+   "Fisk",
+   [
+    "a close-up photo of a fish underwater",
+    "a photo of a fish swimming"
+   ]
   ],
-  "closeup": [
-    "an extreme close-up photo of an animal's face or eye",
-    "a close-up macro photo of a small sea creature",
-    "a close-up portrait of a fish filling the frame"
+  [
+   "Haj",
+   "a photo of a shark underwater"
   ],
-  "medium": [
-    "a photo of a whole animal swimming in the middle of the frame",
-    "a medium shot of a scuba diver",
-    "a photo of a sea turtle seen at a short distance"
+  [
+   "Rocka",
+   "a photo of a manta ray or stingray underwater"
   ],
-  "wide": [
-    "a wide shot of a vast underwater landscape",
-    "a wide establishing shot of a coral reef",
-    "a distant view of the open blue sea"
+  [
+   "Bläckfisk",
+   [
+    "a photo of an octopus underwater",
+    "a photo of a cuttlefish underwater",
+    "a photo of a small bobtail squid on the sandy sea floor",
+    "a photo of a squid underwater"
+   ]
   ],
-  "surface": [
-    "a photo of the sea surface seen from a boat",
-    "a photo of divers on a boat getting ready",
-    "a photo of the water surface seen from below with sun rays"
+  [
+   "Manet",
+   [
+    "a photo of a jellyfish",
+    "a photo of a jellyfish with tentacles drifting in the water"
+   ]
   ],
-  "descent": [
-    "a scuba diver descending into deep blue water",
-    "a diver going down a rope into the sea"
+  [
+   "Muräna",
+   "a photo of a moray eel"
   ],
-  "leaving": [
-    "an animal swimming away from the camera into the distance",
-    "the back of a sea creature leaving"
+  [
+   "Nakensnäcka",
+   "a macro photo of a nudibranch sea slug"
+  ],
+  [
+   "Krabba och hummer",
+   "a photo of a crab or lobster underwater"
+  ],
+  [
+   "Sjöhäst",
+   "a photo of a seahorse"
+  ],
+  [
+   "Säl och delfin",
+   "a photo of a seal or dolphin underwater"
+  ],
+  [
+   "Kammanet",
+   [
+    "a photo of a transparent comb jelly ctenophore",
+    "a photo of a clear glassy comb jelly with rows of shimmering cilia"
+   ]
+  ],
+  [
+   "Bottenfisk",
+   [
+    "a photo of a gurnard fish on the sandy sea floor",
+    "a photo of a goby or weever fish resting on sand",
+    "a photo of a long thin fish lying on the sea bottom"
+   ]
+  ],
+  [
+   "Plattfisk",
+   [
+    "a photo of a flatfish camouflaged on the sand",
+    "a photo of a flounder or plaice on the sea floor"
+   ]
+  ],
+  [
+   "Sjöstjärna",
+   [
+    "a photo of a starfish on the sea floor"
+   ]
+  ],
+  [
+   "Räka",
+   [
+    "a photo of a shrimp or prawn underwater"
+   ]
+  ],
+  [
+   "Snäcka och mussla",
+   [
+    "a photo of a sea snail or a mussel shell underwater"
+   ]
+  ],
+  [
+   "Vrak",
+   "a photo of a shipwreck underwater"
+  ],
+  [
+   "Grotta",
+   "a photo of an underwater cave"
+  ],
+  [
+   "Kelp och tång",
+   "a photo of a kelp forest or seaweed underwater"
+  ],
+  [
+   "Ytan underifrån",
+   "a photo of the water surface seen from below with sun rays"
+  ],
+  [
+   "Båt",
+   "a photo of a boat on the sea"
+  ],
+  [
+   "Strand",
+   "a photo of a beach"
+  ],
+  [
+   "Solnedgång",
+   "a photo of a sunset over the sea"
+  ],
+  [
+   "Berg",
+   "a photo of mountains"
+  ],
+  [
+   "Stad",
+   "a photo of a city street"
+  ],
+  [
+   "Människor",
+   "a photo of smiling people"
+  ],
+  [
+   "Landskap",
+   "a photo of a wide natural landscape"
   ]
+ ],
+ "subject": [
+  "a photo of an animal underwater",
+  "a photo of a fish",
+  "a photo of a sea turtle",
+  "a photo of a scuba diver",
+  "a photo of a shark or ray",
+  "a close-up photo of a sea creature",
+  "a photo of a colorful coral reef",
+  "a photo of a person",
+  "a photo of a boat",
+  "a beautiful landscape"
+ ],
+ "empty": [
+  "an empty blue underwater scene with nothing in it",
+  "murky green water full of particles",
+  "a plain sandy sea floor",
+  "a very dark photo",
+  "an accidental blurry photo of nothing",
+  "a photo of the inside of a boat or a camera bag",
+  "a photo of the ground or someone's feet"
+ ],
+ "beautiful": [
+  "a stunning award-winning professional underwater photograph",
+  "a beautiful cinematic shot with great composition",
+  "a sharp vivid nature documentary still"
+ ],
+ "ugly": [
+  "a boring amateur snapshot",
+  "a low quality blurry out of focus photo",
+  "a badly composed dull photo"
+ ],
+ "closeup": [
+  "an extreme close-up photo of an animal's face or eye",
+  "a close-up macro photo of a small sea creature",
+  "a close-up portrait of a fish filling the frame"
+ ],
+ "medium": [
+  "a photo of a whole animal swimming in the middle of the frame",
+  "a medium shot of a scuba diver",
+  "a photo of a sea turtle seen at a short distance"
+ ],
+ "wide": [
+  "a wide shot of a vast underwater landscape",
+  "a wide establishing shot of a coral reef",
+  "a distant view of the open blue sea"
+ ],
+ "surface": [
+  "a photo of the sea surface seen from a boat",
+  "a photo of divers on a boat getting ready",
+  "a photo of the water surface seen from below with sun rays"
+ ],
+ "descent": [
+  "a scuba diver descending into deep blue water",
+  "a diver going down a rope into the sea"
+ ],
+ "leaving": [
+  "an animal swimming away from the camera into the distance",
+  "the back of a sea creature leaving"
+ ],
+ "funny": [
+  "a funny photo of an animal looking straight into the camera",
+  "a curious animal coming close to the camera",
+  "a cute animal with big eyes staring at the viewer",
+  "an animal doing something surprising and funny"
+ ],
+ "plain": [
+  "an ordinary photo of an animal",
+  "a photo of an animal seen from the side",
+  "a calm photo of the sea floor"
+ ],
+ "action": [
+  "an animal moving fast and suddenly",
+  "a fish darting quickly through the water",
+  "a dramatic action moment in nature"
+ ],
+ "calm": [
+  "a calm peaceful still scene underwater",
+  "an animal resting motionless",
+  "a slow serene moment"
+ ],
+ "underwater": [
+  "a photo taken underwater",
+  "an underwater photo of the sea floor at night with a dive light",
+  "an underwater photo of a sea creature"
+ ],
+ "above": [
+  "a photo taken on land or above water",
+  "a photo of a boat deck or a beach",
+  "a photo of people above the sea surface"
+ ]
 }
