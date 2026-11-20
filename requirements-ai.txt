@@ -1,0 +1,5 @@
+# Valfritt: motivigenkänning med CLIP (sköldpadda, rev, dykare …)
+# Laddar ner cirka 600 MB modellvikter första gången analysen körs.
+torch>=2.1
+open_clip_torch>=2.24
+pillow>=10.0

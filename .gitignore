@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+build/
+dist/
+Output/
+dmg/
+packaging/ffmpeg/
+*.dmg
+dehazeiq-selftest.log
+.DS_Store
