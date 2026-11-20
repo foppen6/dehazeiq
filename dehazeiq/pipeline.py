@@ -106,11 +106,11 @@ def set_music(pid, path):
     return info
 
 
-def generate(pid, style, fmt, length, favorites=()):
+def generate(pid, style, fmt, length, favorites=(), theme=None):
     if fmt not in FORMATS:
         raise RuntimeError(f"Okänt format: {fmt}")
     proj = Project(pid)
-    props = generator.generate_set(proj, style, fmt, float(length), proj.data.get("music"), favorites)
+    props = generator.generate_set(proj, style, fmt, float(length), proj.data.get("music"), favorites, theme)
     proj.reload()
     proj.data["settings"] = {"format": fmt, "length": length, "style": style}
     proj.save()
@@ -125,7 +125,7 @@ def regenerate_one(pid, prop_id):
     if not old:
         raise RuntimeError("Förslaget finns inte")
     new = generator.generate(proj, old["style"], old["format"], old["target_length"],
-                             None, proj.data.get("music"), old.get("favorites", []))
+                             None, proj.data.get("music"), old.get("favorites", []), old.get("theme"))
     proj.add_proposals([new])
     return new
 
@@ -222,3 +222,14 @@ def diagnostics(pid):
                     z.writestr(f"bilder/{tag}_{c['name']}.jpg", buf.tobytes())
         z.writestr("klipp.csv", "\n".join(rows))
     return out
+
+
+def themes(pid):
+    proj = Project(pid)
+    if not proj.usable_clips():
+        return []
+    s = proj.data.get("settings") or {}
+    try:
+        return generator.themes(proj, s.get("format", "9:16"))
+    except generator.GenerateError:
+        return []

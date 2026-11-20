@@ -14,7 +14,7 @@ import uuid
 
 import numpy as np
 
-from . import analysis, quality
+from . import analysis, quality, story
 from .config import FORMATS, STYLES
 
 DT = 1.0 / analysis.SAMPLE_FPS
@@ -82,8 +82,17 @@ def _crop_fraction(clip, fmt):
     return 1.0, src / target      # beskärs i höjdled
 
 
-def build_candidates(project, style, fmt="16:9", favorites=(), use_interest=True):
-    clips = project.usable_clips()
+def context_clips(project):
+    """Klipp som får användas som sammanhang (yta, båt, nedstigning) trots att de saknar
+    ett tydligt motiv – men aldrig tekniskt dåliga klipp."""
+    ok = {"Inget tydligt motiv", "Svagare än resten"}
+    return [c for c in project.clips() if c.get("analysis") and not c.get("is360") and not c.get("excluded")
+            and set(c.get("reasons") or []) <= ok]
+
+
+def build_candidates(project, style, fmt="16:9", favorites=(), use_interest=True, clips=None,
+                     highlights=True):
+    clips = project.usable_clips() if clips is None else clips
     if not clips:
         raise GenerateError("Inget analyserat material ännu. Kör analysen först.")
     loaded = []
@@ -193,7 +202,7 @@ def build_candidates(project, style, fmt="16:9", favorites=(), use_interest=True
                             "Markera klipp som \"Måste med\" om du ändå vill använda dem.")
     # Bara höjdpunkterna: den bättre delen av alla godkända sekvenser (favoriter alltid med)
     u = np.array([x["util"] for x in cands])
-    if len(cands) > 4:
+    if highlights and len(cands) > 4:
         thr = float(np.quantile(u, quality.HIGHLIGHT_QUANTILE))
         keep = [x for x in cands if x["util"] >= thr or x["clip"]["id"] in favorites]
         if len(keep) >= 3:
@@ -387,24 +396,67 @@ def _place(c, dur, fmt):
     return start, cx, cy, keys
 
 
+def _candidates_for(project, style, fmt, favorites):
+    # Höjdpunktsurvalet görs inom varje tema (story.build), inte globalt
+    try:
+        cands, emb_kind = build_candidates(project, style, fmt, set(favorites), highlights=False)
+    except GenerateError:
+        # Inga sekvenser med tydligt motiv – gör filmen av det tekniskt bästa i stället
+        cands, emb_kind = build_candidates(project, style, fmt, set(favorites), use_interest=False,
+                                           highlights=False)
+    try:
+        ctx, _ = build_candidates(project, style, fmt, set(), use_interest=False,
+                                  clips=context_clips(project), highlights=False)
+    except GenerateError:
+        ctx = []
+    by_id = {c["id"]: c for c in project.clips()}
+    story.annotate(cands, by_id)
+    story.annotate(ctx, by_id)
+    ctx = [c for c in ctx if c.get("context")]
+    return cands, ctx, emb_kind
+
+
+def themes(project, fmt="9:16"):
+    """Teman som går att göra film av (för gränssnittet och automatiska förslag)."""
+    cands, _, _ = _candidates_for(project, STYLES["cinematic"], fmt, ())
+    by_id = {c["id"]: c for c in project.clips()}
+    return story.find_themes(cands, by_id)
+
+
+def _resolve_theme(theme, cands, project):
+    if isinstance(theme, dict):
+        return theme
+    by_id = {c["id"]: c for c in project.clips()}
+    found = story.find_themes(cands, by_id)
+    if theme:
+        for t in found:
+            if t["id"] == theme:
+                return t
+    return found[-1]  # resan/höjdpunkterna
+
+
 def generate(project, style_key="cinematic", fmt="9:16", length=30.0, seed=None,
-             music=None, favorites=()):
+             music=None, favorites=(), theme=None):
     if style_key not in STYLES:
         raise GenerateError(f"Okänd stil: {style_key}")
     style = STYLES[style_key]
     seed = int(seed if seed is not None else np.random.SeedSequence().entropy % 2**31)
     rng = np.random.default_rng(seed)
-    try:
-        cands, emb_kind = build_candidates(project, style, fmt, set(favorites))
-    except GenerateError:
-        # Inga sekvenser med tydligt motiv – gör filmen av det tekniskt bästa i stället
-        cands, emb_kind = build_candidates(project, style, fmt, set(favorites), use_interest=False)
+    cands, ctx, emb_kind = _candidates_for(project, style, fmt, favorites)
+    th = _resolve_theme(theme, cands, project)
     length = float(length)
     n = max(3, int(round(length / style["avg_shot"])))
-    # Filmen blir hellre kortare än utfylld: aldrig fler klipp än det finns höjdpunkter
-    n = min(n, max(1, len({(c["clip"]["id"], c["i0"]) for c in cands})))
-    chosen = _select(cands, n, style, rng, emb_kind, list(favorites))
-    seq = _order(chosen, style_key, emb_kind)
+    # Filmen blir hellre kortare än utfylld: aldrig fler klipp än det finns höjdpunkter (+ sammanhang)
+    n = min(n, max(1, len({(c["clip"]["id"], c["i0"]) for c in cands})) + 2)
+    favs = list(favorites)
+
+    def select(pool, k):
+        k = min(k, len(pool))
+        return _select(pool, k, style, rng, emb_kind, [f for f in favs if any(c["clip"]["id"] == f for c in pool)])
+
+    seq = story.build(th, cands, ctx, n, select)
+    if not seq:
+        seq = _order(_select(cands, n, style, rng, emb_kind, favs), style_key, emb_kind)
     beats = music.get("beats") if music else None
     durs = _durations(seq, length, style, rng, beats)
 
@@ -419,6 +471,7 @@ def generate(project, style_key="cinematic", fmt="9:16", length=30.0, seed=None,
             "duration": round(float(dur), 3), "at": round(pos, 3),
             "cx": round(cx, 3), "cy": round(cy, 3), "path": path, "wb_gains": a.get("wb_gains", [1, 1, 1]),
             "underwater": a.get("underwater", False), "tags": a.get("tags", []),
+            "label": c.get("label"), "shot": c.get("shot"), "context": c.get("context"),
             "quality": round(c["quality"], 3), "motion": round(c["motion"], 3),
             "favorite": bool(c.get("favorite")),
         })
@@ -427,6 +480,8 @@ def generate(project, style_key="cinematic", fmt="9:16", length=30.0, seed=None,
     return {
         "id": uuid.uuid4().hex[:10],
         "style": style_key, "style_label": style["label"],
+        "theme": th["id"], "theme_kind": th["kind"], "title": th["title"],
+        "story": story.THEME_TEXT.get(th["kind"], ""),
         "format": fmt, "target_length": length, "length": round(pos, 2),
         "seed": seed, "created": time.time(),
         "n_shots": len(shots),
@@ -442,10 +497,12 @@ def generate(project, style_key="cinematic", fmt="9:16", length=30.0, seed=None,
     }
 
 
-def generate_set(project, style="auto", fmt="9:16", length=30.0, music=None, favorites=()):
-    """Tre förslag: tre stilar (auto) eller tre varianter av samma stil."""
-    if style == "auto":
-        plan = [("cinematic", None), ("action", None), ("calm", None)]
-    else:
-        plan = [(style, None)] * 3
-    return [generate(project, s, fmt, length, seed, music, favorites) for s, seed in plan]
+def generate_set(project, style="auto", fmt="9:16", length=30.0, music=None, favorites=(), theme=None):
+    """Tre förslag. Utan valt tema: tre olika berättelser (t.ex. djurporträtt, ett dyk, resan).
+    Med valt tema: tre versioner av samma berättelse (tre stilar, eller tre varianter av en stil)."""
+    if theme:
+        styles = ["cinematic", "calm", "action"] if style == "auto" else [style] * 3
+        return [generate(project, s, fmt, length, None, music, favorites, theme) for s in styles]
+    plan = story.auto_plan(themes(project, fmt))
+    return [generate(project, s if style == "auto" else style, fmt, length, None, music, favorites, t)
+            for t, s in plan]

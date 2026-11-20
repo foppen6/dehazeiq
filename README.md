@@ -1,4 +1,4 @@
-# DeHazeIQ – AI-powered video editing, without the hassle (v0.5)
+# DeHazeIQ – AI-powered video editing, without the hassle (v0.6)
 
 Lokalt AI-videoredigeringsprogram för dyk-, natur- och resefilm. Fungerar på **Mac och Windows**,
 och kan styras från **mobil och surfplatta** via wifi.
@@ -79,6 +79,20 @@ Automatiskt urval:
   beskärningen följer det mjukt, så att motivet hamnar i bild och inte klipps bort.
 
 Format, längd, stil och musik ställs in under **Importera** och gäller även nästa import.
+
+## Berättelser
+
+Filmerna byggs kring ett tema i stället för att bara samla de bästa klippen:
+
+- **Djurporträtt** – en film om ett motiv (t.ex. sköldpaddan), helst från ett och samma dyk:
+  öppningsbild (yta/nedstigning) → översikt och halvbild → närbilder → höjdpunkt → avsked.
+- **Ett dyk** – ett dyk i tidsordning, från ytan till uppstigningen.
+- **Resans/dykets höjdpunkter** – kapitel per dyk, samma motiv samlat, i tidsordning.
+
+Teman hittas automatiskt: AI:n bestämmer motiv och bildutsnitt (närbild/halvbild/översikt) för
+varje sekvens, och klippens tidsstämplar delar materialet i dyk (mer än 40 minuter mellan klipp
+= nytt dyk). Med *AI väljer berättelser* blir de tre förslagen tre olika teman; väljer du ett tema
+blir det tre versioner av samma berättelse.
 
 ## Inbyggd AI
 

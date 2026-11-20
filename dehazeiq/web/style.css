@@ -313,3 +313,5 @@ dl.stats dd { margin: 0; font-weight: 600; white-space: nowrap; overflow: hidden
 .auto-steps li.done span { background: #1B3E48; color: var(--accent); border-color: transparent; }
 .auto-steps li.now { color: var(--text); font-weight: 600; }
 .auto-steps li.now span { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+
+.ver { font-size: 11px; color: var(--dim); border: 1px solid var(--line-2); border-radius: 999px; padding: 1px 7px; }

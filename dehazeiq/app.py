@@ -433,6 +433,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(_project_view(p))
             if api[2:] == ["status"]:
                 return self._json(JOBS.status(p.id))
+            if api[2:] == ["themes"]:
+                return self._json(pipeline.themes(p.id))
             if api[2:] == ["frame"]:
                 cid = (q.get("clip") or [""])[0]
                 if cid not in p.data["clips"]:
@@ -548,8 +550,9 @@ class Handler(BaseHTTPRequestHandler):
                 raise ApiError("Ogiltig längd")
             length = max(5.0, min(length, 600.0))
             favs = [c["id"] for c in p.clips() if c.get("favorite") and c.get("analysis")]
+            theme = body.get("theme") or None
             try:
-                props = pipeline.generate(p.id, style, fmt, length, favs)
+                props = pipeline.generate(p.id, style, fmt, length, favs, theme)
             except RuntimeError as e:
                 raise ApiError(str(e))
             return self._json({"proposals": props})

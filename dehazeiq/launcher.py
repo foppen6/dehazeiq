@@ -37,9 +37,19 @@ def selftest() -> int:
                    "-i", "testsrc2=s=320x240:d=0.5", "-c:v", "libx264", "-f", "null", "-"])
         media.run([media.ffprobe(), "-version"])
         print("Videokodning:", media.encoder_label())
+        import subprocess as _sp
+        print("Underprocesser utan fönster:", bool(getattr(_sp.Popen, "_dehazeiq_patched", False)) or "ej Windows")
     except Exception:  # noqa: BLE001
         traceback.print_exc()
         ok = False
+    if sys.platform.startswith("win"):
+        try:
+            n, control = _windows_console_check()
+            print("Konsolfönster vid FFmpeg-anrop:", n, "| detektorn ser ett avsiktligt fönster:", control)
+            if n:
+                ok = False
+        except Exception:  # noqa: BLE001
+            traceback.print_exc()
     try:
         import cv2
         import numpy
@@ -76,6 +86,64 @@ def selftest() -> int:
     return 0 if ok else 1
 
 
+def _windows_console_check():
+    """Startar FFmpeg på samma sätt som appen gör och räknar synliga konsolfönster som dyker upp."""
+    import ctypes
+    import subprocess
+    from ctypes import wintypes
+
+    from . import media
+    user32 = ctypes.windll.user32
+    classes = ("ConsoleWindowClass", "CASCADIA_HOSTING_WINDOW_CLASS")
+    proto = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    def snapshot():
+        res = set()
+
+        def cb(hwnd, _lp):
+            if user32.IsWindowVisible(hwnd):
+                buf = ctypes.create_unicode_buffer(256)
+                user32.GetClassNameW(hwnd, buf, 256)
+                if buf.value in classes:
+                    res.add(hwnd)
+            return True
+
+        user32.EnumWindows(proto(cb), 0)
+        return res
+
+    def watch(fn):
+        before = snapshot()
+        seen = set()
+        stop = threading.Event()
+
+        def loop():
+            while not stop.is_set():
+                seen.update(snapshot() - before)
+                time.sleep(0.03)
+
+        th = threading.Thread(target=loop, daemon=True)
+        th.start()
+        try:
+            fn()
+            time.sleep(0.3)
+        finally:
+            stop.set()
+            th.join()
+        return len(seen)
+
+    def ours():
+        for _ in range(4):
+            media.run([media.ffmpeg(), "-hide_banner", "-loglevel", "error", "-f", "lavfi",
+                       "-i", "testsrc2=s=320x240:d=0.4", "-f", "null", "-"])
+        subprocess.run([media.ffprobe(), "-version"], capture_output=True)  # utan egna flaggor
+
+    def control():  # ett avsiktligt synligt konsolfönster – visar att detektorn fungerar
+        p = subprocess.Popen(["cmd", "/c", "ping -n 2 127.0.0.1 >nul"], creationflags=0x00000010)
+        p.wait()
+
+    return watch(ours), watch(control) > 0
+
+
 def _show_error(message: str):
     """Visa ett felmeddelande även utan terminal."""
     print(message)
@@ -97,6 +165,7 @@ def main(argv=None) -> int:
     ap.add_argument("--selftest", action="store_true")
     # macOS kan skicka med -psn_… när appen startas från Finder
     args, _ = ap.parse_known_args(argv)
+    from . import media  # noqa: F401  – installerar "inga konsolfönster" på Windows direkt
 
     if args.selftest:
         return selftest()

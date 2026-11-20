@@ -68,6 +68,34 @@ IS_WIN = sys.platform.startswith("win")
 _WIN_FLAGS = (0x08000000 | 0x00004000) if IS_WIN else 0  # CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS
 
 
+def _install_no_window_patch():
+    """Windows: ALLA underprocesser (även från andra bibliotek) startas utan konsolfönster.
+    En fönsterapp har ingen egen konsol, så annars öppnar varje FFmpeg-anrop ett nytt fönster."""
+    if not IS_WIN or getattr(subprocess.Popen, "_dehazeiq_patched", False):
+        return
+    original = subprocess.Popen.__init__
+
+    def patched(self, *args, **kwargs):
+        if (kwargs.get("creationflags") or 0) & 0x00000010:  # CREATE_NEW_CONSOLE begärt uttryckligen
+            return original(self, *args, **kwargs)
+        kwargs["creationflags"] = (kwargs.get("creationflags") or 0) | 0x08000000  # CREATE_NO_WINDOW
+        if kwargs.get("startupinfo") is None:
+            si = subprocess.STARTUPINFO()
+            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            si.wShowWindow = 0
+            argv = args[0] if args else kwargs.get("args")
+            exe = str(argv[0] if isinstance(argv, (list, tuple)) and argv else argv or "").lower()
+            if "powershell" not in exe and "explorer" not in exe:  # dialoger och Utforskaren ska synas
+                kwargs["startupinfo"] = si
+        original(self, *args, **kwargs)
+
+    subprocess.Popen.__init__ = patched
+    subprocess.Popen._dehazeiq_patched = True
+
+
+_install_no_window_patch()
+
+
 def subprocess_kwargs():
     """Gemensamma inställningar för alla bakgrundsprocesser (FFmpeg m.fl.)."""
     if IS_WIN:

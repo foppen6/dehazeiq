@@ -21,7 +21,7 @@ const SRC_COLOR = { Insta360: "var(--insta)", Nikon: "var(--nikon)", Mobil: "var
 
 const state = {
   info: null, projects: [], pid: null, project: null, view: "import",
-  filter: "all", exportProp: null, exportRes: "1080p", shown: [],
+  filter: "all", exportProp: null, exportRes: "1080p", shown: [], themes: [], theme: null,
   lastJob: null, poll: null, autoAnalyze: false, expectJob: false,
 };
 
@@ -88,7 +88,18 @@ async function loadProject(pid) {
   const ids = new Set((state.project.proposals || []).map((p) => p.id));
   state.shown = (saved || []).filter((id) => ids.has(id));
   if (!state.shown.length) state.shown = (state.project.proposals || []).slice(0, 3).map((p) => p.id);
+  state.themes = [];
+  state.theme = null;
   handleJob(state.project.job, true);
+  loadThemes();
+}
+
+async function loadThemes() {
+  if (!state.pid || running()) return;
+  try {
+    state.themes = await api("GET", `/api/p/${state.pid}/themes`);
+    if (state.view === "proposals") render();
+  } catch (_) { state.themes = []; }
 }
 
 function saveShown() { localStorage.setItem(`tv.shown.${state.pid}`, JSON.stringify(state.shown)); }
@@ -154,6 +165,7 @@ async function onJobFinished(j) {
     const r = j.result || {};
     const ex = (r.analysis || {}).excluded || 0;
     if (r.proposals && r.proposals.length) { state.shown = r.proposals.slice(0, 3); saveShown(); }
+    loadThemes();
     toast(`Klart! ${r.proposals ? r.proposals.length : 0} filmförslag är klara.${ex ? ` ${ex} svaga klipp valdes bort automatiskt.` : ""}`, true);
     state.view = "proposals";
   } else if (kind[0] === "import") {
@@ -334,7 +346,7 @@ async function generate() {
   generating = true; render();
   try {
     const s = settings();
-    const r = await api("POST", `/api/p/${state.pid}/generate`, { style: s.style, format: s.format, length: s.length });
+    const r = await api("POST", `/api/p/${state.pid}/generate`, { style: s.style, format: s.format, length: s.length, theme: state.theme });
     P().proposals = r.proposals.concat(P().proposals || []);
     state.shown = r.proposals.map((p) => p.id);
     saveShown();
@@ -383,6 +395,8 @@ function stepsModel() {
 
 function renderTop() {
   $("#crumb").textContent = P() ? `/ ${P().name}` : "";
+  const ver = $("#ver");
+  if (ver && state.info) ver.textContent = `v${state.info.version}`;
   $("#steps").innerHTML = stepsModel().map((s) => {
     const active = state.view === s.id;
     const cls = ["step", active ? "active" : "", !active && s.done ? "done" : ""].join(" ");
@@ -607,8 +621,8 @@ function propCard(p, idx) {
     <div class="top" style="${wide ? "flex-direction:column" : ""}">
       <div class="phone" style="width:${w}px;height:${h}px">${phone}</div>
       <div class="info">
-        <div class="stack" style="gap:4px"><span class="plabel" style="color:${si.color || "var(--accent)"}">Förslag ${"ABCDEFGHIJ"[idx] || ""}</span>
-          <h2 class="pname">${esc(p.style_label)}</h2><p class="pdesc">${esc(si.long || "")}</p>
+        <div class="stack" style="gap:4px"><span class="plabel" style="color:${si.color || "var(--accent)"}">Förslag ${"ABCDEFGHIJ"[idx] || ""} · ${esc(p.style_label)}</span>
+          <h2 class="pname">${esc(p.title || p.style_label)}</h2><p class="pdesc">${esc(p.story || si.long || "")}</p>
           ${p.short ? `<p class="pdesc" style="color:var(--warn)">Kortare än önskat – det fanns bara ${fmtDur(p.length)} skarpt material.</p>` : ""}</div>
         <dl class="stats">
           <div><dt>Klipp</dt><dd class="num">${p.n_shots}</dd></div>
@@ -656,6 +670,8 @@ function viewProposals() {
   const favs = clips().filter((c) => c.favorite).length;
   const fmt = FORMAT_INFO.find((f) => f.id === s.format);
   const styleSel = Object.entries(STYLE_INFO).map(([k, v]) => `<button class="chip" data-style="${k}" aria-pressed="${s.style === k}">${v.label}</button>`).join("");
+  const themeSel = [`<button class="chip" data-theme="" aria-pressed="${!state.theme}">AI väljer berättelser</button>`]
+    .concat((state.themes || []).map((t) => `<button class="chip" data-theme="${esc(t.id)}" aria-pressed="${state.theme === t.id}">${esc(t.title)}<span class="muted"> · ${t.clips} klipp</span></button>`)).join("");
   return `<main class="main wide">
     <div class="spread">
       <div class="head"><h1>${shown.length ? "Filmförslag" : "Inga förslag ännu"}</h1>
@@ -667,10 +683,11 @@ function viewProposals() {
     </div>
     <div class="props">${shown.map(propCard).join("") || '<div class="empty">Klicka på "Generera nya förslag".</div>'}</div>
     <section class="box" style="flex-direction:row;flex-wrap:wrap;align-items:center;gap:14px">
-      <b>Nästa generering</b><div class="chips">${styleSel}</div>
+      <div class="stack" style="gap:8px;flex:1 1 100%"><b>Berättelse</b><div class="chips">${themeSel}</div></div>
+      <div class="stack" style="gap:8px;flex:1 1 auto"><b>Stil</b><div class="chips">${styleSel}</div></div>
       <a href="#" data-step-link="import" style="font-size:13px">Ändra format, längd eller musik</a>
     </section>
-    ${older.length ? `<section class="older"><h2>Tidigare förslag</h2>${older.slice(0, 9).map((p) => `<div class="older-row"><b>${esc(p.style_label)}</b><span class="muted num">${p.n_shots} klipp · ${fmtDur(p.length)} · ${esc(p.format)}</span><span class="grow"></span><button class="btn small" data-show="${p.id}">Visa</button></div>`).join("")}</section>` : ""}
+    ${older.length ? `<section class="older"><h2>Tidigare förslag</h2>${older.slice(0, 9).map((p) => `<div class="older-row"><b>${esc(p.title || p.style_label)}</b><span class="muted">${esc(p.style_label)}</span><span class="muted num">${p.n_shots} klipp · ${fmtDur(p.length)} · ${esc(p.format)}</span><span class="grow"></span><button class="btn small" data-show="${p.id}">Visa</button></div>`).join("")}</section>` : ""}
   </main>`;
 }
 
@@ -769,6 +786,7 @@ document.addEventListener("click", async (ev) => {
   if (d.format) return saveSettings({ format: d.format });
   if (d.length) return saveSettings({ length: Number(d.length) });
   if (d.style) return saveSettings({ style: d.style });
+  if (d.theme !== undefined) { state.theme = d.theme || null; return render(); }
   if (d.filter) { state.filter = d.filter; return render(); }
   if (d.fav) return toggleClip(d.fav, "favorite");
   if (d.ex) return toggleClip(d.ex, "excluded");
