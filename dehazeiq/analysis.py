@@ -10,7 +10,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from . import tagging
+from . import ai, tagging
 
 SAMPLE_FPS = 4.0
 WORK_WIDTH = 320
@@ -18,11 +18,13 @@ TAG_EVERY = 2.0  # sekunder mellan bildrutor till CLIP
 
 
 SAL_W = 64
+_NOISE_K = np.array([[1, -2, 1], [-2, 4, -2], [1, -2, 1]], np.float32)
 
 
-def saliency(frame_bgr):
-    """Var i bilden finns motivet? Spektralresidual (Hou & Zhang) + färgkontrast.
-    Returnerar (sx, sy, spread_x, spread_y, styrka), alla normaliserade 0..1."""
+def saliency(frame_bgr, grad=None):
+    """Var i bilden finns motivet? Spektralresidual (Hou & Zhang) + färgkontrast,
+    viktat mot skarpa områden (motivet är oftast det som är i fokus).
+    Returnerar (sx, sy, spread_x, spread_y, styrka, motivskärpa)."""
     h, w = frame_bgr.shape[:2]
     sh = max(8, int(round(SAL_W * h / w)))
     small = cv2.resize(frame_bgr, (SAL_W, sh), interpolation=cv2.INTER_AREA)
@@ -42,12 +44,17 @@ def saliency(frame_bgr):
         return (a - lo) / (hi - lo) if hi > lo else np.zeros_like(a)
 
     sal = 0.5 * _n(sr) + 0.5 * _n(cc)
+    g_small = None
+    if grad is not None:
+        g_small = cv2.resize(grad, (SAL_W, sh), interpolation=cv2.INTER_AREA)
+        g_small = cv2.GaussianBlur(g_small, (0, 0), 1.5)
+        sal = sal * (0.35 + 0.65 * _n(g_small))
     # Bara de mest framträdande delarna räknas, så att bakgrunden inte drar mot mitten
     thr = np.percentile(sal, 85)
     wgt = np.clip(sal - thr, 0, None) ** 2
     tot = float(wgt.sum())
     if tot <= 1e-9:
-        return 0.5, 0.5, 0.5, 0.5, 0.0
+        return 0.5, 0.5, 0.5, 0.5, 0.0, 0.0
     ys, xs = np.mgrid[0:sh, 0:SAL_W]
     xs = (xs + 0.5) / SAL_W
     ys = (ys + 0.5) / sh
@@ -56,7 +63,8 @@ def saliency(frame_bgr):
     spx = float(np.sqrt((wgt * (xs - sx) ** 2).sum() / tot))
     spy = float(np.sqrt((wgt * (ys - sy) ** 2).sum() / tot))
     strength = float(sal.max() - np.median(sal))
-    return sx, sy, spx, spy, strength
+    sfocus = float((wgt * g_small).sum() / tot) if g_small is not None else 0.0
+    return sx, sy, spx, spy, strength, sfocus
 
 
 def _hist(hsv):
@@ -90,7 +98,32 @@ def analyze_clip(proxy_path, out_npz, progress=None, with_tags=True) -> dict:
     tag_step = max(1, int(round(TAG_EVERY * SAMPLE_FPS)))
 
     rec = {k: [] for k in ("t", "sharp", "luma", "clo", "chi", "r", "g", "b",
-                           "cx", "dx", "dy", "diff", "cut", "sx", "sy", "spx", "spy", "sstr")}
+                           "cx", "dx", "dy", "diff", "cut", "sx", "sy", "spx", "spy", "sstr",
+                           "focus", "sfocus")}
+    model = ai.get() if with_tags else None
+    ai_step = max(1, int(round(SAMPLE_FPS)))  # en AI-bild per sekund
+    ai_buf, ai_buf_t = [], []
+    ai_rec = {"t": [], "emb": [], "int": [], "beauty": [], "probs": [], "crop": []}
+
+    def ai_flush():
+        if not ai_buf:
+            return
+        emb = model.embed(ai_buf)
+        inter = model.interest(emb)
+        ai_rec["t"] += ai_buf_t
+        ai_rec["emb"].append(emb)
+        ai_rec["int"].append(inter)
+        ai_rec["beauty"].append(model.beauty(emb))
+        ai_rec["probs"].append(model.label_probs(emb))
+        for k, (img, it) in enumerate(zip(ai_buf, inter)):
+            h_, w_ = img.shape[:2]
+            # Var i bilden är motivet? Bara för liggande bild med något i, varannan sekund
+            if w_ > h_ * 1.2 and it > 0.45 and (len(ai_rec["crop"]) % 2 == 0):
+                ai_rec["crop"].append(model.crop_scores(img))
+            else:
+                ai_rec["crop"].append(np.full(len(ai.CROP_CENTERS), np.nan, np.float32))
+        ai_buf.clear()
+        ai_buf_t.clear()
     hists = []
     tag_frames, tag_times = [], []
     prev_gray = prev_small = prev_hist = None
@@ -110,6 +143,12 @@ def analyze_clip(proxy_path, out_npz, progress=None, with_tags=True) -> dict:
             continue
         t = idx / fps
         h, w = frame.shape[:2]
+        if model is not None and n_samples % ai_step == 0:
+            aw = 448
+            ai_buf.append(cv2.resize(frame, (aw, max(2, int(h * aw / w))), interpolation=cv2.INTER_AREA))
+            ai_buf_t.append(t)
+            if len(ai_buf) >= 16:
+                ai_flush()
         if w != WORK_WIDTH:
             frame = cv2.resize(frame, (WORK_WIDTH, max(2, int(h * WORK_WIDTH / w))),
                                interpolation=cv2.INTER_AREA)
@@ -127,7 +166,18 @@ def analyze_clip(proxy_path, out_npz, progress=None, with_tags=True) -> dict:
         col = np.abs(lap).sum(axis=0)
         cs = col.sum()
         rec["cx"].append(float((np.arange(col.size) * col).sum() / cs / col.size) if cs > 0 else 0.5)
-        sx, sy, spx, spy, sstr = saliency(frame)
+        # Brusokänslig skärpa: lätt utjämning tar bort sensorbrus och partiklar,
+        # sedan mäts de starkaste kanterna (motivets konturer) i stället för hela bildens snitt
+        den = cv2.GaussianBlur(gray, (0, 0), 1.0).astype(np.float32)
+        gm = cv2.magnitude(cv2.Sobel(den, cv2.CV_32F, 1, 0, ksize=3), cv2.Sobel(den, cv2.CV_32F, 0, 1, ksize=3))
+        top = np.partition(gm.ravel(), int(gm.size * 0.95))[int(gm.size * 0.95):]
+        # Brusnivå (Immerkær) – brusiga bilder får lägre skärpevärde, så att brus inte ser skarpt ut
+        gf_ = gray.astype(np.float32)
+        noise = float(np.sqrt(np.pi / 2) / (6 * max(1, (gf_.shape[1] - 2) * (gf_.shape[0] - 2)))
+                      * np.abs(cv2.filter2D(gf_, -1, _NOISE_K)[1:-1, 1:-1]).sum())
+        rec["focus"].append(float(top.mean()) / (1.0 + 0.6 * noise))
+        sx, sy, spx, spy, sstr, sfocus = saliency(frame, gm)
+        rec["sfocus"].append(sfocus)
         rec["sx"].append(sx)
         rec["sy"].append(sy)
         rec["spx"].append(spx)
@@ -155,7 +205,7 @@ def analyze_clip(proxy_path, out_npz, progress=None, with_tags=True) -> dict:
         rec["diff"].append(diff)
         rec["cut"].append(bool(cut))
         hists.append(hist)
-        if with_tags and tagging.AVAILABLE and n_samples % tag_step == 0:
+        if model is None and with_tags and tagging.AVAILABLE and n_samples % tag_step == 0:
             tag_frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
             tag_times.append(t)
         prev_gray, prev_small, prev_hist = gf, small, hist
@@ -164,6 +214,8 @@ def analyze_clip(proxy_path, out_npz, progress=None, with_tags=True) -> dict:
         if progress and total and n_samples % 20 == 0:
             progress(min(0.99, idx / total))
     cap.release()
+    if model is not None:
+        ai_flush()
 
     if n_samples < 2:
         raise RuntimeError("För kort eller oläsbart klipp")
@@ -195,9 +247,21 @@ def analyze_clip(proxy_path, out_npz, progress=None, with_tags=True) -> dict:
     motion = np.linalg.norm(shift, axis=1) * 10.0 + arr["diff"] * 4.0
     arr["motion"] = np.clip(motion, 0, 1).astype(np.float32)
 
-    # Motiv med CLIP (valfritt)
+    # Motiv, intresse och skönhet med den inbyggda AI-modellen
     tags = []
-    if tag_frames:
+    if model is not None and ai_rec["t"]:
+        emb = np.concatenate(ai_rec["emb"])
+        inter = np.concatenate(ai_rec["int"])
+        probs = np.concatenate(ai_rec["probs"])
+        arr["emb"] = emb.astype(np.float16)
+        arr["emb_t"] = np.asarray(ai_rec["t"], np.float32)
+        arr["ai_int"] = inter.astype(np.float32)
+        arr["ai_beauty"] = np.concatenate(ai_rec["beauty"]).astype(np.float32)
+        arr["ai_crop"] = np.stack(ai_rec["crop"]).astype(np.float32)
+        arr["tag_probs"] = probs.astype(np.float16)
+        sel = inter > 0.5
+        tags = ai.summarize_tags(probs[sel] if sel.any() else probs[:0], model.labels, min_prob=0.2)
+    elif tag_frames:
         tagger = tagging.get_tagger()
         if tagger is not None:
             emb, probs = tagger.embed(tag_frames)
@@ -214,11 +278,18 @@ def analyze_clip(proxy_path, out_npz, progress=None, with_tags=True) -> dict:
     gains = [float(np.clip((gray_m / max(c, 1.0)) ** strength, 0.75, 1.8)) for c in (r_m, g_m, b_m)]
     if not tags:
         tags = ["Undervatten" if underwater else "Ovan ytan"]
+    # Intresse och skönhet per prov (interpolerat från AI-bilderna), 0.5 = okänt
+    if "ai_int" in arr:
+        arr["interest"] = np.interp(t, arr["emb_t"], arr["ai_int"]).astype(np.float32)
+        arr["beauty"] = np.interp(t, arr["emb_t"], arr["ai_beauty"]).astype(np.float32)
+        q_sel = q * (0.4 + 0.6 * arr["interest"])
+    else:
+        q_sel = q
 
     # Bästa sekvens (3 s) för översikten
     win = max(1, int(3.0 * SAMPLE_FPS))
     if len(q) > win:
-        csum = np.concatenate([[0.0], np.cumsum(q)])
+        csum = np.concatenate([[0.0], np.cumsum(q_sel)])
         means = (csum[win:] - csum[:-win]) / win
         bi = int(np.argmax(means))
         best = (float(t[bi]), float(t[min(bi + win, len(t) - 1)]))
@@ -230,6 +301,10 @@ def analyze_clip(proxy_path, out_npz, progress=None, with_tags=True) -> dict:
     best_sharp = float(sharp_n[bsl].mean())
     best_expo = float(expo[bsl].mean())
     best_stab = float(stab[bsl].mean())
+    best_focus = float(arr["focus"][bsl].mean())
+    best_sfocus = float(arr["sfocus"][bsl].mean())
+    best_int = float(arr["interest"][bsl].mean()) if "interest" in arr else None
+    best_beauty = float(arr["beauty"][bsl].mean()) if "beauty" in arr else None
 
     mean_motion = float(arr["motion"].mean())
     pan = float(np.abs(arr["dx"]).mean())
@@ -259,6 +334,10 @@ def analyze_clip(proxy_path, out_npz, progress=None, with_tags=True) -> dict:
         "best_q": round(best_q, 3), "best_sharp": round(best_sharp, 3),
         "best_expo": round(best_expo, 3), "best_stab": round(best_stab, 3),
         "subject": round(float(np.median(arr["sstr"])), 3),
+        "best_focus": round(best_focus, 2), "best_sfocus": round(best_sfocus, 2),
+        "best_interest": None if best_int is None else round(best_int, 3),
+        "best_beauty": None if best_beauty is None else round(best_beauty, 3),
+        "ai": "interest" in arr,
         "scenes": int(arr["cut"].sum()) + 1,
         "tags": tags,
         "has_embeddings": "emb" in arr,

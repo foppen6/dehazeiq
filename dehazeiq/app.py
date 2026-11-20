@@ -20,7 +20,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import cv2
 
-from . import TAGLINE, __version__, media, pipeline, tagging
+from . import TAGLINE, __version__, ai, media, pipeline, tagging
 from .config import FORMATS, HOME, PROJECTS_DIR, STYLES
 from .project import JOBS, Project, auto_name, save_default_settings
 
@@ -420,7 +420,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({
                 "version": __version__, "tagline": TAGLINE, "platform": sys.platform,
                 "remote": self.is_remote, "encoder": media.encoder_label(),
-                "hw_encoder": bool(media.hw_encoder()), "clip_ai": tagging.AVAILABLE,
+                "hw_encoder": bool(media.hw_encoder()), "clip_ai": tagging.AVAILABLE or ai.available(),
                 "projects_dir": str(PROJECTS_DIR),
                 "styles": {k: {"label": v["label"], "avg_shot": v["avg_shot"]} for k, v in STYLES.items()},
                 "formats": list(FORMATS),
@@ -495,6 +495,11 @@ class Handler(BaseHTTPRequestHandler):
                 raise ApiError(busy_msg, HTTPStatus.CONFLICT)
             JOBS.start(p.id, "auto", pipeline.auto, p.id, None)
             return self._json({"ok": True})
+        if action == ["diagnostics"]:
+            out = pipeline.diagnostics(p.id)
+            if not self.is_remote:
+                reveal(out)
+            return self._json({"file": out.name})
         if action == ["rename"]:
             name = (body.get("name") or "").strip()
             if not name:
@@ -597,7 +602,7 @@ def start_server(port: int, lan: bool = False):
     print(f"Projekt sparas i {PROJECTS_DIR}")
     print("FFmpeg:", media.ffmpeg())
     print("Videokodning:", media.encoder_label())
-    print("Motivigenkänning (CLIP):", "på" if tagging.AVAILABLE else "av")
+    print("AI-bildförståelse:", "på" if ai.available() else "av (modellen saknas)")
     if lan:
         st = start_lan(port + 1)
         print("Mobil via wifi:", ", ".join(st["urls"]) or f"port {st['port']}", "· kod:", st["key"])

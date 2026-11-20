@@ -56,6 +56,18 @@ def selftest() -> int:
         traceback.print_exc()
         ok = False
     try:
+        import numpy as np
+
+        from . import ai
+        m = ai.get()
+        assert m is not None, "AI-modellen saknas eller går inte att ladda"
+        img = (np.random.rand(240, 427, 3) * 255).astype("uint8")
+        e = m.embed([img])
+        print("AI-modell:", m.folder, "inbäddning", e.shape, "intresse", round(float(m.interest(e)[0]), 3))
+    except Exception:  # noqa: BLE001
+        traceback.print_exc()
+        ok = False
+    try:
         import webview  # noqa: F401
         print("pywebview: finns")
     except Exception as e:  # noqa: BLE001

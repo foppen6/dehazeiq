@@ -27,6 +27,12 @@ for dirpath, _, files in os.walk(ff_root):
 if not binaries:
     raise SystemExit("packaging/ffmpeg saknas – hämta FFmpeg först")
 
+# Inbyggd AI-modell (CLIP ONNX + textinbäddningar), hämtas av byggsystemet till packaging/models
+models = os.path.join(PKG, "models")
+if not os.path.exists(os.path.join(models, "clip_vision.onnx")):
+    raise SystemExit("packaging/models saknas – hämta AI-modellen först")
+datas.append((models, "models"))
+
 a = Analysis(
     [os.path.join(PKG, "run_dehazeiq.py")],
     pathex=[ROOT],

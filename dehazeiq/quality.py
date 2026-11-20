@@ -13,8 +13,14 @@ CLIP_MIN_SHARP = 0.32
 CLIP_MIN_EXPO = 0.35
 CLIP_MIN_STAB = 0.40
 CLIP_REL_QUALITY = 0.72  # andel av projektets median – svagare än så väljs bort
+CLIP_REL_FOCUS = 0.6     # skärpa (brusokänslig) i förhållande till projektets median
+CLIP_MIN_INTEREST = 0.35 # AI: sannolikhet att bilden visar något sevärt
 
 # Sekvensnivå (generatorn)
+WIN_MIN_FOCUS_RANK = 0.70      # sekvensens skärpa minst 70 % av klippets bästa
+WIN_MIN_FOCUS_RANK_LOW = 0.50  # och aldrig under hälften (fokusletande, rörelseoskärpa)
+WIN_MIN_INTEREST = 0.45        # AI: något sevärt i bild större delen av tiden
+HIGHLIGHT_QUANTILE = 0.5       # bara den bättre hälften av alla godkända sekvenser blir film
 WIN_MIN_SHARP = 0.36      # snittskärpa i sekvensen
 WIN_MIN_SHARP_LOW = 0.26  # skärpan får inte dippa under detta (fokusletande, rörelseoskärpa)
 WIN_MIN_EXPO = 0.35
@@ -26,24 +32,42 @@ def assess(clips):
     analyzed = [c for c in clips if c.get("analysis") and not c.get("is360")]
     if not analyzed:
         return 0
-    qs = [c["analysis"].get("best_q", c["analysis"].get("score", 0)) for c in analyzed]
-    median_q = float(np.median(qs))
-    n_out = 0
+    def combined(a):
+        q = a.get("best_q", a.get("score", 0))
+        if a.get("best_interest") is not None:
+            q *= (0.4 + 0.6 * a["best_interest"]) * (0.7 + 0.3 * (a.get("best_beauty") or 0.5))
+        return q
+
+    median_q = float(np.median([combined(c["analysis"]) for c in analyzed]))
+    foci = [c["analysis"].get("best_focus") for c in analyzed if c["analysis"].get("best_focus")]
+    median_focus = float(np.median(foci)) if foci else None
     for c in analyzed:
         a = c["analysis"]
         reasons = []
         if a.get("best_sharp", 1) < CLIP_MIN_SHARP:
             reasons.append("Suddigt")
+        elif (median_focus and len(analyzed) >= 3 and a.get("best_focus") is not None
+              and a["best_focus"] < CLIP_REL_FOCUS * median_focus):
+            reasons.append("Suddigt")
         if a.get("best_expo", 1) < CLIP_MIN_EXPO:
             reasons.append("Fel exponering")
         if a.get("best_stab", 1) < CLIP_MIN_STAB:
             reasons.append("Skakigt")
-        if not reasons and len(analyzed) >= 4 and a.get("best_q", 1) < CLIP_REL_QUALITY * median_q:
+        if a.get("best_interest") is not None and a["best_interest"] < CLIP_MIN_INTEREST:
+            reasons.append("Inget tydligt motiv")
+        if not reasons and len(analyzed) >= 4 and combined(a) < CLIP_REL_QUALITY * median_q:
             reasons.append("Svagare än resten")
         c["auto_excluded"] = bool(reasons)
         c["reasons"] = reasons
-        n_out += bool(reasons)
-    return n_out
+    # AI:ns "inget tydligt motiv" är en bedömning, inte ett tekniskt fel: om den skulle lämna
+    # för lite material (t.ex. resfilm utan djur) släpps just det kravet
+    usable = [c for c in analyzed if not c["auto_excluded"]]
+    if len(usable) < min(3, len(analyzed)):
+        for c in analyzed:
+            if "Inget tydligt motiv" in c["reasons"]:
+                c["reasons"] = [r for r in c["reasons"] if r != "Inget tydligt motiv"]
+                c["auto_excluded"] = bool(c["reasons"])
+    return sum(1 for c in analyzed if c["auto_excluded"])
 
 
 def is_usable(clip) -> bool:

@@ -184,3 +184,41 @@ def auto(progress, pid, paths=None):
         render_proposal(_stage(progress, lo, hi, f"4/4 Förhandsvisning {i + 1} av {len(props)}"),
                         pid, prop["id"], "preview")
     return result
+
+
+def diagnostics(pid):
+    """Liten rapport (utan filmerna) för att kunna justera AI:ns gränser:
+    projektdata, analysvärden och en bild per klipp från dess bästa sekvens."""
+    import io
+    import json
+    import time
+    import zipfile
+
+    import cv2
+
+    proj = Project(pid)
+    name = f"DeHazeIQ-rapport-{time.strftime('%Y%m%d-%H%M')}.zip"
+    out = proj.renders / name
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("project.json", json.dumps(proj.data, ensure_ascii=False, indent=1))
+        rows = ["fil;i_filmen;orsaker;skarpa;fokus;exponering;stabilitet;intresse;skonhet;taggar"]
+        for c in proj.clips():
+            a = c.get("analysis") or {}
+            rows.append(";".join(str(x) for x in (
+                c["name"], quality.is_usable(c), "/".join(c.get("reasons") or []),
+                a.get("best_sharp"), a.get("best_focus"), a.get("best_expo"), a.get("best_stab"),
+                a.get("best_interest"), a.get("best_beauty"), "/".join(a.get("tags") or []))))
+            px = proj.proxy_path(c["id"])
+            if a and px.exists():
+                cap = cv2.VideoCapture(str(px))
+                cap.set(cv2.CAP_PROP_POS_MSEC, (a["best"][0] + a["best"][1]) / 2 * 1000)
+                ok, img = cap.read()
+                cap.release()
+                if ok:
+                    h, w = img.shape[:2]
+                    img = cv2.resize(img, (480, int(h * 480 / w)), interpolation=cv2.INTER_AREA)
+                    ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                    tag = "MED" if quality.is_usable(c) else "BORT"
+                    z.writestr(f"bilder/{tag}_{c['name']}.jpg", buf.tobytes())
+        z.writestr("klipp.csv", "\n".join(rows))
+    return out

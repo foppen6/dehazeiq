@@ -392,7 +392,7 @@ function renderTop() {
     return `<button class="${cls}" data-step="${s.id}" ${dis} ${active ? 'aria-current="step"' : ""}><span class="dot">${dot}</span>${s.label}${soon}</button>`;
   }).join("");
   const info = state.info || {};
-  const chip = `<span class="chip-status" title="Videokodning och motivigenkänning"><i style="background:${info.hw_encoder ? "var(--good)" : "var(--warn)"}"></i>${esc(info.encoder || "")} · ${info.clip_ai ? "AI-motiv på" : "Färgbaserad likhet"}</span>`;
+  const chip = `<span class="chip-status" title="Videokodning och motivigenkänning"><i style="background:${info.hw_encoder ? "var(--good)" : "var(--warn)"}"></i>${esc(info.encoder || "")} · ${info.clip_ai ? "AI på" : "AI saknas"}</span>`;
   $("#topActions").innerHTML = remote()
     ? `<span class="chip-status"><i></i>Ansluten via wifi</span>`
     : `${chip}<button class="btn small" data-act="lan" title="Styr DeHazeIQ från mobil eller surfplatta">${icon("phone", 15)}Mobil</button>`;
@@ -561,12 +561,13 @@ function viewAnalyze() {
   const info = state.info || {};
   const panel = `<aside class="panel" aria-label="Sammanfattning">
     <section class="stack" style="gap:14px"><h2>Hittat i materialet</h2>${found || '<p class="muted" style="margin:0">Visas när analysen är klar.</p>'}</section>
-    <section class="box"><h2 style="font-size:14px">Variation</h2><p>${info.clip_ai
-      ? "Motiv känns igen med CLIP. Liknande klipp hålls isär så att samma motiv inte upprepas."
-      : "Liknande klipp hittas med färg och bildinnehåll. Installera AI-paketen (se README) för att känna igen motiv som sköldpadda, rev och dykare."}</p></section>
+    <section class="box"><h2 style="font-size:14px">AI-bedömning</h2><p>${info.clip_ai
+      ? "AI:n känner igen motiv, bedömer hur sevärd och snygg varje bild är och väljer bara höjdpunkterna. Tomt vatten, sand och ofokuserade bilder sorteras bort."
+      : "AI-modellen saknas – urvalet görs med enklare bildanalys."}</p></section>
     <section class="box"><h2 style="font-size:14px">Automatiskt urval</h2><p>${dropped.length ? `${dropped.length} klipp valdes bort (suddiga, skakiga, felexponerade eller klart svagare). Även i godkända klipp används bara de delar som är skarpa hela vägen.` : "Alla klipp klarade kvalitetskraven. Bara de skarpaste delarna används."}</p></section>
     <section class="box"><h2 style="font-size:14px">Favoriter</h2><p>${favs ? `${favs} ${favs === 1 ? "klipp är markerat" : "klipp är markerade"} som "måste med". AI bygger filmen runt dem.` : 'Valfritt: markera klipp med "Måste med" för att alltid få med dem.'}</p></section>
     <div class="stack push">
+      <button class="btn small" data-act="diagnostics" title="Sparar en liten rapport med analysvärden och en bild per klipp (inga filmer)">Exportera analysrapport</button>
       <button class="btn" data-act="reanalyze" ${running() ? "disabled" : ""}>Analysera om allt</button>
       <button class="btn primary big" data-act="generate" ${running() || !done.length || generating ? "disabled" : ""}>${generating ? "Skapar …" : "Skapa 3 filmförslag"}</button>
     </div>
@@ -791,6 +792,13 @@ document.addEventListener("click", async (ev) => {
     case "music-remove": return removeMusic();
     case "export": return renderProp(state.exportProp, state.exportRes);
     case "lan": return openLan();
+    case "diagnostics":
+      try {
+        const r = await api("POST", `/api/p/${state.pid}/diagnostics`);
+        if (remote()) window.location.href = mediaUrl("renders", r.file);
+        else toast(`Rapporten är sparad: ${r.file}\nSkicka den till Claude för att justera urvalet.`, true);
+      } catch (e) { fail(e); }
+      return undefined;
     case "lan-on": return setLan(true);
     case "lan-off": return setLan(false);
     case "modal-close": $("#modal").hidden = true; return undefined;

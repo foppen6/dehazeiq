@@ -82,7 +82,7 @@ def _crop_fraction(clip, fmt):
     return 1.0, src / target      # beskärs i höjdled
 
 
-def build_candidates(project, style, fmt="16:9", favorites=()):
+def build_candidates(project, style, fmt="16:9", favorites=(), use_interest=True):
     clips = project.usable_clips()
     if not clips:
         raise GenerateError("Inget analyserat material ännu. Kör analysen först.")
@@ -98,6 +98,10 @@ def build_candidates(project, style, fmt="16:9", favorites=()):
     # Blandad absolut och relativ kvalitet, så att mjukare undervattensmaterial inte straffas för hårt
     allq = np.concatenate([d["quality"] for _, d, _ in loaded])
     ranks = np.sort(allq)
+    # Skärpa i förhållande till resten av materialet (brusokänsligt mått)
+    has_focus = all("focus" in d for _, d, _ in loaded)
+    focus_sorted = np.sort(np.concatenate([d["focus"] for _, d, _ in loaded])) if has_focus else None
+    use_ai = all("interest" in d for _, d, _ in loaded)
     emb_kind = "clip" if all(k == "clip" for _, _, k in loaded) else "hist"
 
     wlen = float(np.clip(style["avg_shot"] * 1.6, style["min_shot"], style["max_shot"]))
@@ -117,6 +121,16 @@ def build_candidates(project, style, fmt="16:9", favorites=()):
             _, sharp_n, expo, stab = analysis.sample_quality(d["sharp"], d["luma"], d["clo"], d["chi"],
                                                              d.get("jitter", np.zeros_like(d["sharp"])))
         sharp_s = _smooth(sharp_n, 3)
+        if focus_sorted is not None:
+            # Skärpa i förhållande till klippets egen bästa skärpa: fångar fokusletande och
+            # suddiga ögonblick (jämförelsen mellan klipp görs redan på klippnivå)
+            ref = max(1e-6, float(np.percentile(d["focus"], 90)))
+            frank = d["focus"] / ref
+            frank_s = _smooth(frank, 3)
+        else:
+            frank = frank_s = None
+        interest = d["interest"] if use_ai else None
+        beauty = d["beauty"] if use_ai else None
         fw, fh = _crop_fraction(c, fmt)
         spread = d["spx"] if fw < 0.999 and "spx" in d else (d["spy"] if fh < 0.999 and "spy" in d else None)
         frac = fw if fw < 0.999 else fh
@@ -139,9 +153,18 @@ def build_candidates(project, style, fmt="16:9", favorites=()):
                           and float(sharp_s[a:b].min()) >= quality.WIN_MIN_SHARP_LOW
                           and float(expo[a:b].mean()) >= quality.WIN_MIN_EXPO
                           and float(stab[a:b].mean()) >= quality.WIN_MIN_STAB)
+                if passes and frank is not None:
+                    passes = (float(frank[a:b].mean()) >= quality.WIN_MIN_FOCUS_RANK
+                              and float(frank_s[a:b].min()) >= quality.WIN_MIN_FOCUS_RANK_LOW)
+                mi = float(interest[a:b].mean()) if interest is not None else None
+                if passes and mi is not None and use_interest:
+                    passes = mi >= quality.WIN_MIN_INTEREST
                 if not passes and not is_fav:
                     continue
                 util = ms + style["motion_pref"] * (mm - 0.3) * 0.5 - 0.8 * max(0.0, 0.55 - ma)
+                if mi is not None:
+                    # AI: sevärdhet och skönhet väger lika tungt som teknisk kvalitet
+                    util = 0.4 * util + 0.35 * mi + 0.25 * float(beauty[a:b].mean())
                 if not passes:
                     util -= 1.0  # favorit utan godkänd sekvens: ta den minst dåliga
                 # Motivet måste rymmas i beskärningen (t.ex. 9:16 ur liggande video)
@@ -168,7 +191,14 @@ def build_candidates(project, style, fmt="16:9", favorites=()):
     if not cands:
         raise GenerateError("Hittade inga tillräckligt skarpa sekvenser i materialet. "
                             "Markera klipp som \"Måste med\" om du ändå vill använda dem.")
+    # Bara höjdpunkterna: den bättre delen av alla godkända sekvenser (favoriter alltid med)
     u = np.array([x["util"] for x in cands])
+    if len(cands) > 4:
+        thr = float(np.quantile(u, quality.HIGHLIGHT_QUANTILE))
+        keep = [x for x in cands if x["util"] >= thr or x["clip"]["id"] in favorites]
+        if len(keep) >= 3:
+            cands = keep
+            u = np.array([x["util"] for x in cands])
     lo, hi = float(u.min()), float(u.max())
     for x in cands:
         x["util_n"] = (x["util"] - lo) / (hi - lo) if hi > lo else 1.0
@@ -304,6 +334,22 @@ def _place(c, dur, fmt):
         sx = d["cx"]
         sy = np.full_like(sx, 0.5)
         weak = False
+    # AI: i vilket av fem utsnitt syns motivet tydligast? (bara när bilden beskärs i sidled)
+    ai_x = None
+    if fw < 0.999 and "ai_crop" in d and "emb_t" in d:
+        from .ai import CROP_CENTERS
+        centers = np.asarray(CROP_CENTERS, np.float32)
+        crop = d["ai_crop"]
+        valid = ~np.isnan(crop).any(axis=1)
+        if valid.any():
+            et = d["emb_t"][valid]
+            cs = crop[valid]
+            spread = cs.max(axis=1) - cs.min(axis=1)
+            w = np.exp((cs - cs.max(axis=1, keepdims=True)) * 250.0)
+            w /= w.sum(axis=1, keepdims=True)
+            xs = (w * centers).sum(axis=1)
+            conf = np.clip(spread / 0.015, 0.0, 1.0)
+            ai_x = (et, xs, conf)
     idx = np.where(m)[0]
     keys = []
     prev = None
@@ -312,12 +358,23 @@ def _place(c, dur, fmt):
         rel = float(t[k] - start)
         x = 0.5 if weak else float(sx[k])
         y = 0.5 if weak else float(sy[k])
+        if ai_x is not None:
+            et, xs, conf = ai_x
+            j = int(np.argmin(np.abs(et - t[k])))
+            if abs(float(et[j]) - float(t[k])) <= 2.5 and conf[j] > 0:
+                # närliggande AI-mätningar viktas ihop med motivkartan
+                near = np.abs(et - t[k]) <= 2.5
+                wsum = float((conf[near]).sum())
+                xa = float((xs[near] * conf[near]).sum() / wsum) if wsum > 0 else float(xs[j])
+                # AI-utsnitten är grova: de styr mest när motivkartan är osäker
+                alpha = (0.8 if weak else 0.3) * float(np.clip(conf[near].mean(), 0, 1))
+                x = alpha * xa + (1 - alpha) * x
         # Håll beskärningen innanför bilden
         x = float(np.clip(x, fw / 2, 1 - fw / 2))
         y = float(np.clip(y, fh / 2, 1 - fh / 2))
         if prev is not None:  # begränsa panoreringens hastighet
             dt = max(1e-3, rel - prev[0])
-            lim = 0.12 * dt
+            lim = 0.22 * dt
             x = prev[1] + float(np.clip(x - prev[1], -lim, lim))
             y = prev[2] + float(np.clip(y - prev[2], -lim, lim))
         if prev is None or rel - prev[0] > 1e-3:
@@ -337,9 +394,15 @@ def generate(project, style_key="cinematic", fmt="9:16", length=30.0, seed=None,
     style = STYLES[style_key]
     seed = int(seed if seed is not None else np.random.SeedSequence().entropy % 2**31)
     rng = np.random.default_rng(seed)
-    cands, emb_kind = build_candidates(project, style, fmt, set(favorites))
+    try:
+        cands, emb_kind = build_candidates(project, style, fmt, set(favorites))
+    except GenerateError:
+        # Inga sekvenser med tydligt motiv – gör filmen av det tekniskt bästa i stället
+        cands, emb_kind = build_candidates(project, style, fmt, set(favorites), use_interest=False)
     length = float(length)
     n = max(3, int(round(length / style["avg_shot"])))
+    # Filmen blir hellre kortare än utfylld: aldrig fler klipp än det finns höjdpunkter
+    n = min(n, max(1, len({(c["clip"]["id"], c["i0"]) for c in cands})))
     chosen = _select(cands, n, style, rng, emb_kind, list(favorites))
     seq = _order(chosen, style_key, emb_kind)
     beats = music.get("beats") if music else None

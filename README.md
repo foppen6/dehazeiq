@@ -1,4 +1,4 @@
-# DeHazeIQ – AI-powered video editing, without the hassle (v0.3)
+# DeHazeIQ – AI-powered video editing, without the hassle (v0.5)
 
 Lokalt AI-videoredigeringsprogram för dyk-, natur- och resefilm. Fungerar på **Mac och Windows**,
 och kan styras från **mobil och surfplatta** via wifi.
@@ -79,6 +79,23 @@ Automatiskt urval:
   beskärningen följer det mjukt, så att motivet hamnar i bild och inte klipps bort.
 
 Format, längd, stil och musik ställs in under **Importera** och gäller även nästa import.
+
+## Inbyggd AI
+
+Appen har en inbyggd bildförståelsemodell (CLIP ViT-B/32 från OpenAI, MIT-licens, körs lokalt
+via onnxruntime – inget laddas upp). Den används för att:
+- känna igen motiv (sköldpadda, dykare, rev, fiskstim, haj, rocka …),
+- bedöma hur **sevärd** (finns det ett motiv, eller bara tomt vatten/sand?) och **snygg** varje bild är,
+- välja **bara höjdpunkterna** – filmen blir hellre kortare än utfylld,
+- hitta i vilket utsnitt motivet syns när bilden beskärs till 9:16.
+
+Skärpan mäts brusokänsligt (partiklar och sensorbrus räknas inte som skärpa) och jämförs både
+mellan klipp och inom varje klipp, så att fokusletande och suddiga ögonblick hoppas över.
+
+**Analysrapport:** knappen *Exportera analysrapport* i analysvyn sparar en liten zip (inga filmer)
+med analysvärden och en bild per klipp – bra underlag för att justera gränserna.
+
+Modellpaketet byggs av `.github/workflows/models.yml` (prompterna finns i `packaging/ai_prompts.json`).
 
 ## Insta360
 
