@@ -15,7 +15,7 @@ permissions:
 jobs:
   mac:
     name: Mac (Apple Silicon)
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -101,10 +101,17 @@ jobs:
 
   release:
     name: Skapa release
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Varje lyckat bygge på main uppdaterar releasen för aktuell version (v + __version__)
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     needs: [mac, windows]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Läs version
+        id: ver
+        run: echo "v=$(sed -n 's/^__version__ = \"\(.*\)\"/\1/p' dehazeiq/__init__.py)" >> "$GITHUB_OUTPUT"
+
       - uses: actions/download-artifact@v4
         with:
           path: files
@@ -112,7 +119,10 @@ jobs:
 
       - uses: softprops/action-gh-release@v2
         with:
-          name: DeHazeIQ ${{ github.ref_name }}
+          tag_name: v${{ steps.ver.outputs.v }}
+          target_commitish: ${{ github.sha }}
+          name: DeHazeIQ ${{ steps.ver.outputs.v }}
+          make_latest: true
           files: |
             files/DeHazeIQ-mac.dmg
             files/DeHazeIQ-Setup.exe
