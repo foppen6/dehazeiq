@@ -20,7 +20,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import cv2
 
-from . import TAGLINE, __version__, ai, media, pipeline, tagging
+from . import TAGLINE, __version__, ai, effects, media, pipeline, tagging
 from .config import FORMATS, HOME, PROJECTS_DIR, STYLES
 from .project import JOBS, Project, auto_name, save_default_settings
 
@@ -529,6 +529,14 @@ class Handler(BaseHTTPRequestHandler):
             for k in ("format", "length", "style"):
                 if k in body:
                     s[k] = body[k]
+            if isinstance(body.get("effects"), dict):
+                eff = effects.enabled(s)
+                eff.update({k: bool(v) for k, v in body["effects"].items() if k in effects.EFFECTS})
+                if eff != effects.enabled(s):
+                    # förhandsvisningarna gjordes med andra effekter: gör om dem vid nästa uppspelning
+                    for prop in p.data.get("proposals", []):
+                        (prop.get("renders") or {}).pop("preview", None)
+                s["effects"] = eff
             p.save()
             save_default_settings(s)
             return self._json({"settings": s})

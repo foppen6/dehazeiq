@@ -1,4 +1,4 @@
-# DeHazeIQ – AI-powered video editing, without the hassle (v0.6)
+# DeHazeIQ – AI-powered video editing, without the hassle (v0.7)
 
 Lokalt AI-videoredigeringsprogram för dyk-, natur- och resefilm. Fungerar på **Mac och Windows**,
 och kan styras från **mobil och surfplatta** via wifi.
@@ -88,11 +88,27 @@ Filmerna byggs kring ett tema i stället för att bara samla de bästa klippen:
   öppningsbild (yta/nedstigning) → översikt och halvbild → närbilder → höjdpunkt → avsked.
 - **Ett dyk** – ett dyk i tidsordning, från ytan till uppstigningen.
 - **Resans/dykets höjdpunkter** – kapitel per dyk, samma motiv samlat, i tidsordning.
+- **Detaljer och färger** – närbilderna, lugnt klippta.
+- **Det stora blå / Miljöerna** – översikter, ytan och nedstigningen.
+- **I rörelse** – klippen med mest rörelse, stegrat mot det mest intensiva.
 
 Teman hittas automatiskt: AI:n bestämmer motiv och bildutsnitt (närbild/halvbild/översikt) för
 varje sekvens, och klippens tidsstämplar delar materialet i dyk (mer än 40 minuter mellan klipp
 = nytt dyk). Med *AI väljer berättelser* blir de tre förslagen tre olika teman; väljer du ett tema
-blir det tre versioner av samma berättelse.
+blir det tre versioner av samma berättelse. Varje ny generering väljer helst teman som inte
+användes de senaste gångerna, så att du får variation.
+
+## Effekter
+
+AI:n lägger till effekter där de passar, och de kan slås av och på under *Effekter* (utan att
+generera om):
+
+- **Mjuka övergångar** – korta toningar mellan klippen i Cinematisk och Lugn natur (Action har raka klipp).
+  Klippbytena ligger kvar på takten.
+- **Slowmotion** – bara när källan är filmad i minst 48 bilder/s (t.ex. 4K60/120).
+- **Långsam zoom** – lugn inzoomning på stillsamma översikter och halvbilder.
+- **Titel** – berättelsens namn tonas in i början.
+- **Vinjett** – mörkare hörn i Cinematisk.
 
 ## Inbyggd AI
 

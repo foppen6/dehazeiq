@@ -110,9 +110,11 @@ def generate(pid, style, fmt, length, favorites=(), theme=None):
     if fmt not in FORMATS:
         raise RuntimeError(f"Okänt format: {fmt}")
     proj = Project(pid)
-    props = generator.generate_set(proj, style, fmt, float(length), proj.data.get("music"), favorites, theme)
+    recent = [p.get("theme") for p in (proj.data.get("proposals") or [])[:3] if p.get("theme")]
+    props = generator.generate_set(proj, style, fmt, float(length), proj.data.get("music"), favorites, theme,
+                                   avoid=recent)
     proj.reload()
-    proj.data["settings"] = {"format": fmt, "length": length, "style": style}
+    proj.data.setdefault("settings", {}).update(format=fmt, length=length, style=style)
     proj.save()
     save_default_settings(proj.data["settings"])
     proj.add_proposals(props)
@@ -138,7 +140,7 @@ def render_proposal(progress, pid, prop_id, resolution="preview"):
     if resolution == "preview":
         out = proj.renders / f"{prop_id}_preview.mp4"
     else:
-        safe = f"{proj.data['name']} - {prop['style_label']} {prop['format'].replace(':', 'x')} {resolution}"
+        safe = f"{proj.data['name']} - {prop.get('title') or ''} {prop['style_label']} {prop['format'].replace(':', 'x')} {resolution}"
         safe = "".join(ch if (ch.isalnum() or ch in "-_") else " " for ch in safe)
         safe = " ".join(safe.split())
         out = proj.renders / f"{safe}.mp4"

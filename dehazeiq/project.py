@@ -18,6 +18,7 @@ import uuid
 from pathlib import Path
 
 from .config import PROJECTS_DIR, VIDEO_EXT
+from .effects import DEFAULT_EFFECTS
 
 _LOCK = threading.RLock()
 
@@ -168,16 +169,18 @@ class Project:
 
 
 _SETTINGS_FILE = PROJECTS_DIR.parent / "settings.json"
-_DEFAULTS = {"format": "9:16", "length": 30, "style": "auto"}
+_DEFAULTS = {"format": "9:16", "length": 30, "style": "auto", "effects": dict(DEFAULT_EFFECTS)}
 
 
 def default_settings():
     """Senast använda format/längd/stil – nya projekt får samma."""
     try:
         data = json.loads(_SETTINGS_FILE.read_text("utf-8"))
-        return {k: data.get(k, v) for k, v in _DEFAULTS.items()}
-    except (OSError, ValueError):
-        return dict(_DEFAULTS)
+        out = {k: data.get(k, v) for k, v in _DEFAULTS.items()}
+        out["effects"] = {**DEFAULT_EFFECTS, **(out.get("effects") or {})}
+        return out
+    except (OSError, ValueError, TypeError):
+        return {**_DEFAULTS, "effects": dict(DEFAULT_EFFECTS)}
 
 
 def save_default_settings(settings):

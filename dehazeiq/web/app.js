@@ -307,6 +307,31 @@ async function saveSettings(patch) {
   try { await api("POST", `/api/p/${state.pid}/settings`, patch); } catch (e) { fail(e); }
 }
 
+const EFFECT_INFO = { transitions: "Mjuka övergångar", slowmo: "Slowmotion", zoom: "Långsam zoom", title: "Titel", vignette: "Vinjett" };
+const effectsOn = () => Object.assign(Object.fromEntries(Object.keys(EFFECT_INFO).map((k) => [k, true])), settings().effects || {});
+
+async function toggleEffect(key) {
+  const eff = effectsOn();
+  eff[key] = !eff[key];
+  (P().proposals || []).forEach((p) => { if (p.renders) delete p.renders.preview; });
+  return saveSettings({ effects: eff });
+}
+
+function effectList(p) {
+  const on = effectsOn();
+  const plan = p.effects || {};
+  const shots = p.shots || [];
+  const out = [];
+  if (on.transitions && plan.transition === "fade") out.push("Mjuka övergångar");
+  const slow = shots.filter((s) => s.fx && s.fx.speed).length;
+  const zoom = shots.filter((s) => s.fx && s.fx.zoom).length;
+  if (on.slowmo && slow) out.push(`Slowmotion ×${slow}`);
+  if (on.zoom && zoom) out.push(`Zoom ×${zoom}`);
+  if (on.title && plan.title) out.push("Titel");
+  if (on.vignette && plan.vignette) out.push("Vinjett");
+  return out;
+}
+
 async function chooseMusic() {
   let path = null;
   try {
@@ -629,6 +654,7 @@ function propCard(p, idx) {
           <div><dt>Snittlängd</dt><dd class="num">${dec(p.avg_shot)} s</dd></div>
           <div><dt>Längd</dt><dd class="num">${fmtDur(p.length)}</dd></div>
           <div><dt>Musik</dt><dd>${p.music_name ? `${esc(p.music_name)} · ${dec(p.bpm, 0)} BPM` : "Originalljud"}</dd></div>
+          <div style="grid-column:1/-1"><dt>Effekter</dt><dd>${esc(effectList(p).join(" · ") || (p.effects ? "Raka klipp" : "–"))}</dd></div>
         </dl>
       </div>
     </div>
@@ -670,6 +696,8 @@ function viewProposals() {
   const favs = clips().filter((c) => c.favorite).length;
   const fmt = FORMAT_INFO.find((f) => f.id === s.format);
   const styleSel = Object.entries(STYLE_INFO).map(([k, v]) => `<button class="chip" data-style="${k}" aria-pressed="${s.style === k}">${v.label}</button>`).join("");
+  const on = effectsOn();
+  const fxSel = Object.entries(EFFECT_INFO).map(([k, l]) => `<button class="chip" data-effect="${k}" aria-pressed="${!!on[k]}">${l}</button>`).join("");
   const themeSel = [`<button class="chip" data-theme="" aria-pressed="${!state.theme}">AI väljer berättelser</button>`]
     .concat((state.themes || []).map((t) => `<button class="chip" data-theme="${esc(t.id)}" aria-pressed="${state.theme === t.id}">${esc(t.title)}<span class="muted"> · ${t.clips} klipp</span></button>`)).join("");
   return `<main class="main wide">
@@ -685,6 +713,7 @@ function viewProposals() {
     <section class="box" style="flex-direction:row;flex-wrap:wrap;align-items:center;gap:14px">
       <div class="stack" style="gap:8px;flex:1 1 100%"><b>Berättelse</b><div class="chips">${themeSel}</div></div>
       <div class="stack" style="gap:8px;flex:1 1 auto"><b>Stil</b><div class="chips">${styleSel}</div></div>
+      <div class="stack" style="gap:8px;flex:1 1 100%"><b>Effekter <span class="muted" style="font-weight:400">· AI lägger till där det passar, slå av det du inte vill ha</span></b><div class="chips">${fxSel}</div></div>
       <a href="#" data-step-link="import" style="font-size:13px">Ändra format, längd eller musik</a>
     </section>
     ${older.length ? `<section class="older"><h2>Tidigare förslag</h2>${older.slice(0, 9).map((p) => `<div class="older-row"><b>${esc(p.title || p.style_label)}</b><span class="muted">${esc(p.style_label)}</span><span class="muted num">${p.n_shots} klipp · ${fmtDur(p.length)} · ${esc(p.format)}</span><span class="grow"></span><button class="btn small" data-show="${p.id}">Visa</button></div>`).join("")}</section>` : ""}
@@ -786,6 +815,7 @@ document.addEventListener("click", async (ev) => {
   if (d.format) return saveSettings({ format: d.format });
   if (d.length) return saveSettings({ length: Number(d.length) });
   if (d.style) return saveSettings({ style: d.style });
+  if (d.effect) return toggleEffect(d.effect);
   if (d.theme !== undefined) { state.theme = d.theme || null; return render(); }
   if (d.filter) { state.filter = d.filter; return render(); }
   if (d.fav) return toggleClip(d.fav, "favorite");

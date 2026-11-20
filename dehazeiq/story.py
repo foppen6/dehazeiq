@@ -72,6 +72,7 @@ def annotate(cands, clips_by_id):
     for c in cands:
         c["session"] = sess_of.get(c["clip"]["id"], 1)
         c["label"], c["label_p"], c["shot"], c["context"] = None, 0.0, "medium", None
+        c["closeness"] = 0.0
         d = c["data"]
         if model is None or "emb" not in d or "tag_probs" not in d:
             # Utan AI: bara undervatten/ovan ytan som sammanhang
@@ -93,6 +94,7 @@ def annotate(cands, clips_by_id):
             p = np.exp((sims - sims.max()) * 100.0)
             p /= p.sum()
             c["shot"] = ("close", "medium", "wide")[int(np.argmax(p))]
+            c["closeness"] = float(sims[0] - sims[2])  # relativt mått: >0 närmare, <0 vidare
         groups = [g for g in ("subject", "surface", "descent", "leaving") if g in t]
         if len(groups) > 1:
             sims = np.array([(emb @ t[g].T).max(axis=1).mean() for g in groups])
@@ -106,6 +108,27 @@ def annotate(cands, clips_by_id):
 
 # ---------- teman ----------
 
+def _share(cands, k=None):
+    return k or max(2, int(np.ceil(len(cands) * 0.5)))
+
+
+def closest(cands, k=None):
+    """Närbilderna – relativt resten av materialet, så att temat finns även om allt är halvbild."""
+    picked = [c for c in cands if c.get("shot") == "close"]
+    rest = sorted((c for c in cands if not _has(picked, c)), key=lambda c: -c.get("closeness", 0))
+    return (picked + rest)[:max(len(picked), _share(cands, k))]
+
+
+def widest(cands, k=None):
+    picked = [c for c in cands if c.get("shot") == "wide" or c.get("context") in ("surface", "descent")]
+    rest = sorted((c for c in cands if not _has(picked, c)), key=lambda c: c.get("closeness", 0))
+    return (picked + rest)[:max(len(picked), _share(cands, k))]
+
+
+def most_moving(cands, k=None):
+    return sorted(cands, key=lambda c: -c["motion"])[:_share(cands, k)]
+
+
 def find_themes(cands, clips_by_id):
     """Vilka filmer går att berätta med det här materialet? Sorterat efter hur bra de blir."""
     _, sinfo = sessions(list(clips_by_id.values()))
@@ -116,18 +139,31 @@ def find_themes(cands, clips_by_id):
             by_label.setdefault(c["label"], []).append(c)
     for label, cs in by_label.items():
         n_clips = len({c["clip"]["id"] for c in cs})
-        if len(cs) >= 3 and n_clips >= 2:
+        if len(cs) >= 3:
             score = sum(c["util_n"] for c in cs)
             themes.append({"id": f"subject:{label}", "kind": "subject", "label": label,
                            "title": PORTRAIT_TITLE.get(label, label), "count": len(cs),
                            "clips": n_clips, "score": score})
-    if len(sinfo) > 1:
-        for s in sinfo:
-            cs = [c for c in cands if c.get("session") == s["id"]]
-            if len(cs) >= 3:
-                themes.append({"id": f"session:{s['id']}", "kind": "session", "title": s["title"],
-                               "count": len(cs), "clips": len(s["clips"]),
-                               "score": sum(c["util_n"] for c in cs) * 0.9})
+    for s in sinfo:
+        cs = [c for c in cands if c.get("session") == s["id"]]
+        if len(cs) >= 3:
+            title = s["title"] if len(sinfo) > 1 else ("Dyket i tidsordning" if s["kind"] == "Dyk" else "I tidsordning")
+            themes.append({"id": f"session:{s['id']}", "kind": "session", "title": title,
+                           "count": len(cs), "clips": len(s["clips"]),
+                           "score": sum(c["util_n"] for c in cs) * 0.9})
+    underwater = sum(1 for c in clips_by_id.values() if (c.get("analysis") or {}).get("underwater"))
+    mostly_under = underwater * 2 >= max(1, len(clips_by_id))
+    enough = len(cands) >= 4
+    extra = [
+        ("detail", "Detaljer och färger", closest(cands) if enough else [], 0.8),
+        ("blue", "Det stora blå" if mostly_under else "Miljöerna", widest(cands) if enough else [], 0.7),
+        ("motion", "I rörelse", most_moving(cands) if enough else [], 0.6),
+    ]
+    for kind, title, cs, w in extra:
+        if len(cs) >= 2:
+            themes.append({"id": kind, "kind": kind, "title": title, "count": len(cs),
+                           "clips": len({c["clip"]["id"] for c in cs}),
+                           "score": sum(c["util_n"] for c in cs) * w})
     themes.sort(key=lambda t: -t["score"])
     themes.append({"id": "trip", "kind": "trip",
                    "title": "Resans höjdpunkter" if len(sinfo) > 1 else "Dykets höjdpunkter",
@@ -135,24 +171,43 @@ def find_themes(cands, clips_by_id):
     return themes
 
 
-def auto_plan(themes):
-    """Tre olika berättelser när användaren låter AI välja."""
-    subj = [t for t in themes if t["kind"] == "subject"]
-    sess = [t for t in themes if t["kind"] == "session"]
-    trip = [t for t in themes if t["kind"] == "trip"]
-    picks = []
-    if subj:
-        picks.append((subj[0], "cinematic"))
-    if sess:
-        picks.append((sess[0], "cinematic" if not picks else "calm"))
-    elif len(subj) > 1:
-        picks.append((subj[1], "calm"))
-    picks.append((trip[0], "action"))
-    for st in ("cinematic", "calm", "action"):  # för lite material för tre teman: fler stilar av resan
+STYLE_FOR = {"subject": "cinematic", "session": "cinematic", "trip": "action",
+             "detail": "calm", "blue": "calm", "motion": "action"}
+KIND_PRIORITY = ["subject", "session", "detail", "motion", "blue", "trip"]
+
+
+def auto_plan(themes, avoid=(), rng=None):
+    """Tre OLIKA berättelser när användaren låter AI välja. Teman som användes senast (avoid)
+    hamnar sist, så att varje ny generering ger något nytt."""
+    rng = rng or np.random.default_rng()
+    avoid = set(avoid)
+    # Högst en av varje sort först, i prioritetsordning med lite slump, sedan resten
+    by_kind = {}
+    for t in themes:
+        by_kind.setdefault(t["kind"], []).append(t)
+    order = sorted(by_kind, key=lambda k: KIND_PRIORITY.index(k) + rng.uniform(0, 1.6))
+    candidates = []
+    for k in order:
+        ts = sorted(by_kind[k], key=lambda t: (t["id"] in avoid, -t["score"]))
+        candidates.append(ts[0])
+    for k in order:
+        candidates += [t for t in by_kind[k][1:]]
+    candidates.sort(key=lambda t: t["id"] in avoid)  # stabil sortering: nya teman först
+    picks, used_styles = [], set()
+    for t in candidates:
+        if len(picks) == 3:
+            break
+        st = STYLE_FOR.get(t["kind"], "cinematic")
+        if st in used_styles:  # variera även stilen
+            st = next((x for x in ("cinematic", "calm", "action") if x not in used_styles), st)
+        picks.append((t, st))
+        used_styles.add(st)
+    trip = by_kind.get("trip", [themes[-1]])[0]
+    for st in ("cinematic", "calm", "action"):  # för lite material: fler stilar av samma berättelse
         if len(picks) >= 3:
             break
-        if all(not (t is trip[0] and s == st) for t, s in picks):
-            picks.append((trip[0], st))
+        if all(s != st for _, s in picks):
+            picks.append((trip, st))
     return picks[:3]
 
 
@@ -236,6 +291,31 @@ def build(theme, cands, ctx_pool, n, select):
         closer = _context_pick(ctx_pool, ("surface",), sid, after=body[-1]["time"], exclude=body)
         return _dedupe(([opener] if opener else []) + body + ([closer] if closer else []))
 
+    if kind == "detail":
+        pool = closest(cands, max(n, 2)) or cands
+        body = select(pool, max(1, n - 1))
+        first_seen = {}
+        for c in body:
+            first_seen[c.get("label")] = min(first_seen.get(c.get("label"), c["time"]), c["time"])
+        body = sorted(body, key=lambda c: (first_seen[c.get("label")], c["time"]))
+        sess = body[0]["session"] if body else None
+        opener = next((c for c in sorted(cands, key=lambda c: -c["util_n"])
+                       if c.get("shot") in ("wide", "medium") and c.get("session") == sess and not _has(body, c)), None)
+        return _dedupe(([opener] if opener else []) + body)
+
+    if kind == "blue":
+        pool = _dedupe(widest(cands, max(n, 2)) + [c for c in ctx_pool if c.get("context") in ("surface", "descent")])
+        body = sorted(select(pool or cands, n), key=lambda c: c["time"])
+        desc = [c for c in body if c.get("context") == "descent"]
+        surf = [c for c in body if c.get("context") == "surface"]
+        mid = [c for c in body if not _has(desc, c) and not _has(surf, c)]
+        return _dedupe(surf[:1] + desc + mid + surf[1:])
+
+    if kind == "motion":
+        pool = most_moving(cands, max(n, 2))
+        body = select(pool, n)
+        return _dedupe(sorted(body, key=lambda c: c["motion"]))  # stegras mot det mest intensiva
+
     # Resan: kapitel per session, samma motiv samlat, tidsordning
     sess_ids = sorted({c["session"] for c in cands})
     weight = {s: sum(c["util_n"] for c in cands if c["session"] == s) for s in sess_ids}
@@ -272,4 +352,7 @@ THEME_TEXT = {
     "subject": "Porträtt av ett motiv: från översikt till närbilder och ett avsked.",
     "session": "Ett dyk i tidsordning, från ytan till uppstigningen.",
     "trip": "De bästa ögonblicken, kapitel för kapitel i tidsordning.",
+    "detail": "Närbilder: färger, mönster och små detaljer, samlade per motiv.",
+    "blue": "Stämning och miljö: vida vyer, ljus och vatten.",
+    "motion": "Fart och rörelse som trappas upp mot det mest intensiva.",
 }

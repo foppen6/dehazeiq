@@ -14,7 +14,7 @@ import uuid
 
 import numpy as np
 
-from . import analysis, quality, story
+from . import analysis, effects, quality, story
 from .config import FORMATS, STYLES
 
 DT = 1.0 / analysis.SAMPLE_FPS
@@ -477,7 +477,7 @@ def generate(project, style_key="cinematic", fmt="9:16", length=30.0, seed=None,
         })
         pos += float(dur)
 
-    return {
+    prop = {
         "id": uuid.uuid4().hex[:10],
         "style": style_key, "style_label": style["label"],
         "theme": th["id"], "theme_kind": th["kind"], "title": th["title"],
@@ -495,14 +495,16 @@ def generate(project, style_key="cinematic", fmt="9:16", length=30.0, seed=None,
         "shots": shots,
         "renders": {},
     }
+    return effects.plan(prop, {c["id"]: c for c in project.clips()}, style_key)
 
 
-def generate_set(project, style="auto", fmt="9:16", length=30.0, music=None, favorites=(), theme=None):
+def generate_set(project, style="auto", fmt="9:16", length=30.0, music=None, favorites=(), theme=None,
+                 avoid=()):
     """Tre förslag. Utan valt tema: tre olika berättelser (t.ex. djurporträtt, ett dyk, resan).
     Med valt tema: tre versioner av samma berättelse (tre stilar, eller tre varianter av en stil)."""
     if theme:
         styles = ["cinematic", "calm", "action"] if style == "auto" else [style] * 3
         return [generate(project, s, fmt, length, None, music, favorites, theme) for s in styles]
-    plan = story.auto_plan(themes(project, fmt))
+    plan = story.auto_plan(themes(project, fmt), avoid)
     return [generate(project, s if style == "auto" else style, fmt, length, None, music, favorites, t)
             for t, s in plan]

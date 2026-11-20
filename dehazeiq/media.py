@@ -124,9 +124,9 @@ def lower_priority():
         pass
 
 
-def run(cmd, timeout=None):
+def run(cmd, timeout=None, cwd=None):
     """Kör ett kommando och kasta MediaError med slutet av stderr vid fel."""
-    proc = subprocess.run(cmd, capture_output=True, timeout=timeout, **subprocess_kwargs())
+    proc = subprocess.run(cmd, capture_output=True, timeout=timeout, cwd=cwd, **subprocess_kwargs())
     if proc.returncode != 0:
         err = proc.stderr.decode("utf-8", "replace").strip().splitlines()
         tail = "\n".join(err[-8:])
