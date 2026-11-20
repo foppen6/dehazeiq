@@ -13,6 +13,7 @@ import numpy as np
 from . import ai, tagging
 
 SAMPLE_FPS = 4.0
+ANALYSIS_VERSION = 2  # 2: djurets position via AI-rutnät (loc_*), etiketter på utsnittet
 WORK_WIDTH = 320
 TAG_EVERY = 2.0  # sekunder mellan bildrutor till CLIP
 
@@ -104,6 +105,9 @@ def analyze_clip(proxy_path, out_npz, progress=None, with_tags=True) -> dict:
     ai_step = max(1, int(round(SAMPLE_FPS)))  # en AI-bild per sekund
     ai_buf, ai_buf_t = [], []
     ai_rec = {"t": [], "emb": [], "int": [], "beauty": [], "probs": [], "crop": []}
+    loc_rec = {"t": [], "x": [], "y": [], "conf": [], "score": [], "emb": []}
+    clip_len = total / fps if total else 0.0
+    loc_every = 1 if clip_len and clip_len < 10 else 2  # korta klipp: varje sekund
 
     def ai_flush():
         if not ai_buf:
@@ -115,13 +119,17 @@ def analyze_clip(proxy_path, out_npz, progress=None, with_tags=True) -> dict:
         ai_rec["int"].append(inter)
         ai_rec["beauty"].append(model.beauty(emb))
         ai_rec["probs"].append(model.label_probs(emb))
-        for k, (img, it) in enumerate(zip(ai_buf, inter)):
-            h_, w_ = img.shape[:2]
-            # Var i bilden är motivet? Bara för liggande bild med något i, varannan sekund
-            if w_ > h_ * 1.2 and it > 0.45 and (len(ai_rec["crop"]) % 2 == 0):
-                ai_rec["crop"].append(model.crop_scores(img))
-            else:
-                ai_rec["crop"].append(np.full(len(ai.CROP_CENTERS), np.nan, np.float32))
+        for img, tt in zip(ai_buf, ai_buf_t):
+            # Var i bilden är djuret? (rutnät av utsnitt, varannan sekund)
+            if len(ai_rec["crop"]) % loc_every == 0:
+                x_, y_, conf_, score_, e_ = model.locate(img)
+                loc_rec["t"].append(tt)
+                loc_rec["x"].append(x_)
+                loc_rec["y"].append(y_)
+                loc_rec["conf"].append(conf_)
+                loc_rec["score"].append(score_)
+                loc_rec["emb"].append(e_)
+            ai_rec["crop"].append(np.full(len(ai.CROP_CENTERS), np.nan, np.float32))
         ai_buf.clear()
         ai_buf_t.clear()
     hists = []
@@ -259,6 +267,18 @@ def analyze_clip(proxy_path, out_npz, progress=None, with_tags=True) -> dict:
         arr["ai_beauty"] = np.concatenate(ai_rec["beauty"]).astype(np.float32)
         arr["ai_crop"] = np.stack(ai_rec["crop"]).astype(np.float32)
         arr["tag_probs"] = probs.astype(np.float16)
+        if loc_rec["t"]:
+            for k in ("t", "x", "y", "conf", "score"):
+                arr[f"loc_{k}"] = np.asarray(loc_rec[k], np.float32)
+            arr["loc_emb"] = np.stack(loc_rec["emb"]).astype(np.float16)
+            # Etiketter: utsnittet med djuret säger mer än hela bilden (sand, partiklar …)
+            lp = model.label_probs(np.stack(loc_rec["emb"]))
+            j = np.clip(np.searchsorted(arr["loc_t"], arr["emb_t"]), 0, len(lp) - 1)
+            probs = 0.35 * probs + 0.65 * lp[j]
+            arr["tag_probs"] = probs.astype(np.float16)
+        uw = model.group_prob(emb, "underwater", "above")
+        if uw is not None:
+            arr["ai_uw"] = uw.astype(np.float32)
         sel = inter > 0.5
         tags = ai.summarize_tags(probs[sel] if sel.any() else probs[:0], model.labels, min_prob=0.2)
     elif tag_frames:
@@ -273,8 +293,11 @@ def analyze_clip(proxy_path, out_npz, progress=None, with_tags=True) -> dict:
     # Färg: undervatten känns igen på svag röd kanal
     r_m, g_m, b_m = float(arr["r"].mean()), float(arr["g"].mean()), float(arr["b"].mean())
     underwater = ((g_m + b_m) / 2.0) / max(r_m, 1.0) > 1.45
+    blue_cast = underwater
+    if "ai_uw" in arr:  # nattdyk med lampa har normal röd kanal – fråga AI:n
+        underwater = underwater or float(np.median(arr["ai_uw"])) > 0.6
     gray_m = (r_m + g_m + b_m) / 3.0
-    strength = 0.55 if underwater else 0.25
+    strength = 0.55 if blue_cast else 0.25
     gains = [float(np.clip((gray_m / max(c, 1.0)) ** strength, 0.75, 1.8)) for c in (r_m, g_m, b_m)]
     if not tags:
         tags = ["Undervatten" if underwater else "Ovan ytan"]
@@ -341,6 +364,8 @@ def analyze_clip(proxy_path, out_npz, progress=None, with_tags=True) -> dict:
         "scenes": int(arr["cut"].sum()) + 1,
         "tags": tags,
         "has_embeddings": "emb" in arr,
+        "v": ANALYSIS_VERSION if "loc_t" in arr else 1,
+        "subject_conf": round(float(np.percentile(arr["loc_conf"], 75)), 4) if "loc_conf" in arr else None,
     }
 
 

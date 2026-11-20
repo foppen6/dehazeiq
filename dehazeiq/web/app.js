@@ -9,6 +9,8 @@ const STYLE_INFO = {
     long: "Korta klipp som följer musikens takt, med fokus på rörelse och energi." },
   calm: { label: "Lugn natur", desc: "Långsamt, berättande", sw: "#16302A", color: "#6FD3A5",
     long: "Få och långa klipp med naturliga färger. Originalljudet hörs svagt under musiken." },
+  playful: { label: "Lekfull", desc: "Roliga ögonblick, fart och frysbilder", sw: "#3A2A12", color: "#F2C14E",
+    long: "Snabba klipp i takt, snabbspolning, frysbilder och zoomryck med varma, glada färger." },
 };
 const FORMAT_INFO = [
   { id: "9:16", name: "Reel / Shorts", sub: "9:16 · Instagram, TikTok", shape: [18, 30] },
@@ -307,7 +309,8 @@ async function saveSettings(patch) {
   try { await api("POST", `/api/p/${state.pid}/settings`, patch); } catch (e) { fail(e); }
 }
 
-const EFFECT_INFO = { transitions: "Mjuka övergångar", slowmo: "Slowmotion", zoom: "Långsam zoom", title: "Titel", vignette: "Vinjett" };
+const EFFECT_INFO = { transitions: "Mjuka övergångar", slowmo: "Slowmotion", zoom: "Långsam zoom", title: "Titel",
+  vignette: "Vinjett", fast: "Snabbspolning", freeze: "Frysbild", punch: "Zoomryck" };
 const effectsOn = () => Object.assign(Object.fromEntries(Object.keys(EFFECT_INFO).map((k) => [k, true])), settings().effects || {});
 
 async function toggleEffect(key) {
@@ -323,10 +326,16 @@ function effectList(p) {
   const shots = p.shots || [];
   const out = [];
   if (on.transitions && plan.transition === "fade") out.push("Mjuka övergångar");
-  const slow = shots.filter((s) => s.fx && s.fx.speed).length;
+  const slow = shots.filter((s) => s.fx && s.fx.speed && s.fx.speed < 1).length;
+  const fast = shots.filter((s) => s.fx && s.fx.speed > 1).length;
+  const freeze = shots.filter((s) => s.fx && s.fx.freeze).length;
+  const punch = shots.filter((s) => s.fx && s.fx.punch).length;
   const zoom = shots.filter((s) => s.fx && s.fx.zoom).length;
   if (on.slowmo && slow) out.push(`Slowmotion ×${slow}`);
   if (on.zoom && zoom) out.push(`Zoom ×${zoom}`);
+  if (on.fast && fast) out.push(`Snabbspolning ×${fast}`);
+  if (on.freeze && freeze) out.push("Frysbild");
+  if (on.punch && punch) out.push("Zoomryck");
   if (on.title && plan.title) out.push("Titel");
   if (on.vignette && plan.vignette) out.push("Vinjett");
   return out;
@@ -534,6 +543,16 @@ function meter(v) {
   return `<span class="meter"><i style="width:${Math.round(v * 100)}%;background:${c}"></i></span>`;
 }
 
+function outdatedBanner() {
+  if (!(state.info && state.info.clip_ai) || running()) return "";
+  const n = clips().filter((c) => c.analysis && c.analysis.ai !== false && (c.analysis.v || 1) < 2).length;
+  if (!n) return "";
+  return `<section class="box" style="flex-direction:row;align-items:center;gap:14px;border-color:var(--accent)">
+    <div class="stack grow" style="gap:4px"><b>Ny AI: hittar djuret i bilden och känner igen arterna bättre</b>
+      <span class="muted" style="font-size:13px">${n} klipp är analyserade med den äldre versionen. Uppdatera för bättre centrering och renare berättelser (några minuter).</span></div>
+    <button class="btn primary" data-act="update-analysis">Uppdatera analysen</button></section>`;
+}
+
 function viewAnalyze() {
   const all = usable();
   const done = analyzed();
@@ -590,6 +609,7 @@ function viewAnalyze() {
     : `<div class="progress"><div class="spread" style="font-size:13px"><b>${used.length} av ${done.length} klipp används</b></div><div class="bar"><div style="width:${done.length ? (used.length / done.length) * 100 : 0}%"></div></div></div>`;
 
   const main = `<main class="main">
+    ${outdatedBanner()}
     <div class="spread"><div class="head"><h1>${busy ? "AI analyserar materialet" : "Analysresultat"}</h1>
       <p class="lead">Bara skarpa, stabila och välexponerade klipp används. Svaga klipp väljs bort automatiskt – du behöver inte gå igenom dem.</p></div>${prog}</div>
     <div class="chips" role="group" aria-label="Filtrera">${chips}</div>
@@ -701,6 +721,7 @@ function viewProposals() {
   const themeSel = [`<button class="chip" data-theme="" aria-pressed="${!state.theme}">AI väljer berättelser</button>`]
     .concat((state.themes || []).map((t) => `<button class="chip" data-theme="${esc(t.id)}" aria-pressed="${state.theme === t.id}">${esc(t.title)}<span class="muted"> · ${t.clips} klipp</span></button>`)).join("");
   return `<main class="main wide">
+    ${outdatedBanner()}
     <div class="spread">
       <div class="head"><h1>${shown.length ? "Filmförslag" : "Inga förslag ännu"}</h1>
         <p class="lead">${esc(fmt ? fmt.name : s.format)} · ${fmtLong(s.length)} · samma material, olika urval, tempo och rytm.</p></div>
@@ -835,6 +856,7 @@ document.addEventListener("click", async (ev) => {
     case "auto": return runAuto();
     case "analyze": return startAnalyze(false);
     case "reanalyze": return startAnalyze(true);
+    case "update-analysis": return startAnalyze(false);
     case "generate": return generate();
     case "music": return chooseMusic();
     case "music-remove": return removeMusic();

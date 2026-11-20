@@ -13,10 +13,14 @@ EFFECTS = {
     "zoom": "Långsam zoom",
     "title": "Titel",
     "vignette": "Vinjett",
+    "fast": "Snabbspolning",
+    "freeze": "Frysbild",
+    "punch": "Zoomryck",
 }
 DEFAULT_EFFECTS = {k: True for k in EFFECTS}
 
-TRANSITION = {"cinematic": ("fade", 0.45), "calm": ("fade", 0.7), "action": ("cut", 0.0)}
+TRANSITION = {"cinematic": ("fade", 0.45), "calm": ("fade", 0.7), "action": ("cut", 0.0),
+              "playful": ("cut", 0.0)}
 
 
 def enabled(settings):
@@ -46,8 +50,31 @@ def plan(proposal, clips_by_id, style_key):
         zoom = [i for i, s in enumerate(shots)
                 if i not in slow and s["duration"] >= 2.2 and s["motion"] <= med
                 and s.get("shot") in ("wide", "medium", None)][:max(1, int(len(shots) * 0.4))]
+    # Lekfullt och action: snabbspola en lugn, lång tagning (t.ex. en krabba som går),
+    # frys det roligaste ögonblicket och ge klippen ett zoomryck på takten
+    fast, freeze, punch = [], [], []
+    if style_key in ("playful", "action"):
+        for i, s in enumerate(shots):
+            clip = clips_by_id.get(s["clip_id"]) or {}
+            room = float(clip.get("duration") or 0) - s["src_start"]
+            if i not in slow and s["motion"] < med and s["duration"] >= 1.5 and room >= s["duration"] * 2 + 0.2:
+                fast.append(i)
+        fast = fast[:1] if style_key == "action" else fast[:2]
+        punch = [i for i in range(1, len(shots), 2) if i not in fast]
+    if style_key == "playful" and len(shots) >= 3:
+        cand = [i for i, s in enumerate(shots) if s["duration"] >= 2.0 and i not in fast and i not in slow]
+        if cand:
+            freeze = [max(cand, key=lambda i: shots[i]["quality"] + shots[i]["motion"])]
     for i, s in enumerate(shots):
         fx = {}
+        if i in fast:
+            fx["speed"] = 2.0
+            s["src_end"] = round(s["src_start"] + s["duration"] * 2.0, 3)
+        if i in freeze:
+            fx["freeze"] = round(min(0.9, s["duration"] * 0.4), 2)
+            s["src_end"] = round(s["src_start"] + s["duration"] - fx["freeze"], 3)
+        if i in punch:
+            fx["punch"] = 0.1 if style_key == "action" else 0.07
         if i in slow:
             fps = (clips_by_id.get(s["clip_id"]) or {}).get("fps", 60)
             fx["speed"] = 0.4 if fps >= 100 else 0.5
@@ -71,7 +98,7 @@ def describe(proposal, settings):
     out = []
     if on["transitions"] and fx.get("transition") == "fade":
         out.append("mjuka övergångar")
-    n_slow = sum(1 for s in proposal["shots"] if (s.get("fx") or {}).get("speed"))
+    n_slow = sum(1 for s in proposal["shots"] if 0 < (s.get("fx") or {}).get("speed", 1) < 1)
     n_zoom = sum(1 for s in proposal["shots"] if (s.get("fx") or {}).get("zoom"))
     if on["slowmo"] and n_slow:
         out.append(f"slowmotion ×{n_slow}")
@@ -81,6 +108,11 @@ def describe(proposal, settings):
         out.append("titel")
     if on["vignette"] and fx.get("vignette"):
         out.append("vinjett")
+    for key, name in (("fast", "snabbspolning"), ("freeze", "frysbild"), ("punch", "zoomryck")):
+        n = sum(1 for s in proposal["shots"] if (s.get("fx") or {}).get("speed" if key == "fast" else key)
+                and (key != "fast" or (s.get("fx") or {}).get("speed", 1) > 1))
+        if on[key] and n:
+            out.append(name)
     return out
 
 

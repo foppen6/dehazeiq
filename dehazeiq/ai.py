@@ -26,6 +26,13 @@ SIZE = 224
 # Utsnitt för beskärning: smal remsa (ungefär 9:16 ur 16:9) på fem positioner
 CROP_CENTERS = (0.2, 0.35, 0.5, 0.65, 0.8)
 CROP_WIDTH = 0.34
+# Rutnät för att hitta var djuret är: 5 × 3 överlappande utsnitt
+GRID_X = (0.2, 0.35, 0.5, 0.65, 0.8)
+GRID_Y = (0.3, 0.5, 0.7)
+GRID_W, GRID_H = 0.36, 0.55
+# Etiketter som är miljöer, inte motiv att centrera
+SCENE_LABELS = {"Rev och koraller", "Vrak", "Grotta", "Kelp och tång", "Ytan underifrån", "Båt", "Strand",
+                "Solnedgång", "Berg", "Stad", "Landskap"}
 
 
 def model_dirs():
@@ -57,6 +64,7 @@ class Clip:
             self.text = {k: t[k].astype(np.float32) for k in t.files}
         prompts = json.loads((folder / "prompts.json").read_text("utf-8"))
         self.labels = [sv for sv, _ in prompts["labels"]]
+        self.creature_idx = np.array([i for i, sv in enumerate(self.labels) if sv not in SCENE_LABELS], int)
         self.folder = folder
         self._lock = threading.Lock()
 
@@ -119,6 +127,37 @@ class Clip:
             x0 = int(min(max(c * w - cw / 2, 0), w - cw))
             crops.append(frame_bgr[:, x0:x0 + cw])
         return self.subject_score(self.embed(crops))
+
+
+    def group_prob(self, emb, pos, neg):
+        """Sannolikhet för grupp pos mot grupp neg (t.ex. 'funny' mot 'plain'). None om grupperna saknas."""
+        if pos not in self.text or neg not in self.text:
+            return None
+        a, b = self.text[pos], self.text[neg]
+        p = self._softmax(100.0 * np.concatenate([emb @ a.T, emb @ b.T], axis=1))
+        return p[:, : len(a)].sum(axis=1)
+
+    def locate(self, frame_bgr):
+        """Var i bilden är djuret/motivet? Jämför 15 överlappande utsnitt med alla djuretiketter.
+        Returnerar (x, y, säkerhet, inbäddning av bästa utsnittet). x, y är 0..1."""
+        h, w = frame_bgr.shape[:2]
+        cw, ch = max(8, int(w * GRID_W)), max(8, int(h * GRID_H))
+        crops, centers = [], []
+        for gy in GRID_Y:
+            for gx in GRID_X:
+                x0 = int(min(max(gx * w - cw / 2, 0), w - cw))
+                y0 = int(min(max(gy * h - ch / 2, 0), h - ch))
+                crops.append(frame_bgr[y0:y0 + ch, x0:x0 + cw])
+                centers.append(((x0 + cw / 2) / w, (y0 + ch / 2) / h))
+        e = self.embed(crops)
+        lab = self.text["labels"][self.creature_idx] if len(self.creature_idx) else self.text["subject"]
+        s = (e @ lab.T).max(axis=1) - (e @ self.text["empty"].T).max(axis=1)
+        wgt = np.exp((s - s.max()) * 40.0)
+        wgt /= wgt.sum()
+        c = (wgt[:, None] * np.asarray(centers, np.float32)).sum(axis=0)
+        conf = float(s.max() - np.median(s))
+        best = int(np.argmax(s))
+        return float(c[0]), float(c[1]), conf, float(s.max()), e[best]
 
 
 _MODEL = None

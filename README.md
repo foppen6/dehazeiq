@@ -1,4 +1,4 @@
-# DeHazeIQ – AI-powered video editing, without the hassle (v0.7)
+# DeHazeIQ – AI-powered video editing, without the hassle (v0.8)
 
 Lokalt AI-videoredigeringsprogram för dyk-, natur- och resefilm. Fungerar på **Mac och Windows**,
 och kan styras från **mobil och surfplatta** via wifi.
@@ -91,6 +91,12 @@ Filmerna byggs kring ett tema i stället för att bara samla de bästa klippen:
 - **Detaljer och färger** – närbilderna, lugnt klippta.
 - **Det stora blå / Miljöerna** – översikter, ytan och nedstigningen.
 - **I rörelse** – klippen med mest rörelse, stegrat mot det mest intensiva.
+- **Roliga ögonblick** – nyfikna djur som tittar in i kameran och oväntade ögonblick (stilen Lekfull).
+- **Lugna stunder** – djur som vilar och långsamma tagningar.
+
+I en film om ett djur jämför AI:n hur djuret ser ut i varje klipp och tar bara med samma sorts
+djur, även när den inte är säker på artnamnet (en knot eller ett kammanet blandas inte in i en
+film om bläckfisken).
 
 Teman hittas automatiskt: AI:n bestämmer motiv och bildutsnitt (närbild/halvbild/översikt) för
 varje sekvens, och klippens tidsstämplar delar materialet i dyk (mer än 40 minuter mellan klipp
@@ -109,6 +115,15 @@ generera om):
 - **Långsam zoom** – lugn inzoomning på stillsamma översikter och halvbilder.
 - **Titel** – berättelsens namn tonas in i början.
 - **Vinjett** – mörkare hörn i Cinematisk.
+- **Snabbspolning** – en lugn tagning spelas i dubbel fart (Lekfull och Action).
+- **Frysbild** – det roligaste ögonblicket fryses med en snabb inzoomning (Lekfull).
+- **Zoomryck** – en kort zoom på klippet, i takt (Lekfull och Action).
+
+## Djuret i mitten
+
+Analysen (version 2) delar varannan sekund in bilden i 15 överlappande utsnitt och låter AI:n avgöra
+i vilket djuret syns. Beskärningen till 9:16, 4:5 och 1:1 följer den positionen. Projekt som
+analyserades med en äldre version får en knapp: *Uppdatera analysen*.
 
 ## Inbyggd AI
 

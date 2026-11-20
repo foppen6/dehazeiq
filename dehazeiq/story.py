@@ -73,6 +73,7 @@ def annotate(cands, clips_by_id):
         c["session"] = sess_of.get(c["clip"]["id"], 1)
         c["label"], c["label_p"], c["shot"], c["context"] = None, 0.0, "medium", None
         c["closeness"] = 0.0
+        c["fun"], c["calm_p"], c["subj_emb"], c["subj_conf"] = 0.0, 0.5, None, 0.0
         d = c["data"]
         if model is None or "emb" not in d or "tag_probs" not in d:
             # Utan AI: bara undervatten/ovan ytan som sammanhang
@@ -85,7 +86,28 @@ def annotate(cands, clips_by_id):
             m = np.zeros(len(et), bool)
             m[int(np.argmin(np.abs(et - (c["start"] + c["end"]) / 2)))] = True
         emb = d["emb"][m].astype(np.float32)
-        probs = d["tag_probs"][m].astype(np.float32).mean(axis=0)
+        # Etiketter räknas om från inbäddningarna med de aktuella beskrivningarna
+        probs = model.label_probs(emb).mean(axis=0)
+        c["subj_emb"] = None
+        if "loc_emb" in d and len(d["loc_t"]):
+            lt = d["loc_t"]
+            lm = (lt >= c["start"] - 1.0) & (lt <= c["end"] + 1.0)
+            if not lm.any():
+                lm = np.zeros(len(lt), bool)
+                lm[int(np.argmin(np.abs(lt - (c["start"] + c["end"]) / 2)))] = True
+            le = d["loc_emb"][lm].astype(np.float32)
+            # utsnittet med djuret säger mer än hela bilden
+            probs = 0.35 * probs + 0.65 * model.label_probs(le).mean(axis=0)
+            v = le.mean(axis=0)
+            c["subj_emb"] = v / max(float(np.linalg.norm(v)), 1e-6)
+            c["subj_conf"] = float(d["loc_conf"][lm].mean())
+            fun = model.group_prob(le, "funny", "plain")
+            c["fun"] = float(fun.mean()) if fun is not None else 0.0
+        else:
+            fun = model.group_prob(emb, "funny", "plain")
+            c["fun"] = float(fun.mean()) if fun is not None else 0.0
+        calm = model.group_prob(emb, "calm", "action")
+        c["calm_p"] = float(calm.mean()) if calm is not None else 0.5
         best = int(np.argmax(probs))
         c["label"], c["label_p"] = model.labels[best], float(probs[best])
         t = model.text
@@ -108,6 +130,44 @@ def annotate(cands, clips_by_id):
 
 # ---------- teman ----------
 
+def same_animal(cs, margin=0.035, extra=()):
+    """Behåll bara sekvenser där det är samma sorts djur. AI-etiketten kan blanda ihop t.ex.
+    en dvärgbläckfisk med en knot eller ett kammanet, men utsnitten av djuret ser olika ut:
+    jämför varje sekvens med medelbilden av de säkraste och släng de som avviker."""
+    with_emb = [c for c in cs if c.get("subj_emb") is not None]
+    if len(with_emb) < 4:
+        return cs
+    E = np.stack([c["subj_emb"] for c in with_emb])
+    p = np.array([c.get("label_p", 0) for c in with_emb])
+    # kärnan: de som liknar flest andra (det vanligaste djuret), med etikettens säkerhet som tillägg
+    dens = (E @ E.T).mean(axis=1)
+    score = dens + 0.1 * p
+    seed = score >= np.median(score)
+    keep = np.ones(len(with_emb), bool)
+    for _ in range(3):
+        ref = E[seed & keep] if (seed & keep).any() else E[keep]
+        cen = ref.mean(axis=0)
+        cen /= max(float(np.linalg.norm(cen)), 1e-6)
+        sim = E @ cen
+        thr = float(np.median(sim[seed & keep] if (seed & keep).any() else sim)) - margin
+        new = sim >= thr
+        if new.sum() < 3 or (new == keep).all():
+            break
+        keep = new
+    for c, k, sv in zip(with_emb, keep, sim):
+        c["animal_sim"] = float(sv)
+    kept = [c for c, k in zip(with_emb, keep) if k]
+    # sekvenser där AI:n var osäker på arten men djuret ser likadant ut tas också med
+    for c in extra:
+        if c.get("subj_emb") is None or c.get("context") or any(c is k for k in kept) \
+                or any(c is k for k in with_emb):
+            continue
+        if float(c["subj_emb"] @ cen) >= thr + 0.01:
+            c["animal_sim"] = float(c["subj_emb"] @ cen)
+            kept.append(c)
+    return kept + [c for c in cs if c.get("subj_emb") is None]
+
+
 def _share(cands, k=None):
     return k or max(2, int(np.ceil(len(cands) * 0.5)))
 
@@ -125,6 +185,19 @@ def widest(cands, k=None):
     return (picked + rest)[:max(len(picked), _share(cands, k))]
 
 
+def funniest(cands, k=None):
+    """Nyfikna djur som tittar in i kameran, oväntade ögonblick (AI) – plus lite rörelse."""
+    if not any(c.get("fun") for c in cands):
+        return []
+    ranked = sorted(cands, key=lambda c: -(c.get("fun", 0) + 0.25 * c["motion"]))
+    return [c for c in ranked if c.get("fun", 0) >= 0.7][:_share(cands, k)]
+
+
+def calmest(cands, k=None):
+    ranked = sorted(cands, key=lambda c: -(c.get("calm_p", 0.5) - 0.6 * c["motion"]))
+    return [c for c in ranked if c["motion"] < 0.5][:_share(cands, k)]
+
+
 def most_moving(cands, k=None):
     return sorted(cands, key=lambda c: -c["motion"])[:_share(cands, k)]
 
@@ -135,8 +208,10 @@ def find_themes(cands, clips_by_id):
     themes = []
     by_label = {}
     for c in cands:
-        if c.get("label") in SUBJECT_LABELS and c.get("label_p", 0) >= 0.25 and not c.get("context"):
+        if c.get("label") in SUBJECT_LABELS and c.get("label_p", 0) >= 0.22 and not c.get("context"):
             by_label.setdefault(c["label"], []).append(c)
+    for label in list(by_label):
+        by_label[label] = same_animal(by_label[label], extra=cands)
     for label, cs in by_label.items():
         n_clips = len({c["clip"]["id"] for c in cs})
         if len(cs) >= 3:
@@ -158,6 +233,8 @@ def find_themes(cands, clips_by_id):
         ("detail", "Detaljer och färger", closest(cands) if enough else [], 0.8),
         ("blue", "Det stora blå" if mostly_under else "Miljöerna", widest(cands) if enough else [], 0.7),
         ("motion", "I rörelse", most_moving(cands) if enough else [], 0.6),
+        ("fun", "Roliga ögonblick", funniest(cands) if enough else [], 0.75),
+        ("calm", "Lugna stunder", calmest(cands) if enough else [], 0.55),
     ]
     for kind, title, cs, w in extra:
         if len(cs) >= 2:
@@ -172,8 +249,9 @@ def find_themes(cands, clips_by_id):
 
 
 STYLE_FOR = {"subject": "cinematic", "session": "cinematic", "trip": "action",
-             "detail": "calm", "blue": "calm", "motion": "action"}
-KIND_PRIORITY = ["subject", "session", "detail", "motion", "blue", "trip"]
+             "detail": "calm", "blue": "calm", "motion": "action", "fun": "playful", "calm": "calm"}
+KIND_PRIORITY = ["subject", "fun", "session", "detail", "motion", "calm", "blue", "trip"]
+ALL_STYLES = ("cinematic", "calm", "action", "playful")
 
 
 def auto_plan(themes, avoid=(), rng=None):
@@ -199,7 +277,7 @@ def auto_plan(themes, avoid=(), rng=None):
             break
         st = STYLE_FOR.get(t["kind"], "cinematic")
         if st in used_styles:  # variera även stilen
-            st = next((x for x in ("cinematic", "calm", "action") if x not in used_styles), st)
+            st = next((x for x in ALL_STYLES if x not in used_styles), st)
         picks.append((t, st))
         used_styles.add(st)
     trip = by_kind.get("trip", [themes[-1]])[0]
@@ -222,6 +300,8 @@ def _context_pick(ctx_pool, kinds, session=None, before=None, after=None, exclud
     best = None
     for c in ctx_pool:
         if c.get("context") not in kinds or _has(exclude, c):
+            continue
+        if c.get("subj_conf", 0) > 0.026:  # tydligt (annat) djur i bild – inte en miljöbild
             continue
         if session is not None and c.get("session") != session:
             continue
@@ -250,7 +330,8 @@ def build(theme, cands, ctx_pool, n, select):
     _sel = select
     select = lambda pool, k: _sel(_top(pool, k), k)  # noqa: E731
     if kind == "subject":
-        pool = [c for c in cands if c.get("label") == theme["label"] and c.get("label_p", 0) >= 0.2]
+        pool = same_animal([c for c in cands if c.get("label") == theme["label"] and c.get("label_p", 0) >= 0.2],
+                           extra=cands)
         if len(pool) < 2:
             pool = cands
         # Håll ihop berättelsen: helst ett och samma dyk
@@ -311,6 +392,21 @@ def build(theme, cands, ctx_pool, n, select):
         mid = [c for c in body if not _has(desc, c) and not _has(surf, c)]
         return _dedupe(surf[:1] + desc + mid + surf[1:])
 
+    if kind == "fun":
+        pool = funniest(cands, max(n, 2)) or cands
+        body = select(pool, n)
+        # uppbyggnad: lugnare först, det roligaste mot slutet – men samma djur hålls ihop
+        key = lambda c: c.get("fun", 0) + 0.25 * c["motion"]  # noqa: E731
+        peak = {}
+        for c in body:
+            peak[c.get("label")] = max(peak.get(c.get("label"), 0), key(c))
+        return _dedupe(sorted(body, key=lambda c: (peak[c.get("label")], key(c))))
+
+    if kind == "calm":
+        pool = calmest(cands, max(n, 2)) or cands
+        body = sorted(select(pool, n), key=lambda c: c["time"])
+        return _dedupe(body)
+
     if kind == "motion":
         pool = most_moving(cands, max(n, 2))
         body = select(pool, n)
@@ -355,4 +451,6 @@ THEME_TEXT = {
     "detail": "Närbilder: färger, mönster och små detaljer, samlade per motiv.",
     "blue": "Stämning och miljö: vida vyer, ljus och vatten.",
     "motion": "Fart och rörelse som trappas upp mot det mest intensiva.",
+    "fun": "Nyfikna djur och oväntade ögonblick, lekfullt klippt med fartfyllda effekter.",
+    "calm": "Stilla stunder: djur som vilar, långsamma tagningar och lugn rytm.",
 }

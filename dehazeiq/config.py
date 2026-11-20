@@ -58,12 +58,20 @@ STYLES = {
         "temperature": 0.22, "color": "natural", "orig_audio": 0.12,
         "fade": 1.2,
     },
+    "playful": {
+        "label": "Lekfull",
+        "avg_shot": 2.2, "min_shot": 1.0, "max_shot": 3.6,
+        "beat_sync": 0.85, "motion_pref": 0.2, "variety": 0.5,
+        "temperature": 0.3, "color": "playful", "orig_audio": 0.1,
+        "fade": 0.3,
+    },
 }
 
 COLOR_PROFILES = {
     "cinematic": "eq=contrast=1.06:saturation=1.08:gamma=0.98",
     "punchy": "eq=contrast=1.12:saturation=1.18",
     "natural": "eq=contrast=1.03:saturation=1.05",
+    "playful": "eq=contrast=1.08:saturation=1.25:brightness=0.01,colorbalance=rm=0.03:bm=-0.02",
 }
 
 PROXY_SHORT_SIDE = 540

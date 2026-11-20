@@ -343,9 +343,13 @@ def _place(c, dur, fmt):
         sx = d["cx"]
         sy = np.full_like(sx, 0.5)
         weak = False
-    # AI: i vilket av fem utsnitt syns motivet tydligast? (bara när bilden beskärs i sidled)
+    # AI: var i bilden är djuret? (rutnät av utsnitt, analysversion 2)
+    loc = None
+    if "loc_t" in d and len(d["loc_t"]):
+        lconf = np.clip((d["loc_conf"] - 0.012) / 0.02, 0.0, 1.0)
+        loc = (d["loc_t"], d["loc_x"], d["loc_y"], lconf)
     ai_x = None
-    if fw < 0.999 and "ai_crop" in d and "emb_t" in d:
+    if loc is None and fw < 0.999 and "ai_crop" in d and "emb_t" in d:
         from .ai import CROP_CENTERS
         centers = np.asarray(CROP_CENTERS, np.float32)
         crop = d["ai_crop"]
@@ -367,7 +371,19 @@ def _place(c, dur, fmt):
         rel = float(t[k] - start)
         x = 0.5 if weak else float(sx[k])
         y = 0.5 if weak else float(sy[k])
-        if ai_x is not None:
+        if loc is not None:
+            lt, lx, ly, lc = loc
+            near = np.abs(lt - t[k]) <= 2.2
+            if near.any():
+                # närliggande mätningar viktade efter säkerhet och avstånd i tid
+                wgt = (0.1 + lc[near]) * (1.0 - np.abs(lt[near] - t[k]) / 2.5)
+                if float(wgt.sum()) > 1e-3:
+                    xa = float((lx[near] * wgt).sum() / wgt.sum())
+                    ya = float((ly[near] * wgt).sum() / wgt.sum())
+                    alpha = 0.5 + 0.45 * float(np.clip(lc[near].max(), 0, 1))
+                    x = alpha * xa + (1 - alpha) * x
+                    y = alpha * ya + (1 - alpha) * y
+        elif ai_x is not None:
             et, xs, conf = ai_x
             j = int(np.argmin(np.abs(et - t[k])))
             if abs(float(et[j]) - float(t[k])) <= 2.5 and conf[j] > 0:
@@ -383,7 +399,7 @@ def _place(c, dur, fmt):
         y = float(np.clip(y, fh / 2, 1 - fh / 2))
         if prev is not None:  # begränsa panoreringens hastighet
             dt = max(1e-3, rel - prev[0])
-            lim = 0.22 * dt
+            lim = 0.3 * dt
             x = prev[1] + float(np.clip(x - prev[1], -lim, lim))
             y = prev[2] + float(np.clip(y - prev[2], -lim, lim))
         if prev is None or rel - prev[0] > 1e-3:
@@ -503,7 +519,13 @@ def generate_set(project, style="auto", fmt="9:16", length=30.0, music=None, fav
     """Tre förslag. Utan valt tema: tre olika berättelser (t.ex. djurporträtt, ett dyk, resan).
     Med valt tema: tre versioner av samma berättelse (tre stilar, eller tre varianter av en stil)."""
     if theme:
-        styles = ["cinematic", "calm", "action"] if style == "auto" else [style] * 3
+        if style == "auto":
+            kind = str(theme).split(":")[0]
+            styles = ["cinematic", "playful", "action"] if kind in ("fun", "subject") else ["cinematic", "calm", "action"]
+            if kind == "fun":
+                styles = ["playful", "action", "cinematic"]
+        else:
+            styles = [style] * 3
         return [generate(project, s, fmt, length, None, music, favorites, theme) for s in styles]
     plan = story.auto_plan(themes(project, fmt), avoid)
     return [generate(project, s if style == "auto" else style, fmt, length, None, music, favorites, t)

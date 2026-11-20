@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from . import analysis, generator, media, music, quality, render, timeline
+from . import ai, analysis, generator, media, music, quality, render, timeline
 from .config import AUDIO_EXT, FORMATS
 from .project import Project, clip_id_for, collect_video_files, save_default_settings
 
@@ -54,11 +54,18 @@ def import_media(progress, pid, paths):
     return {"added": len(added), "skipped": skipped, "failed": failed}
 
 
+def outdated(clip):
+    """Analyserad med en äldre version (saknar t.ex. AI-positionen för djuret)?"""
+    a = clip.get("analysis") or {}
+    return bool(a) and a.get("ai") is not False and a.get("v", 1) < analysis.ANALYSIS_VERSION \
+        and ai.available()
+
+
 def analyze(progress, pid, redo=False):
     proj = Project(pid)
     todo = [c for c in proj.clips()
             if proj.proxy_path(c["id"]).exists() and not c.get("is360")
-            and (redo or not c.get("analysis"))]
+            and (redo or not c.get("analysis") or outdated(c))]
     if not todo:
         return {"analyzed": 0, "excluded": assess(pid)}
     done = 0

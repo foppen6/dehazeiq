@@ -99,11 +99,23 @@ def _shot_filter(shot, src_w, src_h, out_w, out_h, style, wb=True, fade_in=0.0, 
     speed = fx.get("speed")
     if speed:
         parts.append(f"setpts=(PTS-STARTPTS)/{speed:.3f}")
-    zoom = fx.get("zoom")
-    if zoom:
-        span = dur + pad
-        parts += [f"scale=w='2*trunc({out_w}*(1+{zoom:.3f}*t/{span:.3f})/2)'"
-                  f":h='2*trunc({out_h}*(1+{zoom:.3f}*t/{span:.3f})/2)':eval=frame:flags=bicubic",
+    freeze = float(fx.get("freeze") or 0.0)
+    if freeze > 0 or pad > 0:
+        # frysbild och/eller förlängning för övergången: sista bilden står kvar
+        parts.append(f"tpad=stop_mode=clone:stop_duration={freeze + pad:.3f}")
+    # Zoom som funktion av tiden: långsam inzoomning, zoomryck vid klippet, inzoomning på frysbilden
+    terms = []
+    span = dur + pad
+    if fx.get("zoom"):
+        terms.append(f"{float(fx['zoom']):.3f}*t/{span:.3f}")
+    if fx.get("punch"):
+        terms.append(f"{float(fx['punch']):.3f}*pow(max(0,1-t/0.35),2)")
+    if freeze > 0:
+        t0 = dur - freeze
+        terms.append(f"0.14*min(1,max(0,(t-{t0:.3f})/0.25))")
+    if terms:
+        z = "(1+" + "+".join(terms) + ")"
+        parts += [f"scale=w='2*trunc({out_w}*{z}/2)':h='2*trunc({out_h}*{z}/2)':eval=frame:flags=bicubic",
                   f"crop={out_w}:{out_h}"]
     else:
         parts.append(f"scale={out_w}:{out_h}:flags=lanczos")
@@ -124,8 +136,6 @@ def _shot_filter(shot, src_w, src_h, out_w, out_h, style, wb=True, fade_in=0.0, 
     if fade_out > 0:
         d = min(fade_out, dur / 2)
         parts.append(f"fade=t=out:st={dur - d:.3f}:d={d:.3f}")
-    if pad > 0:
-        parts.append(f"tpad=stop_mode=clone:stop_duration={dur + pad:.3f}")
     parts.append("format=yuv420p")
     return ",".join(parts)
 
@@ -227,7 +237,9 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
             dur = shot["duration"]
             pad = T if i < len(shots) - 1 else 0.0
             fx = {k: v for k, v in (shot.get("fx") or {}).items()
-                  if (k == "speed" and on["slowmo"]) or (k == "zoom" and on["zoom"])}
+                  if (k == "speed" and v < 1 and on["slowmo"]) or (k == "speed" and v > 1 and on["fast"])
+                  or (k == "zoom" and on["zoom"]) or (k == "punch" and on["punch"])
+                  or (k == "freeze" and on["freeze"])}
             seg = tmp / f"seg_{i:03d}.mp4"
             has_audio = clip.get("has_audio", False)
             out_len = dur + pad
@@ -237,7 +249,7 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
                                   fade_in=style["fade"] if i == 0 else 0.0,
                                   fade_out=style["fade"] if i == len(shots) - 1 else 0.0,
                                   fx=fx, pad=pad, vignette=vignette, title=title)
-                read = out_len * fx.get("speed", 1.0)
+                read = (out_len - pad - float(fx.get("freeze") or 0.0)) * fx.get("speed", 1.0) + 0.05
                 cmd = [ffmpeg(), "-hide_banner", "-loglevel", "error", "-y",
                        "-ss", f"{shot['src_start']:.3f}", "-t", f"{read:.3f}", "-i", str(src)]
                 if not has_audio:

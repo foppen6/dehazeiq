@@ -14,6 +14,7 @@ CLIP_MIN_EXPO = 0.35
 CLIP_MIN_STAB = 0.40
 CLIP_REL_QUALITY = 0.72  # andel av projektets median – svagare än så väljs bort
 CLIP_REL_FOCUS = 0.6     # skärpa (brusokänslig) i förhållande till projektets median
+CLIP_MIN_SUBJECT_CONF = 0.015  # AI-rutnätet hittar inget djur någonstans i bilden (bara vatten/partiklar)
 CLIP_MIN_INTEREST = 0.35 # AI: sannolikhet att bilden visar något sevärt
 
 # Sekvensnivå (generatorn)
@@ -53,7 +54,8 @@ def assess(clips):
             reasons.append("Fel exponering")
         if a.get("best_stab", 1) < CLIP_MIN_STAB:
             reasons.append("Skakigt")
-        if a.get("best_interest") is not None and a["best_interest"] < CLIP_MIN_INTEREST:
+        weak_loc = a.get("subject_conf") is not None and a["subject_conf"] < CLIP_MIN_SUBJECT_CONF
+        if weak_loc or (a.get("best_interest") is not None and a["best_interest"] < CLIP_MIN_INTEREST):
             reasons.append("Inget tydligt motiv")
         if not reasons and len(analyzed) >= 4 and combined(a) < CLIP_REL_QUALITY * median_q:
             reasons.append("Svagare än resten")
