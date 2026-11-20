@@ -8,7 +8,7 @@ import subprocess
 
 import numpy as np
 
-from .media import MediaError, ffmpeg
+from .media import MediaError, ffmpeg, subprocess_kwargs
 
 SR = 22050
 HOP = 512
@@ -18,7 +18,7 @@ FRAME = 1024
 def decode(path, sr=SR) -> np.ndarray:
     proc = subprocess.run([ffmpeg(), "-hide_banner", "-loglevel", "error", "-i", str(path),
                            "-ac", "1", "-ar", str(sr), "-f", "f32le", "-"],
-                          capture_output=True)
+                          capture_output=True, **subprocess_kwargs())
     if proc.returncode != 0:
         raise MediaError("Kunde inte läsa musikfilen: "
                          + proc.stderr.decode("utf-8", "replace")[-300:])

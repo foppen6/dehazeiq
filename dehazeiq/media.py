@@ -63,9 +63,42 @@ def ffprobe() -> str:
     return _find_bin("ffprobe")
 
 
+IS_WIN = sys.platform.startswith("win")
+# Windows: inget konsolfönster för FFmpeg och lägre prioritet så att datorn går att använda samtidigt
+_WIN_FLAGS = (0x08000000 | 0x00004000) if IS_WIN else 0  # CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS
+
+
+def subprocess_kwargs():
+    """Gemensamma inställningar för alla bakgrundsprocesser (FFmpeg m.fl.)."""
+    if IS_WIN:
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = 0  # SW_HIDE
+        return {"creationflags": _WIN_FLAGS, "startupinfo": si}
+    return {}
+
+
+def lower_priority():
+    """Kör hela DeHazeIQ med låg prioritet: analys och rendering tar bara ledig datorkraft."""
+    try:
+        if IS_WIN:
+            import ctypes
+            k32 = ctypes.windll.kernel32
+            k32.SetPriorityClass(k32.GetCurrentProcess(), 0x00004000)  # BELOW_NORMAL
+        else:
+            os.nice(10)  # ärvs av FFmpeg-processerna
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        import cv2
+        cv2.setNumThreads(max(1, (os.cpu_count() or 2) // 2))
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def run(cmd, timeout=None):
     """Kör ett kommando och kasta MediaError med slutet av stderr vid fel."""
-    proc = subprocess.run(cmd, capture_output=True, timeout=timeout)
+    proc = subprocess.run(cmd, capture_output=True, timeout=timeout, **subprocess_kwargs())
     if proc.returncode != 0:
         err = proc.stderr.decode("utf-8", "replace").strip().splitlines()
         tail = "\n".join(err[-8:])

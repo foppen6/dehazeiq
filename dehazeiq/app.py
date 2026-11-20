@@ -80,9 +80,8 @@ def _powershell(kind: str):
         body = ("$d=New-Object System.Windows.Forms.OpenFileDialog;"
                 f"$d.Multiselect={multi};$d.Title='{title}';$d.Filter='{_PS_FILTERS[kind]}';"
                 "if($d.ShowDialog($owner) -eq 'OK'){$d.FileNames -join \"`n\"}")
-    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     proc = subprocess.run(["powershell", "-NoProfile", "-STA", "-Command", _PS_HEAD + body],
-                          capture_output=True, creationflags=flags)
+                          capture_output=True, creationflags=0x08000000)  # inget konsolfönster
     out = proc.stdout.decode("utf-8", "replace")
     return [line.strip() for line in out.splitlines() if line.strip()]
 
@@ -586,6 +585,7 @@ def start_server(port: int, lan: bool = False):
     (då körs DeHazeIQ troligen redan och url pekar på den)."""
     media.ffmpeg()
     media.ffprobe()
+    media.lower_priority()
     PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
     url = f"http://127.0.0.1:{port}/"
     try:
