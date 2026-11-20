@@ -14,8 +14,8 @@ import uuid
 
 import numpy as np
 
-from . import analysis
-from .config import STYLES
+from . import analysis, quality
+from .config import FORMATS, STYLES
 
 DT = 1.0 / analysis.SAMPLE_FPS
 
@@ -64,7 +64,25 @@ def _scenes(cut):
     return [(idx[k], idx[k + 1]) for k in range(len(idx) - 1) if idx[k + 1] > idx[k]]
 
 
-def build_candidates(project, style):
+def _smooth(a, k):
+    if len(a) < 2 or k <= 1:
+        return a.astype(np.float32)
+    pad = k // 2
+    ap = np.pad(a.astype(np.float32), (pad, pad), mode="edge")
+    return np.convolve(ap, np.ones(k, np.float32) / k, mode="valid")[: len(a)]
+
+
+def _crop_fraction(clip, fmt):
+    """Hur stor del av källbildens bredd/höjd som syns efter beskärning till målformatet."""
+    tw, th = FORMATS.get(fmt, FORMATS["16:9"])
+    sw, sh = clip.get("width") or 16, clip.get("height") or 9
+    target, src = tw / th, sw / sh
+    if src > target:
+        return target / src, 1.0  # beskärs i sidled
+    return 1.0, src / target      # beskärs i höjdled
+
+
+def build_candidates(project, style, fmt="16:9", favorites=()):
     clips = project.usable_clips()
     if not clips:
         raise GenerateError("Inget analyserat material ännu. Kör analysen först.")
@@ -91,6 +109,17 @@ def build_candidates(project, style):
         score = 0.5 * q_abs + 0.5 * q_rel
         motion = d["motion"]
         t = d["t"]
+        is_fav = c["id"] in favorites
+        # Skärpa, exponering och stabilitet per prov (äldre analyser saknar dem: räkna fram)
+        if "sharp_n" in d:
+            sharp_n, expo, stab = d["sharp_n"], d["expo"], d["stab"]
+        else:
+            _, sharp_n, expo, stab = analysis.sample_quality(d["sharp"], d["luma"], d["clo"], d["chi"],
+                                                             d.get("jitter", np.zeros_like(d["sharp"])))
+        sharp_s = _smooth(sharp_n, 3)
+        fw, fh = _crop_fraction(c, fmt)
+        spread = d["spx"] if fw < 0.999 and "spx" in d else (d["spy"] if fh < 0.999 and "spy" in d else None)
+        frac = fw if fw < 0.999 else fh
         for i0, i1 in _scenes(d["cut"]):
             scene_len = (i1 - i0) * DT
             if scene_len < style["min_shot"]:
@@ -101,18 +130,30 @@ def build_candidates(project, style):
             cm = np.concatenate([[0.0], np.cumsum(motion[i0:i1])])
             local = []
             for j in range(0, (i1 - i0) - n + 1, stride):
+                a, b = i0 + j, i0 + j + n
                 ms = (cs[j + n] - cs[j]) / n
                 ma = (ca[j + n] - ca[j]) / n
                 mm = (cm[j + n] - cm[j]) / n
-                # Suddiga/mörka partier straffas hårt oavsett stil
+                # Kvalitetsspärr: bara skarpa, välexponerade och stabila sekvenser
+                passes = (float(sharp_n[a:b].mean()) >= quality.WIN_MIN_SHARP
+                          and float(sharp_s[a:b].min()) >= quality.WIN_MIN_SHARP_LOW
+                          and float(expo[a:b].mean()) >= quality.WIN_MIN_EXPO
+                          and float(stab[a:b].mean()) >= quality.WIN_MIN_STAB)
+                if not passes and not is_fav:
+                    continue
                 util = ms + style["motion_pref"] * (mm - 0.3) * 0.5 - 0.8 * max(0.0, 0.55 - ma)
-                local.append((util, i0 + j, i0 + j + n, ms, mm, ma))
+                if not passes:
+                    util -= 1.0  # favorit utan godkänd sekvens: ta den minst dåliga
+                # Motivet måste rymmas i beskärningen (t.ex. 9:16 ur liggande video)
+                if spread is not None:
+                    need = 3.0 * float(spread[a:b].mean())
+                    if need > frac:
+                        util -= 0.6 * min(1.0, (need - frac) / frac)
+                local.append((util, a, b, ms, mm, ma))
             local.sort(key=lambda x: -x[0])
             taken = []
             for util, a, b, ms, mm, ma in local:
                 if any(not (b <= ta or a >= tb) for ta, tb in taken):
-                    continue
-                if ms < 0.2 or ma < 0.3:
                     continue
                 taken.append((a, b))
                 s, e = float(t[a]), float(t[b - 1]) + DT
@@ -125,7 +166,8 @@ def build_candidates(project, style):
                 if len(taken) >= 3:
                     break
     if not cands:
-        raise GenerateError("Hittade inga tillräckligt bra sekvenser i materialet.")
+        raise GenerateError("Hittade inga tillräckligt skarpa sekvenser i materialet. "
+                            "Markera klipp som \"Måste med\" om du ändå vill använda dem.")
     u = np.array([x["util"] for x in cands])
     lo, hi = float(u.min()), float(u.max())
     for x in cands:
@@ -233,8 +275,8 @@ def _durations(seq, total, style, rng, beats):
     return d
 
 
-def _place(c, dur):
-    """Välj bästa delen av kandidatfönstret för ett klipp med längden dur."""
+def _place(c, dur, fmt):
+    """Välj bästa delen av kandidatfönstret och en beskärningsbana som följer motivet."""
     d = c["data"]
     t = d["t"]
     q = d["quality"]
@@ -248,10 +290,44 @@ def _place(c, dur):
             v = float(q[m].mean()) if m.any() else 0.0
             if v > best:
                 best, start = v, float(s)
+    fw, fh = _crop_fraction(c["clip"], fmt)
     m = (t >= start) & (t < start + dur)
-    cx = float(d["cx"][m].mean()) if m.any() else 0.5
-    cx = 0.5 + 0.7 * (cx - 0.5)
-    return start, cx
+    if not m.any():
+        m = np.argmin(np.abs(t - start)) == np.arange(len(t))
+    if "sx" in d:
+        # Motivets position, utjämnad (~1,75 s) så att beskärningen glider i stället för att rycka
+        sx = _smooth(d["sx"], 7)
+        sy = _smooth(d["sy"], 7)
+        strength = float(np.median(d["sstr"][m]))
+        weak = strength < 0.08  # inget tydligt motiv – håll bilden centrerad
+    else:
+        sx = d["cx"]
+        sy = np.full_like(sx, 0.5)
+        weak = False
+    idx = np.where(m)[0]
+    keys = []
+    prev = None
+    step = max(1, int(round(0.5 / DT)))
+    for k in list(idx[::step]) + [idx[-1]]:
+        rel = float(t[k] - start)
+        x = 0.5 if weak else float(sx[k])
+        y = 0.5 if weak else float(sy[k])
+        # Håll beskärningen innanför bilden
+        x = float(np.clip(x, fw / 2, 1 - fw / 2))
+        y = float(np.clip(y, fh / 2, 1 - fh / 2))
+        if prev is not None:  # begränsa panoreringens hastighet
+            dt = max(1e-3, rel - prev[0])
+            lim = 0.12 * dt
+            x = prev[1] + float(np.clip(x - prev[1], -lim, lim))
+            y = prev[2] + float(np.clip(y - prev[2], -lim, lim))
+        if prev is None or rel - prev[0] > 1e-3:
+            keys.append([round(max(0.0, min(rel, dur)), 3), round(x, 4), round(y, 4)])
+            prev = (rel, x, y)
+    if keys and keys[-1][0] < dur:
+        keys.append([round(dur, 3), keys[-1][1], keys[-1][2]])
+    cx = float(np.mean([k[1] for k in keys])) if keys else 0.5
+    cy = float(np.mean([k[2] for k in keys])) if keys else 0.5
+    return start, cx, cy, keys
 
 
 def generate(project, style_key="cinematic", fmt="9:16", length=30.0, seed=None,
@@ -261,7 +337,7 @@ def generate(project, style_key="cinematic", fmt="9:16", length=30.0, seed=None,
     style = STYLES[style_key]
     seed = int(seed if seed is not None else np.random.SeedSequence().entropy % 2**31)
     rng = np.random.default_rng(seed)
-    cands, emb_kind = build_candidates(project, style)
+    cands, emb_kind = build_candidates(project, style, fmt, set(favorites))
     length = float(length)
     n = max(3, int(round(length / style["avg_shot"])))
     chosen = _select(cands, n, style, rng, emb_kind, list(favorites))
@@ -271,14 +347,14 @@ def generate(project, style_key="cinematic", fmt="9:16", length=30.0, seed=None,
 
     shots, pos = [], 0.0
     for c, dur in zip(seq, durs):
-        start, cx = _place(c, float(dur))
+        start, cx, cy, path = _place(c, float(dur), fmt)
         clip = c["clip"]
         a = clip.get("analysis", {})
         shots.append({
             "clip_id": clip["id"], "name": clip["name"],
             "src_start": round(start, 3), "src_end": round(start + float(dur), 3),
             "duration": round(float(dur), 3), "at": round(pos, 3),
-            "cx": round(cx, 3), "wb_gains": a.get("wb_gains", [1, 1, 1]),
+            "cx": round(cx, 3), "cy": round(cy, 3), "path": path, "wb_gains": a.get("wb_gains", [1, 1, 1]),
             "underwater": a.get("underwater", False), "tags": a.get("tags", []),
             "quality": round(c["quality"], 3), "motion": round(c["motion"], 3),
             "favorite": bool(c.get("favorite")),
@@ -297,6 +373,7 @@ def generate(project, style_key="cinematic", fmt="9:16", length=30.0, seed=None,
         "bpm": music.get("bpm") if music else None,
         "favorites": list(favorites),
         "similarity": emb_kind,
+        "short": bool(pos < length * 0.85),
         "shots": shots,
         "renders": {},
     }

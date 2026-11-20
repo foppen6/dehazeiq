@@ -2,9 +2,9 @@
 
 from pathlib import Path
 
-from . import analysis, generator, media, music, render, timeline
+from . import analysis, generator, media, music, quality, render, timeline
 from .config import AUDIO_EXT, FORMATS
-from .project import Project, clip_id_for, collect_video_files
+from .project import Project, clip_id_for, collect_video_files, save_default_settings
 
 
 def import_media(progress, pid, paths):
@@ -60,7 +60,7 @@ def analyze(progress, pid, redo=False):
             if proj.proxy_path(c["id"]).exists() and not c.get("is360")
             and (redo or not c.get("analysis"))]
     if not todo:
-        return {"analyzed": 0}
+        return {"analyzed": 0, "excluded": assess(pid)}
     done = 0
     for i, clip in enumerate(todo):
         base = i / len(todo)
@@ -75,7 +75,17 @@ def analyze(progress, pid, redo=False):
             done += 1
         except Exception as exc:  # noqa: BLE001
             proj.update_clip(clip["id"], status="error", error=str(exc)[:300])
-    return {"analyzed": done}
+    excluded = assess(pid)
+    return {"analyzed": done, "excluded": excluded}
+
+
+def assess(pid):
+    """Automatiskt bortval av svaga klipp (suddiga, skakiga, felexponerade, klart sämre)."""
+    proj = Project(pid)
+    proj.reload()
+    n = quality.assess(list(proj.data["clips"].values()))
+    proj.save()
+    return n
 
 
 def set_music(pid, path):
@@ -104,6 +114,7 @@ def generate(pid, style, fmt, length, favorites=()):
     proj.reload()
     proj.data["settings"] = {"format": fmt, "length": length, "style": style}
     proj.save()
+    save_default_settings(proj.data["settings"])
     proj.add_proposals(props)
     return props
 
@@ -141,4 +152,35 @@ def render_proposal(progress, pid, prop_id, resolution="preview"):
         renders["otio"] = otio.name
         result["otio"] = otio.name
     proj.update_proposal(prop_id, renders=renders)
+    return result
+
+
+def _stage(progress, lo, hi, label):
+    def sub(frac=None, message=None):
+        progress(None if frac is None else lo + (hi - lo) * frac,
+                 None if message is None else f"{label} · {message}")
+    return sub
+
+
+def auto(progress, pid, paths=None):
+    """Hela flödet utan att användaren behöver göra något:
+    import → analys → bortval av svaga klipp → tre filmförslag → förhandsvisningar."""
+    result = {}
+    if paths:
+        result["import"] = import_media(_stage(progress, 0.0, 0.35, "1/4 Läser in"), pid, paths)
+    result["analysis"] = analyze(_stage(progress, 0.35, 0.72, "2/4 Analyserar"), pid)
+    proj = Project(pid)
+    if not proj.usable_clips():
+        raise RuntimeError("Inget klipp klarade kvalitetskraven (skärpa, exponering, stabilitet). "
+                           "Markera klipp som \"Måste med\" i analysvyn om du ändå vill använda dem.")
+    progress(0.74, "3/4 Skapar filmförslag")
+    s = proj.data.get("settings") or {}
+    favs = [c["id"] for c in proj.clips() if c.get("favorite") and c.get("analysis")]
+    props = generate(pid, s.get("style", "auto"), s.get("format", "9:16"), s.get("length", 30), favs)
+    result["proposals"] = [p["id"] for p in props]
+    for i, prop in enumerate(props):
+        lo = 0.78 + 0.22 * i / len(props)
+        hi = 0.78 + 0.22 * (i + 1) / len(props)
+        render_proposal(_stage(progress, lo, hi, f"4/4 Förhandsvisning {i + 1} av {len(props)}"),
+                        pid, prop["id"], "preview")
     return result

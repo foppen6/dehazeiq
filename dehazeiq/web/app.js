@@ -70,6 +70,8 @@ function icon(name, size = 18) {
     folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
     film: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4"/>',
     phone: '<rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18h2"/>',
+    pen: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>',
+    trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
     wifi: '<path d="M2 8.8a15 15 0 0 1 20 0M5 12.6a10 10 0 0 1 14 0M8.5 16.3a5 5 0 0 1 7 0"/><circle cx="12" cy="19.5" r=".8" fill="currentColor"/>',
   }[name] || "";
   return `<svg aria-hidden="true" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
@@ -94,6 +96,7 @@ const P = () => state.project;
 const clips = () => (P() ? P().clips : []);
 const usable = () => clips().filter((c) => !c.is360);
 const analyzed = () => clips().filter((c) => c.analysis);
+const isUsed = (c) => !!c.analysis && !c.is360 && !c.excluded && (c.favorite || !c.auto_excluded);
 const settings = () => (P() && P().settings) || { format: "9:16", length: 30, style: "auto" };
 const propById = (id) => (P().proposals || []).find((p) => p.id === id);
 const job = () => (P() && P().job) || { state: "idle" };
@@ -106,7 +109,7 @@ function handleJob(j, initial = false) {
   const bar = $("#jobbar");
   if (j.state === "running") {
     bar.hidden = false;
-    const titles = { import: "Importerar", analyze: "Analyserar material" };
+    const titles = { import: "Importerar", analyze: "Analyserar material", auto: "Skapar filmer automatiskt" };
     const kind = (j.kind || "").split(":");
     $("#jobTitle").textContent = titles[kind[0]] || (kind[1] === "preview" ? "Skapar förhandsvisning" : `Exporterar ${kind[1] || ""}`);
     $("#jobPct").textContent = `${Math.round((j.progress || 0) * 100)} %`;
@@ -141,8 +144,19 @@ async function onJobFinished(j) {
   const kind = (j.kind || "").split(":");
   await loadProject(state.pid);
   await loadProjects();
-  if (j.state === "error") { toast(j.message || "Något gick fel"); render(); return; }
-  if (kind[0] === "import") {
+  if (j.state === "error") {
+    toast(j.message || "Något gick fel");
+    if (kind[0] === "auto" && analyzed().length) state.view = "analyze";
+    render();
+    return;
+  }
+  if (kind[0] === "auto") {
+    const r = j.result || {};
+    const ex = (r.analysis || {}).excluded || 0;
+    if (r.proposals && r.proposals.length) { state.shown = r.proposals.slice(0, 3); saveShown(); }
+    toast(`Klart! ${r.proposals ? r.proposals.length : 0} filmförslag är klara.${ex ? ` ${ex} svaga klipp valdes bort automatiskt.` : ""}`, true);
+    state.view = "proposals";
+  } else if (kind[0] === "import") {
     const r = j.result || {};
     let msg = `${r.added || 0} klipp importerade`;
     if (r.skipped) msg += `, ${r.skipped} fanns redan`;
@@ -178,22 +192,91 @@ async function createProject(name) {
   render();
 }
 
-async function chooseAndImport(kind) {
+async function choosePaths(kind) {
   try {
     const r = await api("POST", "/api/choose", { kind });
-    if (r.paths && r.paths.length) await startImport(r.paths);
+    return r.paths || [];
   } catch (e) {
-    toast(`${e.message}\nKlistra in sökvägen i fältet under i stället.`);
+    toast(`${e.message}\nKlistra in sökvägen i fältet i stället.`);
+    return [];
   }
 }
 
-async function startImport(paths) {
-  if (!state.pid) await createProject("Nytt projekt");
-  await api("POST", `/api/p/${state.pid}/import`, { paths });
+// Ny import = nytt projekt (namnges efter mappen) + hela flödet automatiskt
+async function newImport(paths) {
+  if (!paths || !paths.length) return;
+  try {
+    const p = await api("POST", "/api/import", { paths });
     state.expectJob = true;
-  state.autoAnalyze = true;
-  await pollJob();
-  render();
+    await loadProjects();
+    await loadProject(p.id);
+    state.view = "proposals";
+    await pollJob();
+    render();
+  } catch (e) { fail(e); }
+}
+
+// Lägg till klipp i det öppna projektet (gör sedan om analys och förslag automatiskt)
+async function addToProject(paths) {
+  if (!paths || !paths.length) return;
+  try {
+    await api("POST", `/api/p/${state.pid}/import`, { paths });
+    state.expectJob = true;
+    state.view = "proposals";
+    await pollJob();
+    render();
+  } catch (e) { fail(e); }
+}
+
+async function runAuto() {
+  try {
+    await api("POST", `/api/p/${state.pid}/auto`);
+    state.expectJob = true;
+    state.view = "proposals";
+    await pollJob();
+    render();
+  } catch (e) { fail(e); }
+}
+
+/* ---------- byt namn / ta bort ---------- */
+function openRename(pid) {
+  const pr = state.projects.find((x) => x.id === pid);
+  if (!pr) return;
+  const m = $("#modal");
+  m.innerHTML = `<form class="modal-card" id="renameForm" data-pid="${esc(pid)}" role="dialog" aria-modal="true" aria-labelledby="rnTitle">
+    <h2 id="rnTitle" style="font-size:18px">Byt namn på projekt</h2>
+    <label class="sr" for="rnName">Nytt namn</label><input class="field" id="rnName" value="${esc(pr.name)}" maxlength="80">
+    <div class="row"><button class="btn" type="button" data-act="modal-close">Avbryt</button><button class="btn primary" type="submit">Spara</button></div></form>`;
+  m.hidden = false;
+  const inp = $("#rnName");
+  inp.focus(); inp.select();
+}
+
+function openDelete(pid) {
+  const pr = state.projects.find((x) => x.id === pid);
+  if (!pr) return;
+  const m = $("#modal");
+  m.innerHTML = `<div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="delTitle">
+    <h2 id="delTitle" style="font-size:18px">Ta bort "${esc(pr.name)}"?</h2>
+    <p class="lead">Analys, förslag, förhandsvisningar och exporter i projektet tas bort. Dina originalfilmer rörs inte.</p>
+    <div class="row"><button class="btn" data-act="modal-close">Avbryt</button><button class="btn danger" data-del-confirm="${esc(pid)}">Ta bort</button></div></div>`;
+  m.hidden = false;
+}
+
+async function deleteProject(pid) {
+  try {
+    await api("POST", `/api/p/${pid}/delete`);
+    $("#modal").hidden = true;
+    localStorage.removeItem(`tv.shown.${pid}`);
+    await loadProjects();
+    if (state.pid === pid) {
+      state.pid = null; state.project = null;
+      if (state.projects[0]) await loadProject(state.projects[0].id);
+      state.view = "proposals";
+    }
+    toast("Projektet är borttaget", true);
+    render();
+  } catch (e) { fail(e); }
 }
 
 async function startAnalyze(redo = false) {
@@ -334,8 +417,12 @@ function viewImport() {
 
   const side = `<aside class="side" aria-label="Projekt">
     <div class="eyebrow" style="padding:0 8px 8px">Projekt</div>
-    ${state.projects.map((p) => `<button class="proj ${p.id === state.pid ? "active" : ""}" data-proj="${esc(p.id)}"><span>${esc(p.name)}</span><small>${p.clips} klipp · ${fmtLong(p.duration)}</small></button>`).join("") || '<p class="muted" style="padding:0 8px">Inga projekt ännu.</p>'}
-    <form class="newproj" id="newProj"><label class="sr" for="npName">Namn på nytt projekt</label><input id="npName" placeholder="Nytt projekt …" maxlength="80"><button class="btn small" type="submit">Skapa</button></form>
+    ${state.projects.map((p) => `<div class="proj-row ${p.id === state.pid ? "active" : ""}">
+        <button class="proj" data-proj="${esc(p.id)}"><span>${esc(p.name)}</span><small>${p.clips} klipp · ${fmtLong(p.duration)}</small></button>
+        <button class="icon-btn" data-rename="${esc(p.id)}" aria-label="Byt namn på ${esc(p.name)}" title="Byt namn">${icon("pen", 15)}</button>
+        ${remote() ? "" : `<button class="icon-btn" data-delete="${esc(p.id)}" aria-label="Ta bort ${esc(p.name)}" title="Ta bort">${icon("trash", 15)}</button>`}
+      </div>`).join("") || '<p class="muted" style="padding:0 8px">Inga projekt ännu.</p>'}
+    ${remote() ? "" : `<button class="btn primary" style="margin-top:8px" data-act="new-import" ${running() ? "disabled" : ""}>${icon("folder", 16)}Ny import</button>`}
   </aside>`;
 
   const rows = cs.map((c) => {
@@ -351,14 +438,14 @@ function viewImport() {
     ? `<div class="box"><h2>Importera från datorn</h2><p>Nya klipp läggs till på datorn. Här kan du välja format, längd, stil, markera favoriter, skapa förslag och exportera.</p></div>`
     : null;
   const main = `<main class="main">
-    <div class="head"><h1>Importera material</h1><p class="lead">Välj en mapp med en hel resa. Allt bearbetas lokalt på din dator.</p></div>
+    <div class="head"><h1>Material och inställningar</h1><p class="lead">Nya klipp analyseras och filmförslagen görs om automatiskt.</p></div>
     ${drop || `<div class="drop">
       <div class="ico">${icon("upload", 26)}</div>
-      <div class="drop-title">Välj mapp eller filmklipp</div>
+      <div class="drop-title">Lägg till fler klipp i projektet</div>
       <div class="muted" style="font-size:13px">MP4 · MOV · H.264 · H.265/HEVC 10-bit · Insta360 (platta exporter) · Nikon · mobil</div>
       <div class="row" style="justify-content:center">
-        <button class="btn primary" data-act="choose-folder" ${busy ? "disabled" : ""}>${icon("folder", 16)}Välj mapp</button>
-        <button class="btn" data-act="choose-files" ${busy ? "disabled" : ""}>Välj filer</button>
+        <button class="btn primary" data-act="add-folder" ${busy ? "disabled" : ""}>${icon("folder", 16)}Välj mapp</button>
+        <button class="btn" data-act="add-files" ${busy ? "disabled" : ""}>Välj filer</button>
       </div>
       <form class="pathrow" id="pathForm"><label class="sr" for="pathInput">Sökväg till mapp eller fil</label>
         <input class="field" id="pathInput" placeholder="… eller klistra in en sökväg, t.ex. ~/Movies/Röda havet">
@@ -388,8 +475,8 @@ function viewImport() {
 
   let primary;
   if (busy) primary = `<button class="btn primary big push" disabled>Arbetar …</button>`;
-  else if (unAnalyzed) primary = `<button class="btn primary big push" data-act="analyze">Analysera ${unAnalyzed} klipp</button>`;
-  else if (analyzed().length) primary = `<button class="btn primary big push" data-act="generate" ${generating ? "disabled" : ""}>${generating ? "Skapar …" : "Skapa 3 filmförslag"}</button>`;
+  else if (unAnalyzed) primary = `<button class="btn primary big push" data-act="auto">Gör filmer automatiskt</button>`;
+  else if (analyzed().length) primary = `<button class="btn primary big push" data-act="generate" ${generating ? "disabled" : ""}>${generating ? "Skapar …" : "Skapa nya filmförslag"}</button>`;
   else primary = `<button class="btn primary big push" disabled>Importera klipp först</button>`;
 
   const panel = `<aside class="panel" aria-label="Filminställningar">
@@ -419,16 +506,19 @@ function viewAnalyze() {
   const maxTag = tagList.length ? tagList[0][1] : 1;
   const favs = done.filter((c) => c.favorite).length;
 
-  let list = done;
-  if (state.filter === "best") list = done.filter((c) => c.analysis.score >= 0.7);
-  else if (state.filter === "low") list = done.filter((c) => c.analysis.score < 0.5 || c.excluded);
+  const used = done.filter(isUsed);
+  const dropped = done.filter((c) => !isUsed(c));
+  if (!["used", "dropped", "fav", "all"].includes(state.filter) && !state.filter.startsWith("tag:")) state.filter = "used";
+  let list = used;
+  if (state.filter === "all") list = done;
+  else if (state.filter === "dropped") list = dropped;
   else if (state.filter === "fav") list = done.filter((c) => c.favorite);
   else if (state.filter.startsWith("tag:")) list = done.filter((c) => (c.analysis.tags || []).includes(state.filter.slice(4)));
   list = [...list].sort((a, b) => b.analysis.score - a.analysis.score);
 
   const chip = (id, label) => `<button class="chip" data-filter="${esc(id)}" aria-pressed="${state.filter === id}">${esc(label)}</button>`;
-  const chips = [chip("all", `Alla ${done.length}`), chip("best", "Bästa"), chip("fav", `Favoriter ${favs}`),
-    ...tagList.slice(0, 8).map(([t]) => chip(`tag:${t}`, t)), chip("low", "Svaga / bortvalda")].join("");
+  const chips = [chip("used", `I filmerna ${used.length}`), chip("dropped", `Bortvalda ${dropped.length}`),
+    chip("fav", `Favoriter ${favs}`), ...tagList.slice(0, 6).map(([t]) => chip(`tag:${t}`, t)), chip("all", `Alla ${done.length}`)].join("");
 
   const cards = list.map((c) => {
     const a = c.analysis;
@@ -436,7 +526,9 @@ function viewAnalyze() {
     const left = (a.best[0] / (c.duration || 1)) * 100;
     const width = Math.max(3, ((a.best[1] - a.best[0]) / (c.duration || 1)) * 100);
     const score = Math.round(a.score * 100);
-    return `<article class="ccard ${c.excluded ? "off" : ""}">
+    const inUse = isUsed(c);
+    const why = c.excluded ? ["Bortvald av dig"] : (!c.favorite && c.reasons && c.reasons.length ? c.reasons : []);
+    return `<article class="ccard ${inUse ? "" : "off"}">
       <div class="img"><img loading="lazy" alt="" src="${frameUrl(c.id, mid, 480)}">
         <span class="badge" style="left:10px;top:10px">${esc(c.source)}</span>
         <span class="score num ${score >= 70 ? "hi" : "lo"}">${score}</span>
@@ -444,10 +536,11 @@ function viewAnalyze() {
       <div class="body">
         <div class="stack" style="gap:6px"><div class="spread" style="font-size:12px;color:var(--muted)"><span title="${esc(c.name)}">Bästa sekvens</span><span class="num" style="color:var(--text-2)">${fmtDur(a.best[0])}–${fmtDur(a.best[1])}</span></div>
           <div class="best"><span style="left:${left}%;width:${width}%"></span></div></div>
+        ${why.length ? `<div class="tags">${why.map((r) => `<span class="tag bad">${esc(r)}</span>`).join("")}</div>` : ""}
         <div class="tags">${(a.tags || []).map((t) => `<span class="tag">${esc(t)}</span>`).join("")}<span class="tag">${esc(a.movement)}</span></div>
         <div class="meters"><span>Skärpa${meter(a.sharpness)}</span><span>Exponering${meter(a.exposure)}</span><span>Stabilitet${meter(a.stability)}</span></div>
         <div class="card-actions">
-          <button class="toggle fav" data-fav="${c.id}" aria-pressed="${!!c.favorite}">${icon("star", 14)}${c.favorite ? "Favorit" : "Måste med"}</button>
+          <button class="toggle fav" data-fav="${c.id}" aria-pressed="${!!c.favorite}">${icon("star", 14)}${c.favorite ? "Favorit" : (c.auto_excluded ? "Ta med ändå" : "Måste med")}</button>
           <button class="toggle ex" data-ex="${c.id}" aria-pressed="${!!c.excluded}">${icon("eyeoff", 14)}${c.excluded ? "Bortvald" : "Välj bort"}</button>
         </div>
       </div></article>`;
@@ -455,11 +548,11 @@ function viewAnalyze() {
 
   const prog = busy
     ? `<div class="progress"><div class="spread" style="font-size:13px"><b data-live-text>${esc(j.message || "")}</b><span class="muted num" data-live-pct>${Math.round((j.progress || 0) * 100)} %</span></div><div class="bar"><div data-live-fill style="width:${(j.progress || 0) * 100}%"></div></div></div>`
-    : `<div class="progress"><div class="spread" style="font-size:13px"><b>${done.length} av ${all.length} klipp analyserade</b></div><div class="bar"><div style="width:${all.length ? (done.length / all.length) * 100 : 0}%"></div></div></div>`;
+    : `<div class="progress"><div class="spread" style="font-size:13px"><b>${used.length} av ${done.length} klipp används</b></div><div class="bar"><div style="width:${done.length ? (used.length / done.length) * 100 : 0}%"></div></div></div>`;
 
   const main = `<main class="main">
     <div class="spread"><div class="head"><h1>${busy ? "AI analyserar materialet" : "Analysresultat"}</h1>
-      <p class="lead">Skärpa, exponering, stabilitet, rörelse och motiv. Resultatet sparas – nya förslag kräver ingen ny analys.</p></div>${prog}</div>
+      <p class="lead">Bara skarpa, stabila och välexponerade klipp används. Svaga klipp väljs bort automatiskt – du behöver inte gå igenom dem.</p></div>${prog}</div>
     <div class="chips" role="group" aria-label="Filtrera">${chips}</div>
     <div class="grid">${cards || '<div class="empty">Inga klipp i det här urvalet ännu.</div>'}</div>
   </main>`;
@@ -471,7 +564,8 @@ function viewAnalyze() {
     <section class="box"><h2 style="font-size:14px">Variation</h2><p>${info.clip_ai
       ? "Motiv känns igen med CLIP. Liknande klipp hålls isär så att samma motiv inte upprepas."
       : "Liknande klipp hittas med färg och bildinnehåll. Installera AI-paketen (se README) för att känna igen motiv som sköldpadda, rev och dykare."}</p></section>
-    <section class="box"><h2 style="font-size:14px">Favoriter</h2><p>${favs ? `${favs} ${favs === 1 ? "klipp är markerat" : "klipp är markerade"} som "måste med". AI bygger filmen runt dem.` : 'Markera klipp med "Måste med" för att alltid få med dem i filmen.'}</p></section>
+    <section class="box"><h2 style="font-size:14px">Automatiskt urval</h2><p>${dropped.length ? `${dropped.length} klipp valdes bort (suddiga, skakiga, felexponerade eller klart svagare). Även i godkända klipp används bara de delar som är skarpa hela vägen.` : "Alla klipp klarade kvalitetskraven. Bara de skarpaste delarna används."}</p></section>
+    <section class="box"><h2 style="font-size:14px">Favoriter</h2><p>${favs ? `${favs} ${favs === 1 ? "klipp är markerat" : "klipp är markerade"} som "måste med". AI bygger filmen runt dem.` : 'Valfritt: markera klipp med "Måste med" för att alltid få med dem.'}</p></section>
     <div class="stack push">
       <button class="btn" data-act="reanalyze" ${running() ? "disabled" : ""}>Analysera om allt</button>
       <button class="btn primary big" data-act="generate" ${running() || !done.length || generating ? "disabled" : ""}>${generating ? "Skapar …" : "Skapa 3 filmförslag"}</button>
@@ -513,7 +607,8 @@ function propCard(p, idx) {
       <div class="phone" style="width:${w}px;height:${h}px">${phone}</div>
       <div class="info">
         <div class="stack" style="gap:4px"><span class="plabel" style="color:${si.color || "var(--accent)"}">Förslag ${"ABCDEFGHIJ"[idx] || ""}</span>
-          <h2 class="pname">${esc(p.style_label)}</h2><p class="pdesc">${esc(si.long || "")}</p></div>
+          <h2 class="pname">${esc(p.style_label)}</h2><p class="pdesc">${esc(si.long || "")}</p>
+          ${p.short ? `<p class="pdesc" style="color:var(--warn)">Kortare än önskat – det fanns bara ${fmtDur(p.length)} skarpt material.</p>` : ""}</div>
         <dl class="stats">
           <div><dt>Klipp</dt><dd class="num">${p.n_shots}</dd></div>
           <div><dt>Snittlängd</dt><dd class="num">${dec(p.avg_shot)} s</dd></div>
@@ -535,7 +630,24 @@ function propCard(p, idx) {
   </article>`;
 }
 
+function autoProgress() {
+  const j = job();
+  const pct = Math.round((j.progress || 0) * 100);
+  const stage = (j.message || "").match(/^(\d)\/4/);
+  const n = stage ? Number(stage[1]) : 1;
+  const steps = ["Läser in", "Analyserar och väljer bort svaga klipp", "Skapar filmförslag", "Gör förhandsvisningar"];
+  return `<section class="auto-hero">
+    <div class="spinner" style="width:34px;height:34px"></div>
+    <h1>DeHazeIQ gör dina filmer</h1>
+    <p class="lead">Du behöver inte göra något – förslagen dyker upp här när de är klara.</p>
+    <ol class="auto-steps">${steps.map((t, i) => `<li class="${i + 1 < n ? "done" : i + 1 === n ? "now" : ""}"><span>${i + 1 < n ? "✓" : i + 1}</span>${t}</li>`).join("")}</ol>
+    <div class="progress" style="width:min(520px,100%)"><div class="spread" style="font-size:13px"><span class="muted" data-live-text>${esc(j.message || "")}</span><span class="num muted" data-live-pct>${pct} %</span></div>
+      <div class="bar"><div data-live-fill style="width:${pct}%"></div></div></div>
+  </section>`;
+}
+
 function viewProposals() {
+  if (running("auto")) return `<main class="main wide">${autoProgress()}</main>`;
   const s = settings();
   const props = P().proposals || [];
   const shown = state.shown.map(propById).filter(Boolean);
@@ -625,11 +737,13 @@ function render() {
   renderTop();
   const v = $("#view");
   if (!P()) {
-    v.innerHTML = `<main class="main" style="max-width:560px;margin:56px auto;align-items:center">
+    v.innerHTML = `<main class="main" style="max-width:600px;margin:56px auto;align-items:center">
       <div class="hero"><img src="/static/logo.png" alt="DeHazeIQ">
         <h1>Välkommen till DeHazeIQ</h1><p class="tagline">AI-powered video editing, without the hassle</p>
-        <p class="lead">Skapa ett projekt och importera en mapp med filmklipp. AI:n analyserar materialet och gör tre olika filmförslag.</p></div>
-      <form class="newproj" id="newProj" style="width:100%"><label class="sr" for="npName">Projektnamn</label><input id="npName" placeholder="Till exempel Röda havet – mars" maxlength="80" style="height:44px"><button class="btn primary" type="submit">Skapa projekt</button></form></main>`;
+        <p class="lead">Välj mappen med dina filmklipp. Resten sköts automatiskt: analys, bortval av suddiga klipp och tre färdiga filmförslag.</p>
+        ${remote() ? '<p class="lead">Starta en import på datorn.</p>' : `<button class="btn primary big" style="padding:0 28px" data-act="new-import">${icon("folder", 18)}Välj mapp med filmklipp</button>
+        <button class="btn small" data-act="new-import-files">eller välj enskilda filer</button>
+        <form class="pathrow" id="welcomePath"><label class="sr" for="welcomeInput">Sökväg</label><input class="field" id="welcomeInput" placeholder="… eller klistra in en sökväg"><button class="btn" type="submit">Starta</button></form>`}</div></main>`;
     return;
   }
   const views = { import: viewImport, analyze: viewAnalyze, proposals: viewProposals, export: viewExport };
@@ -643,7 +757,14 @@ document.addEventListener("click", async (ev) => {
   const d = t.dataset;
   if (d.stepLink) { ev.preventDefault(); state.view = d.stepLink; return render(); }
   if (d.step) { state.view = d.step; return render(); }
-  if (d.proj) { await loadProject(d.proj); state.view = "import"; return render(); }
+  if (d.proj) {
+    await loadProject(d.proj);
+    state.view = running("auto") || (P().proposals || []).length ? "proposals" : analyzed().length ? "analyze" : "import";
+    return render();
+  }
+  if (d.rename) return openRename(d.rename);
+  if (d.delete) return openDelete(d.delete);
+  if (d.delConfirm) return deleteProject(d.delConfirm);
   if (d.format) return saveSettings({ format: d.format });
   if (d.length) return saveSettings({ length: Number(d.length) });
   if (d.style) return saveSettings({ style: d.style });
@@ -658,8 +779,11 @@ document.addEventListener("click", async (ev) => {
   if (d.reveal) return reveal(state.exportProp, d.reveal);
   if (d.show) { state.shown = [d.show, ...state.shown.filter((x) => x !== d.show)].slice(0, 3); saveShown(); return render(); }
   switch (d.act) {
-    case "choose-folder": return chooseAndImport("folder");
-    case "choose-files": return chooseAndImport("files");
+    case "new-import": return newImport(await choosePaths("folder"));
+    case "new-import-files": return newImport(await choosePaths("files"));
+    case "add-folder": return addToProject(await choosePaths("folder"));
+    case "add-files": return addToProject(await choosePaths("files"));
+    case "auto": return runAuto();
     case "analyze": return startAnalyze(false);
     case "reanalyze": return startAnalyze(true);
     case "generate": return generate();
@@ -676,12 +800,23 @@ document.addEventListener("click", async (ev) => {
 
 document.addEventListener("submit", async (ev) => {
   ev.preventDefault();
-  if (ev.target.id === "newProj") {
-    const name = $("#npName").value.trim();
-    if (name) createProject(name).catch(fail);
+  if (ev.target.id === "renameForm") {
+    const pid = ev.target.dataset.pid;
+    const name = $("#rnName").value.trim();
+    if (!name) return;
+    try {
+      await api("POST", `/api/p/${pid}/rename`, { name });
+      $("#modal").hidden = true;
+      await loadProjects();
+      if (state.pid === pid) P().name = name;
+      render();
+    } catch (e) { fail(e); }
   } else if (ev.target.id === "pathForm") {
     const v = $("#pathInput").value.trim();
-    if (v) startImport(v.split("\n").map((x) => x.trim()).filter(Boolean)).catch(fail);
+    if (v) addToProject(v.split("\n").map((x) => x.trim()).filter(Boolean));
+  } else if (ev.target.id === "welcomePath") {
+    const v = $("#welcomeInput").value.trim();
+    if (v) newImport(v.split("\n").map((x) => x.trim()).filter(Boolean));
   }
 });
 
@@ -694,7 +829,7 @@ document.addEventListener("submit", async (ev) => {
     const pid = state.projects.find((p) => p.id === saved) ? saved : (state.projects[0] && state.projects[0].id);
     if (pid) {
       await loadProject(pid);
-      if ((P().proposals || []).length) state.view = "proposals";
+      if (running("auto") || (P().proposals || []).length) state.view = "proposals";
       else if (analyzed().length) state.view = "analyze";
     }
   } catch (e) { fail(e); }

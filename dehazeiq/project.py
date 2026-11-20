@@ -61,7 +61,7 @@ class Project:
         data = {
             "id": pid, "name": name.strip() or pid, "created": time.time(),
             "clips": {}, "order": [], "music": None, "proposals": [],
-            "settings": {"format": "9:16", "length": 30, "style": "auto"},
+            "settings": default_settings(),
         }
         (d / "project.json").write_text(json.dumps(data, ensure_ascii=False, indent=1), "utf-8")
         return Project(pid)
@@ -90,6 +90,19 @@ class Project:
         return out
 
     # ---------- lagring ----------
+    def rename(self, name: str):
+        with _LOCK:
+            self.reload()
+            self.data["name"] = name.strip()[:80] or self.data["name"]
+            self.save()
+
+    def delete(self):
+        """Tar bort projektmappen (proxyfiler, analys, förhandsvisningar och exporter).
+        Originalfilmerna rörs inte."""
+        import shutil
+        with _LOCK:
+            shutil.rmtree(self.dir)
+
     def save(self):
         with _LOCK:
             tmp = self.file.with_suffix(".tmp")
@@ -130,8 +143,8 @@ class Project:
         return [self.data["clips"][c] for c in self.data.get("order", []) if c in self.data["clips"]]
 
     def usable_clips(self):
-        return [c for c in self.clips()
-                if c.get("analysis") and not c.get("excluded") and not c.get("is360")]
+        from .quality import is_usable
+        return [c for c in self.clips() if is_usable(c)]
 
     def proposal(self, prop_id):
         for p in self.data.get("proposals", []):
@@ -152,6 +165,44 @@ class Project:
                 if p["id"] == prop_id:
                     p.update(fields)
             self.save()
+
+
+_SETTINGS_FILE = PROJECTS_DIR.parent / "settings.json"
+_DEFAULTS = {"format": "9:16", "length": 30, "style": "auto"}
+
+
+def default_settings():
+    """Senast använda format/längd/stil – nya projekt får samma."""
+    try:
+        data = json.loads(_SETTINGS_FILE.read_text("utf-8"))
+        return {k: data.get(k, v) for k, v in _DEFAULTS.items()}
+    except (OSError, ValueError):
+        return dict(_DEFAULTS)
+
+
+def save_default_settings(settings):
+    try:
+        _SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        merged = default_settings()
+        merged.update({k: settings[k] for k in _DEFAULTS if k in settings})
+        _SETTINGS_FILE.write_text(json.dumps(merged), "utf-8")
+    except OSError:
+        pass
+
+
+def auto_name(paths) -> str:
+    """Projektnamn från mappen som importeras (eller filernas mapp)."""
+    from datetime import date
+    months = ["jan", "feb", "mars", "april", "maj", "juni", "juli", "aug", "sep", "okt", "nov", "dec"]
+    for raw in paths:
+        p = Path(raw).expanduser()
+        folder = p if p.is_dir() else p.parent
+        name = folder.name.strip()
+        if name and name.lower() not in ("dcim", "100media", "movies", "filmer", "videos", "downloads",
+                                         "hämtade filer", "desktop", "skrivbord", "camera"):
+            return name[:80]
+    d = date.today()
+    return f"Import {d.day} {months[d.month - 1]} {d.year}"
 
 
 def collect_video_files(paths):

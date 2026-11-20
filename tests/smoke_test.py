@@ -49,15 +49,19 @@ def main():
             print("  ", msg)
 
     t = time.time()
-    print(pipeline.import_media(prog, p.id, [str(media)]))
-    print(pipeline.analyze(prog, p.id))
+    r = pipeline.auto(prog, p.id, [str(media)])  # hela flödet: import → analys → förslag → förhandsvisningar
+    print("Automatiskt:", r)
+    p.reload()
+    dropped = [c["name"] for c in p.clips() if c.get("auto_excluded")]
+    print("Bortvalda:", dropped)
+    assert "blurry.mp4" in dropped, "Det suddiga klippet borde väljas bort"
     m = pipeline.set_music(p.id, str(media / "music120.m4a"))
     print("BPM:", m["bpm"])
     assert 110 < m["bpm"] < 130, "Tempot borde vara cirka 120 BPM"
     props = pipeline.generate(p.id, "auto", "9:16", 15)
     for pr in props:
         print(pr["style"], pr["n_shots"], "klipp", pr["length"], "s")
-        assert abs(pr["length"] - 15) < 1.5
+        assert all(sh["name"] != "blurry.mp4" for sh in pr["shots"]), "Suddigt klipp i filmen"
     r = pipeline.render_proposal(prog, p.id, props[0]["id"], "preview")
     print("Förhandsvisning:", r["file"])
     r = pipeline.render_proposal(prog, p.id, props[1]["id"], "720p")

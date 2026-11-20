@@ -64,16 +64,21 @@ Starta direkt med wifi påslaget: `python -m dehazeiq --lan`.
 
 ## Arbetsflöde
 
-- Skapa ett projekt och klicka **Välj mapp**. Analysen startar automatiskt efter importen.
-- Välj format (9:16, 16:9, 1:1, 4:5), längd, stil och musik i högerpanelen.
-- I analysvyn kan du markera klipp som **Måste med** (favoriter) eller **Välj bort**.
-- **Skapa 3 filmförslag** ger tre versioner. Varje klick på "Generera nya förslag" eller
-  ↻ på ett kort ger ett nytt urval – materialet behöver inte analyseras om.
-- **Förhandsvisa** renderar snabbt från proxyfilerna.
-- **Exportera** renderar från originalfilerna i 720p, 1080p eller 4K och skapar samtidigt en `.otio`-tidslinje.
-  I DaVinci Resolve: *Arkiv › Importera › Tidslinje …* och välj `.otio`-filen.
+1. Klicka **Välj mapp med filmklipp** (eller **Ny import** i sidomenyn). Projektet får mappens namn
+   – byt namn eller ta bort projekt med pennan/papperskorgen i sidomenyn.
+2. Resten sker automatiskt: inläsning → analys → **bortval av svaga klipp** → tre filmförslag →
+   förhandsvisningar. Du behöver inte gå igenom klippen.
+3. Titta på förslagen, tryck ↻ för ett nytt urval eller **Exportera**.
 
-Projekten sparas i `~/DeHazeIQ/projects/` – på Windows `C:\Users\<namn>\DeHazeIQ\projects` (ändra med miljövariabeln `DEHAZEIQ_HOME`).
+Automatiskt urval:
+- Klipp vars bästa del är **suddig, skakig eller felexponerad**, eller klart svagare än resten,
+  väljs bort med en förklaring (fliken *Bortvalda* i analysvyn). "Ta med ändå" tvingar in ett klipp.
+- Även i godkända klipp används bara sekvenser där **skärpan håller hela vägen** (inget fokusletande).
+- Finns det för lite skarpt material blir filmen hellre kortare än sämre.
+- Vid beskärning (t.ex. **9:16 reels ur liggande video**) hittas motivet i varje bildruta och
+  beskärningen följer det mjukt, så att motivet hamnar i bild och inte klipps bort.
+
+Format, längd, stil och musik ställs in under **Importera** och gäller även nästa import.
 
 ## Insta360
 

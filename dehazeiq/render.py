@@ -41,9 +41,36 @@ def crop_box(src_w, src_h, out_w, out_h, cx=0.5, cy=0.5):
     return cw, ch, x, y
 
 
+def _path_expr(keys, size, crop, idx):
+    """Styckvis linjär bana (sekunder → pixel) som FFmpeg-uttryck för crop x/y.
+    keys: [[t, cx, cy], …] med motivets mittpunkt normaliserad 0..1."""
+    lim = max(0, size - crop)
+
+    def px(v):
+        return int(round(min(max(v * size - crop / 2, 0), lim)))
+
+    pts = [(float(k[0]), px(k[idx])) for k in keys]
+    if not pts:
+        return str(lim // 2)
+    if all(p[1] == pts[0][1] for p in pts):
+        return str(pts[0][1])
+    expr = str(pts[-1][1])
+    for (t0, v0), (t1, v1) in reversed(list(zip(pts[:-1], pts[1:]))):
+        span = max(t1 - t0, 1e-3)
+        expr = f"if(lt(t,{t1:.3f}),{v0}+({v1 - v0})*(t-{t0:.3f})/{span:.3f},{expr})"
+    return f"if(lt(t,{pts[0][0]:.3f}),{pts[0][1]},{expr})"
+
+
 def _shot_filter(shot, src_w, src_h, out_w, out_h, style, wb=True, fade_in=0.0, fade_out=0.0):
-    cw, ch, x, y = crop_box(src_w, src_h, out_w, out_h, shot.get("cx", 0.5))
-    parts = [f"crop={cw}:{ch}:{x}:{y}",
+    cw, ch, x, y = crop_box(src_w, src_h, out_w, out_h, shot.get("cx", 0.5), shot.get("cy", 0.5))
+    path = shot.get("path") or []
+    if path and cw < src_w - 1:
+        crop = f"crop={cw}:{ch}:x='{_path_expr(path, src_w, cw, 1)}':y={y}"
+    elif path and ch < src_h - 1:
+        crop = f"crop={cw}:{ch}:x={x}:y='{_path_expr(path, src_h, ch, 2)}'"
+    else:
+        crop = f"crop={cw}:{ch}:{x}:{y}"
+    parts = [crop,
              f"scale={out_w}:{out_h}:flags=lanczos",
              f"fps={OUTPUT_FPS}", "setsar=1"]
     if wb:

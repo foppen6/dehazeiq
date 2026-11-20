@@ -22,7 +22,7 @@ import cv2
 
 from . import TAGLINE, __version__, media, pipeline, tagging
 from .config import FORMATS, HOME, PROJECTS_DIR, STYLES
-from .project import JOBS, Project
+from .project import JOBS, Project, auto_name, save_default_settings
 
 WEB = Path(__file__).parent / "web"
 MEDIA_DIRS = {"proxies", "renders"}
@@ -455,6 +455,16 @@ class Handler(BaseHTTPRequestHandler):
             name = (body.get("name") or "").strip() or "Nytt projekt"
             p = Project.create(name[:80])
             return self._json(_project_view(p), HTTPStatus.CREATED)
+        if api == ["import"]:
+            # Ett klick: skapa projekt efter mappnamnet och kör hela flödet automatiskt
+            if self.is_remote:
+                raise ApiError("Det här görs på datorn.", HTTPStatus.FORBIDDEN)
+            paths = [str(x) for x in body.get("paths") or [] if str(x).strip()]
+            if not paths:
+                raise ApiError("Ange en mapp eller filer")
+            p = Project.create(auto_name(paths))
+            JOBS.start(p.id, "auto", pipeline.auto, p.id, paths)
+            return self._json(_project_view(p), HTTPStatus.CREATED)
         if api == ["choose"]:
             if self.is_remote:
                 raise ApiError("Välj filer på datorn – dialogen öppnas där.", HTTPStatus.FORBIDDEN)
@@ -479,8 +489,26 @@ class Handler(BaseHTTPRequestHandler):
                 raise ApiError("Ange en mapp eller filer")
             if JOBS.busy(p.id):
                 raise ApiError(busy_msg, HTTPStatus.CONFLICT)
-            JOBS.start(p.id, "import", pipeline.import_media, p.id, paths)
+            JOBS.start(p.id, "auto", pipeline.auto, p.id, paths)
             return self._json({"ok": True})
+        if action == ["auto"]:
+            if JOBS.busy(p.id):
+                raise ApiError(busy_msg, HTTPStatus.CONFLICT)
+            JOBS.start(p.id, "auto", pipeline.auto, p.id, None)
+            return self._json({"ok": True})
+        if action == ["rename"]:
+            name = (body.get("name") or "").strip()
+            if not name:
+                raise ApiError("Ange ett namn")
+            p.rename(name)
+            return self._json({"name": p.data["name"]})
+        if action == ["delete"]:
+            if self.is_remote:
+                raise ApiError("Projekt tas bort på datorn.", HTTPStatus.FORBIDDEN)
+            if JOBS.busy(p.id):
+                raise ApiError(busy_msg, HTTPStatus.CONFLICT)
+            p.delete()
+            return self._json({"deleted": p.id})
         if action == ["analyze"]:
             if JOBS.busy(p.id):
                 raise ApiError(busy_msg, HTTPStatus.CONFLICT)
@@ -496,6 +524,7 @@ class Handler(BaseHTTPRequestHandler):
                 if k in body:
                     s[k] = body[k]
             p.save()
+            save_default_settings(s)
             return self._json({"settings": s})
         if len(action) == 2 and action[0] == "clip":
             cid = action[1]

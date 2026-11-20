@@ -17,6 +17,48 @@ WORK_WIDTH = 320
 TAG_EVERY = 2.0  # sekunder mellan bildrutor till CLIP
 
 
+SAL_W = 64
+
+
+def saliency(frame_bgr):
+    """Var i bilden finns motivet? Spektralresidual (Hou & Zhang) + färgkontrast.
+    Returnerar (sx, sy, spread_x, spread_y, styrka), alla normaliserade 0..1."""
+    h, w = frame_bgr.shape[:2]
+    sh = max(8, int(round(SAL_W * h / w)))
+    small = cv2.resize(frame_bgr, (SAL_W, sh), interpolation=cv2.INTER_AREA)
+    gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY).astype(np.float32) / 255.0
+    f = np.fft.fft2(gray)
+    log_amp = np.log(np.abs(f) + 1e-6)
+    phase = np.angle(f)
+    residual = log_amp - cv2.blur(log_amp, (3, 3))
+    sr = np.abs(np.fft.ifft2(np.exp(residual + 1j * phase))) ** 2
+    sr = cv2.GaussianBlur(sr.astype(np.float32), (0, 0), 2.5)
+    lab = cv2.cvtColor(small, cv2.COLOR_BGR2LAB).astype(np.float32)
+    cc = np.linalg.norm(lab - lab.reshape(-1, 3).mean(axis=0), axis=2)
+    cc = cv2.GaussianBlur(cc, (0, 0), 2.0)
+
+    def _n(a):
+        lo, hi = float(a.min()), float(a.max())
+        return (a - lo) / (hi - lo) if hi > lo else np.zeros_like(a)
+
+    sal = 0.5 * _n(sr) + 0.5 * _n(cc)
+    # Bara de mest framträdande delarna räknas, så att bakgrunden inte drar mot mitten
+    thr = np.percentile(sal, 85)
+    wgt = np.clip(sal - thr, 0, None) ** 2
+    tot = float(wgt.sum())
+    if tot <= 1e-9:
+        return 0.5, 0.5, 0.5, 0.5, 0.0
+    ys, xs = np.mgrid[0:sh, 0:SAL_W]
+    xs = (xs + 0.5) / SAL_W
+    ys = (ys + 0.5) / sh
+    sx = float((wgt * xs).sum() / tot)
+    sy = float((wgt * ys).sum() / tot)
+    spx = float(np.sqrt((wgt * (xs - sx) ** 2).sum() / tot))
+    spy = float(np.sqrt((wgt * (ys - sy) ** 2).sum() / tot))
+    strength = float(sal.max() - np.median(sal))
+    return sx, sy, spx, spy, strength
+
+
 def _hist(hsv):
     h = cv2.calcHist([hsv], [0, 1, 2], None, [8, 4, 4], [0, 180, 0, 256, 0, 256]).flatten()
     s = h.sum()
@@ -26,9 +68,14 @@ def _hist(hsv):
 def sample_quality(sharp, luma, clip_lo, clip_hi, jitter):
     """Kvalitet 0..1 per prov. Exponeras även för generatorn."""
     sharp_n = np.clip((np.log10(sharp + 1.0) - 1.0) / 1.6, 0.0, 1.0)
-    expo = 1.0 - np.minimum(1.0, np.abs(luma - 118.0) / 110.0) - 2.0 * (clip_lo + clip_hi)
+    # Undervattensbilder är ofta mörkare än land – hela 45–195 räknas som bra exponering
+    under = np.clip((luma - 12.0) / 33.0, 0.0, 1.0)
+    over = np.clip((242.0 - luma) / 47.0, 0.0, 1.0)
+    # Svarta partier är vanliga (nattdyk, skuggor) – straffa bara stora mängder.
+    # Utfrätta högdagrar är värre och straffas tidigare.
+    expo = np.minimum(under, over) - 1.5 * np.maximum(0.0, clip_lo - 0.25) - 2.5 * np.maximum(0.0, clip_hi - 0.06)
     expo = np.clip(expo, 0.0, 1.0)
-    stab = np.clip(1.0 - jitter * 35.0, 0.0, 1.0)
+    stab = np.clip(1.0 - jitter * 20.0, 0.0, 1.0)
     return np.clip(0.45 * sharp_n + 0.30 * expo + 0.25 * stab, 0.0, 1.0), sharp_n, expo, stab
 
 
@@ -43,7 +90,7 @@ def analyze_clip(proxy_path, out_npz, progress=None, with_tags=True) -> dict:
     tag_step = max(1, int(round(TAG_EVERY * SAMPLE_FPS)))
 
     rec = {k: [] for k in ("t", "sharp", "luma", "clo", "chi", "r", "g", "b",
-                           "cx", "dx", "dy", "diff", "cut")}
+                           "cx", "dx", "dy", "diff", "cut", "sx", "sy", "spx", "spy", "sstr")}
     hists = []
     tag_frames, tag_times = [], []
     prev_gray = prev_small = prev_hist = None
@@ -80,6 +127,12 @@ def analyze_clip(proxy_path, out_npz, progress=None, with_tags=True) -> dict:
         col = np.abs(lap).sum(axis=0)
         cs = col.sum()
         rec["cx"].append(float((np.arange(col.size) * col).sum() / cs / col.size) if cs > 0 else 0.5)
+        sx, sy, spx, spy, sstr = saliency(frame)
+        rec["sx"].append(sx)
+        rec["sy"].append(sy)
+        rec["spx"].append(spx)
+        rec["spy"].append(spy)
+        rec["sstr"].append(sstr)
 
         gf = gray.astype(np.float32)
         if window is None or window.shape != gf.shape:
@@ -87,7 +140,9 @@ def analyze_clip(proxy_path, out_npz, progress=None, with_tags=True) -> dict:
         small = cv2.resize(gray, (64, 36), interpolation=cv2.INTER_AREA).astype(np.float32)
         hist = _hist(cv2.cvtColor(frame, cv2.COLOR_BGR2HSV))
         if prev_gray is not None and prev_gray.shape == gf.shape:
-            (dx, dy), _ = cv2.phaseCorrelate(prev_gray, gf, window)
+            (dx, dy), resp = cv2.phaseCorrelate(prev_gray, gf, window)
+            if resp < 0.05:  # osäker mätning (t.ex. mycket rörelse i bilden) – anta ingen ryckning
+                dx, dy = (rec["dx"][-1] * gf.shape[1], rec["dy"][-1] * gf.shape[1]) if rec["dx"] else (0.0, 0.0)
             diff = float(np.abs(small - prev_small).mean() / 255.0)
             bh = float(cv2.compareHist(prev_hist, hist, cv2.HISTCMP_BHATTACHARYYA))
             cut = bh > 0.45 and diff > 0.08
@@ -119,6 +174,9 @@ def analyze_clip(proxy_path, out_npz, progress=None, with_tags=True) -> dict:
 
     # Skakighet: andraderivatan av kamerans förflyttning (ryck), inte jämn panorering
     shift = np.stack([arr["dx"], arr["dy"]], axis=1)
+    if len(shift) >= 3:  # medianfilter tar bort enstaka felmätningar (upprepade mönster, fiskar)
+        padded = np.pad(shift, ((1, 1), (0, 0)), mode="edge")
+        shift = np.median(np.stack([padded[:-2], padded[1:-1], padded[2:]]), axis=0)
     acc = np.zeros(len(shift), np.float32)
     if len(shift) >= 3:
         acc[1:-1] = np.linalg.norm(shift[2:] - 2 * shift[1:-1] + shift[:-2], axis=1)
@@ -131,6 +189,9 @@ def analyze_clip(proxy_path, out_npz, progress=None, with_tags=True) -> dict:
     edge = (t < 0.6) | (t > dur - 0.6)
     q = np.where(edge, q * 0.6, q)
     arr["quality"] = q.astype(np.float32)
+    arr["sharp_n"] = sharp_n.astype(np.float32)
+    arr["expo"] = expo.astype(np.float32)
+    arr["stab"] = stab.astype(np.float32)
     motion = np.linalg.norm(shift, axis=1) * 10.0 + arr["diff"] * 4.0
     arr["motion"] = np.clip(motion, 0, 1).astype(np.float32)
 
@@ -161,8 +222,14 @@ def analyze_clip(proxy_path, out_npz, progress=None, with_tags=True) -> dict:
         means = (csum[win:] - csum[:-win]) / win
         bi = int(np.argmax(means))
         best = (float(t[bi]), float(t[min(bi + win, len(t) - 1)]))
+        bsl = slice(bi, bi + win)
     else:
         best = (0.0, dur)
+        bsl = slice(0, len(q))
+    best_q = float(q[bsl].mean())
+    best_sharp = float(sharp_n[bsl].mean())
+    best_expo = float(expo[bsl].mean())
+    best_stab = float(stab[bsl].mean())
 
     mean_motion = float(arr["motion"].mean())
     pan = float(np.abs(arr["dx"]).mean())
@@ -189,6 +256,9 @@ def analyze_clip(proxy_path, out_npz, progress=None, with_tags=True) -> dict:
         "underwater": bool(underwater),
         "wb_gains": [round(g, 3) for g in gains],
         "best": [round(best[0], 2), round(best[1], 2)],
+        "best_q": round(best_q, 3), "best_sharp": round(best_sharp, 3),
+        "best_expo": round(best_expo, 3), "best_stab": round(best_stab, 3),
+        "subject": round(float(np.median(arr["sstr"])), 3),
         "scenes": int(arr["cut"].sum()) + 1,
         "tags": tags,
         "has_embeddings": "emb" in arr,
