@@ -295,15 +295,18 @@ class Server:
 # ---------- beskrivning av en bild ----------
 
 PROMPT = """You are an expert nature and underwater film editor. Look at this frame from a {kind} video.
-{hint}Reply with ONLY a JSON object, no other text:
-{{"subject": "<Swedish common name of the main animal or subject, or \\"inget\\">",
- "species": "<scientific name if you are fairly sure, else empty>",
- "what": "<one short Swedish sentence, max 12 words, describing what is happening>",
- "action": <0-10, how much is happening>,
- "fun": <0-10, how funny, curious or charming the moment is>,
- "beauty": <0-10, visual beauty of the frame>,
- "sharp": <true if the main subject is in focus>,
- "role": "<intro|action|climax|calm|detail>"}}"""
+{hint}Reply with ONLY a JSON object, no other text. Write "subject" and "what" in SWEDISH (svenska).
+Fields:
+ "subject": Swedish common name of the main animal or subject, or "inget"
+ "species": scientific name if you are fairly sure, else ""
+ "what": one short Swedish sentence (max 12 words) about what is happening
+ "action": 0-10 how much is happening
+ "fun": 0-10 how funny, curious or charming the moment is
+ "beauty": 0-10 visual beauty of the frame
+ "sharp": true if the main subject is in focus
+ "role": one of "intro", "action", "climax", "calm", "detail"
+Example: {{"subject": "bläckfisk", "species": "Sepiola atlantica", "what": "Bläckfisken gräver ner sig i sanden",
+"action": 6, "fun": 8, "beauty": 7, "sharp": true, "role": "climax"}}"""
 
 
 def parse(text):
