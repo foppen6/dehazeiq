@@ -9,6 +9,8 @@ on:
     paths:
       - packaging/ai_prompts.json
       - packaging/build_models.py
+      - packaging/bio_species.json
+      - packaging/build_bioclip.py
       - .github/workflows/models.yml
 
 permissions:
@@ -29,6 +31,14 @@ jobs:
 
       - name: Bygg modellpaket
         run: python packaging/build_models.py
+
+      - name: Installera PyTorch och OpenCLIP (för artmodellen)
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install open_clip_torch onnx onnxscript
+
+      - name: Bygg artmodell (BioCLIP)
+        run: python packaging/build_bioclip.py
 
       - name: Publicera som release-filer
         env:

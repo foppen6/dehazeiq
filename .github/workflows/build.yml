@@ -29,7 +29,18 @@ jobs:
       - name: Hämta AI-modell
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release download models-v1 --dir packaging/models --repo "${{ github.repository }}" --clobber
+        shell: bash
+        run: |
+          # modellpaketet kan byggas om samtidigt: försök igen tills alla filer finns
+          need="clip_vision.onnx text_embeds.npz prompts.json bioclip_vision.onnx bio_text.npz bio_species.json"
+          for i in $(seq 1 40); do
+            gh release download models-v1 --dir packaging/models --repo "${{ github.repository }}" --clobber || true
+            ok=1; for f in $need; do [ -s "packaging/models/$f" ] || ok=0; done
+            [ $ok = 1 ] && break
+            echo "Väntar på modellpaketet ($i)…"; sleep 30
+          done
+          ls -la packaging/models
+          for f in $need; do [ -s "packaging/models/$f" ] || { echo "Saknas: $f"; exit 1; }; done
 
       - name: Installera Python-paket
         run: |
@@ -80,7 +91,18 @@ jobs:
       - name: Hämta AI-modell
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release download models-v1 --dir packaging/models --repo "${{ github.repository }}" --clobber
+        shell: bash
+        run: |
+          # modellpaketet kan byggas om samtidigt: försök igen tills alla filer finns
+          need="clip_vision.onnx text_embeds.npz prompts.json bioclip_vision.onnx bio_text.npz bio_species.json"
+          for i in $(seq 1 40); do
+            gh release download models-v1 --dir packaging/models --repo "${{ github.repository }}" --clobber || true
+            ok=1; for f in $need; do [ -s "packaging/models/$f" ] || ok=0; done
+            [ $ok = 1 ] && break
+            echo "Väntar på modellpaketet ($i)…"; sleep 30
+          done
+          ls -la packaging/models
+          for f in $need; do [ -s "packaging/models/$f" ] || { echo "Saknas: $f"; exit 1; }; done
 
       - name: Installera Python-paket
         run: |
