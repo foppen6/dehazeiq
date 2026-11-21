@@ -31,10 +31,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p llz packaging/llama
-          gh release view --repo ggml-org/llama.cpp --json tagName,assets --jq '.tagName, .assets[].name' | tee llz/names.txt
-          asset=$(grep -i 'macos' llz/names.txt | grep -i 'arm64' | grep -iv 'xcframework\|kleidiai' | grep -i '\.zip$\|\.tar\.gz$' | head -1)
-          echo "Valt: $asset"
-          gh release download --repo ggml-org/llama.cpp --pattern "$asset" -D llz
+          # senaste utgåvan som har en färdig Mac-version (arm64)
+          tag=""; asset=""
+          for t in $(gh release list --repo ggml-org/llama.cpp --limit 30 --json tagName --jq '.[].tagName'); do
+            names=$(gh release view "$t" --repo ggml-org/llama.cpp --json assets --jq '.assets[].name')
+            asset=$(echo "$names" | grep -i 'macos' | grep -i 'arm64' | grep -iv 'xcframework\|kleidiai' | grep -i '\.zip$\|\.tar\.gz$' | head -1)
+            if [ -n "$asset" ]; then tag=$t; break; fi
+          done
+          echo "Valt: $tag / $asset"
+          [ -n "$asset" ] || { echo "Ingen Mac-version av llama.cpp hittades"; exit 1; }
+          gh release download "$tag" --repo ggml-org/llama.cpp --pattern "$asset" -D llz
           cd llz
           for f in *; do case "$f" in *.zip) unzip -q "$f";; *.tar.gz) tar xzf "$f";; esac; done
           find . -maxdepth 4 | head -50
