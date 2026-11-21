@@ -75,3 +75,40 @@ COLOR_PROFILES = {
 }
 
 PROXY_SHORT_SIDE = 540
+
+
+# Var filmen ska visas: format och standardlängd (sekunder)
+PLATFORMS = {
+    "reels": {"label": "Instagram Reels", "format": "9:16", "length": 30},
+    "tiktok": {"label": "TikTok", "format": "9:16", "length": 30},
+    "shorts": {"label": "YouTube Shorts", "format": "9:16", "length": 45},
+    "youtube": {"label": "YouTube", "format": "16:9", "length": 180},
+    "feed": {"label": "Instagram-flöde", "format": "4:5", "length": 30},
+    "facebook": {"label": "Facebook", "format": "4:5", "length": 45},
+    "square": {"label": "Kvadrat", "format": "1:1", "length": 30},
+}
+
+# Vilka sorters filmer AI:n ska göra av materialet (väljs vid import eller senare)
+FILM_TYPES = {
+    "auto": {"label": "Låt AI välja", "platform": "reels", "count": 3},
+    "dive": {"label": "Dykfilm", "platform": "youtube", "count": 3},
+    "trip": {"label": "Resefilm", "platform": "youtube", "count": 3},
+    "reels": {"label": "Reels och shorts", "platform": "reels", "count": 6},
+    "animal": {"label": "Djurporträtt", "platform": "feed", "count": 3},
+}
+
+# Färgutseenden för redigeringen. Värden: exponering, kontrast, mättnad, temperatur, nyans (−1..1),
+# samt svartvitt och sepia (0..1). Styrkan skalar dem.
+LOOKS = {
+    "none": {"label": "Original"},
+    "natural": {"label": "Naturlig", "contrast": 0.08, "saturation": 0.1},
+    "underwater": {"label": "Undervatten", "saturation": 0.3, "temperature": 0.35, "contrast": 0.1, "exposure": 0.05},
+    "warm": {"label": "Varm", "temperature": 0.45, "saturation": 0.1},
+    "cold": {"label": "Kall", "temperature": -0.45, "saturation": 0.05},
+    "vivid": {"label": "Livlig", "saturation": 0.6, "contrast": 0.15},
+    "film": {"label": "Film", "contrast": 0.2, "saturation": -0.25, "sepia": 0.15},
+    "bw": {"label": "Svartvitt", "bw": 1.0, "contrast": 0.2},
+    "bw_soft": {"label": "Svartvitt mjuk", "bw": 1.0, "contrast": -0.12, "exposure": 0.06},
+    "sepia": {"label": "Sepia", "bw": 1.0, "sepia": 0.9},
+}
+GRADE_KEYS = ("exposure", "contrast", "saturation", "temperature", "tint", "sharpen", "vignette")

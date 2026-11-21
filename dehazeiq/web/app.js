@@ -122,7 +122,7 @@ function handleJob(j, initial = false) {
   const bar = $("#jobbar");
   if (j.state === "running") {
     bar.hidden = false;
-    const titles = { import: "Importerar", analyze: "Analyserar material", auto: "Skapar filmer automatiskt", deep: "Djupanalys" };
+    const titles = { import: "Importerar", analyze: "Analyserar material", auto: "Skapar filmer automatiskt", deep: "Djupanalys", plans: "Skapar filmförslag" };
     const kind = (j.kind || "").split(":");
     $("#jobTitle").textContent = titles[kind[0]] || (kind[1] === "preview" ? "Skapar förhandsvisning" : `Exporterar ${kind[1] || ""}`);
     $("#jobPct").textContent = `${Math.round((j.progress || 0) * 100)} %`;
@@ -166,7 +166,7 @@ async function onJobFinished(j) {
   if (kind[0] === "auto") {
     const r = j.result || {};
     const ex = (r.analysis || {}).excluded || 0;
-    if (r.proposals && r.proposals.length) { state.shown = r.proposals.slice(0, 3); saveShown(); }
+    if (r.proposals && r.proposals.length) { state.shown = r.proposals.slice(0, 3); saveShown(); state.planTab = null; }
     loadThemes();
     toast(`Klart! ${r.proposals ? r.proposals.length : 0} filmförslag är klara.${ex ? ` ${ex} svaga klipp valdes bort automatiskt.` : ""}`, true);
     state.view = "proposals";
@@ -180,6 +180,10 @@ async function onJobFinished(j) {
       state.autoAnalyze = false;
       return startAnalyze();
     }
+  } else if (kind[0] === "plans") {
+    state.planTab = null;
+    toast(`Klart! ${((j.result || []).length) || ""} nya filmförslag.`, true);
+    state.view = "proposals";
   } else if (kind[0] === "analyze") {
     toast(`Analys klar: ${(j.result || {}).analyzed || 0} klipp`, true);
   } else if (kind[0] === "render" && kind[1] !== "preview") {
@@ -218,6 +222,14 @@ async function choosePaths(kind) {
 
 // Ny import = nytt projekt (namnges efter mappen) + hela flödet automatiskt
 async function newImport(paths) {
+  if (!paths || !paths.length) return;
+  // först: vilka sorters filmer ska AI:n göra? (sedan läggs allt i kön)
+  state.setup = { mode: "new", paths, plans: defaultPlans() };
+  state.view = "setup";
+  render();
+}
+
+async function newImportDirect(paths) {
   if (!paths || !paths.length) return;
   try {
     const p = await api("POST", "/api/import", { paths });
@@ -422,7 +434,7 @@ function stepsModel() {
     { id: "import", n: 1, label: "Importera", done: hasClips, enabled: true },
     { id: "analyze", n: 2, label: "Analys", done: hasClips && nAnalyzed >= usable().length && nAnalyzed > 0, enabled: hasClips },
     { id: "proposals", n: 3, label: "Förslag", done: hasProps, enabled: nAnalyzed > 0 || hasProps },
-    { id: "review", n: 4, label: "Granska", soon: true },
+    { id: "edit", n: 4, label: "Redigera", done: false, enabled: hasProps },
     { id: "export", n: 5, label: "Exportera", done: false, enabled: hasProps },
   ];
 }
@@ -442,8 +454,8 @@ function renderTop() {
   const info = state.info || {};
   const chip = `<span class="chip-status" title="Videokodning och motivigenkänning"><i style="background:${info.hw_encoder ? "var(--good)" : "var(--warn)"}"></i>${esc(info.encoder || "")} · ${info.clip_ai ? "AI på" : "AI saknas"}</span>`;
   $("#topActions").innerHTML = remote()
-    ? `<span class="chip-status"><i></i>Ansluten via wifi</span>`
-    : `${chip}<button class="btn small" data-act="lan" title="Styr DeHazeIQ från mobil eller surfplatta">${icon("phone", 15)}Mobil</button>`;
+    ? `${queueButton()}<span class="chip-status"><i></i>Ansluten via wifi</span>`
+    : `${chip}${queueButton()}<button class="btn small" data-act="lan" title="Styr DeHazeIQ från mobil eller surfplatta">${icon("phone", 15)}Mobil</button>`;
 }
 
 /* ---------- vy: importera ---------- */
@@ -699,7 +711,7 @@ function propCard(p, idx) {
     phone = `<div class="frames">${fr}</div>`;
     phone += busyHere
       ? `<div class="busy"><div class="spinner"></div><span data-live-text>${esc(j.message || "Renderar …")}</span><span class="num" data-live-pct>${Math.round((j.progress || 0) * 100)} %</span></div>`
-      : `<button class="play" data-preview="${p.id}" aria-label="Skapa och spela förhandsvisning" ${running() ? "disabled" : ""}>${icon("play", 20)}</button>`;
+      : `<button class="play" data-preview="${p.id}" aria-label="Skapa och spela förhandsvisning">${icon("play", 20)}</button>`;
   }
   const strip = shots.map((s) => `<img alt="" loading="lazy" style="flex:${s.duration} 1 0" src="${frameUrl(s.clip_id, s.src_start + s.duration / 2, 120)}">`).join("");
   const wide = p.format === "16:9";
@@ -722,10 +734,11 @@ function propCard(p, idx) {
     <div class="bottom">
       <div class="stack" style="gap:6px"><div class="strip">${strip}</div>
         <div class="strip-legend"><span>Intro</span><span>Uppbyggnad</span><span>Höjdpunkt</span><span>Avslut</span></div></div>
+      ${platformSelect(p)}
       <div class="row" style="flex-wrap:nowrap">
-        ${prev ? `<button class="btn primary" style="flex:1 1 auto" data-export="${p.id}">Exportera</button>`
-               : `<button class="btn primary" style="flex:1 1 auto" data-preview="${p.id}" ${running() ? "disabled" : ""}>Förhandsvisa</button>
-                  <button class="btn" data-export="${p.id}">Exportera</button>`}
+        ${prev ? `<button class="btn primary" style="flex:1 1 auto" data-edit="${p.id}">Redigera</button><button class="btn" data-export="${p.id}">Exportera</button>`
+               : `<button class="btn primary" style="flex:1 1 auto" data-preview="${p.id}" ${busyHere ? "disabled" : ""}>Förhandsvisa</button>
+                  <button class="btn" data-edit="${p.id}">Redigera</button><button class="btn" data-export="${p.id}">Exportera</button>`}
         <button class="btn icon" data-regen="${p.id}" aria-label="Generera om detta förslag" title="Generera om">${icon("redo", 17)}</button>
       </div>
     </div>
@@ -752,8 +765,9 @@ function viewProposals() {
   if (running("auto")) return `<main class="main wide">${autoProgress()}</main>`;
   const s = settings();
   const props = P().proposals || [];
-  const shown = state.shown.map(propById).filter(Boolean);
-  const older = props.filter((p) => !state.shown.includes(p.id));
+  const planList = planProposals();
+  const shown = planList || state.shown.map(propById).filter(Boolean);
+  const older = planList ? [] : props.filter((p) => !state.shown.includes(p.id));
   const favs = clips().filter((c) => c.favorite).length;
   const fmt = FORMAT_INFO.find((f) => f.id === s.format);
   const styleSel = Object.entries(STYLE_INFO).map(([k, v]) => `<button class="chip" data-style="${k}" aria-pressed="${s.style === k}">${v.label}</button>`).join("");
@@ -771,6 +785,7 @@ function viewProposals() {
         <button class="btn" data-act="generate" ${generating || running() ? "disabled" : ""}>${icon("redo", 16)}${generating ? "Skapar …" : "Generera nya förslag"}</button>
       </div>
     </div>
+    ${planTabs() || `<div class="chips"><button class="chip" data-act="setup-project">+ Välj filmtyper: dykfilm, resefilm, reels, djurporträtt</button></div>`}
     <div class="props">${shown.map(propCard).join("") || '<div class="empty">Klicka på "Generera nya förslag".</div>'}</div>
     <section class="box" style="flex-direction:row;flex-wrap:wrap;align-items:center;gap:14px">
       <div class="stack" style="gap:8px;flex:1 1 100%"><b>Berättelse</b><div class="chips">${themeSel}</div></div>
@@ -806,14 +821,15 @@ function viewExport() {
   const main = `<main class="main">
     <div class="head"><h1>Exportera filmen</h1><p class="lead">Renderas från originalfilerna i full kvalitet. En tidslinje (.otio) skapas samtidigt för finredigering.</p></div>
     <section class="stack"><h2>Förslag</h2><div class="stack" style="gap:8px">${choices}</div></section>
+    ${exportPlatforms(p)}
     <section class="stack"><h2>Upplösning</h2><div class="seg" role="group" aria-label="Upplösning" style="grid-template-columns:repeat(3,minmax(0,1fr));max-width:420px">${resBtns}</div>
-      <p class="muted" style="margin:0;font-size:13px">Bildformat ${esc(p.format)}. Byt format genom att generera nya förslag.</p></section>
+      <p class="muted" style="margin:0;font-size:13px">Förslaget är gjort i ${esc(p.format)}. Andra plattformar får en anpassad kopia.</p></section>
     ${busy ? `<div class="progress"><div class="spread" style="font-size:13px"><b data-live-text>${esc(j.message || "")}</b><span class="muted num" data-live-pct>${Math.round((j.progress || 0) * 100)} %</span></div><div class="bar"><div data-live-fill style="width:${(j.progress || 0) * 100}%"></div></div></div>` : ""}
   </main>`;
   const panel = `<aside class="panel" aria-label="Exporterade filer">
     <section class="stack"><h2>Exporterade filer</h2><div class="files">${fileRows || '<p class="muted" style="margin:0">Inga exporter ännu för det här förslaget.</p>'}</div></section>
     <p class="muted" style="margin:0;font-size:12px">Filerna sparas i projektmappen under renders. Kodning: ${esc((state.info && state.info.encoder) || "")}.</p>
-    <button class="btn primary big push" data-act="export" ${running() ? "disabled" : ""}>${busy ? "Exporterar …" : `Exportera ${state.exportRes === "4k" ? "4K" : state.exportRes}`}</button>
+    <button class="btn primary big push" data-act="export-queue" ${state.exportPlats && state.exportPlats.length ? "" : "disabled"}>Lägg ${state.exportPlats && state.exportPlats.length > 1 ? `${state.exportPlats.length} exporter` : "exporten"} i kön (${state.exportRes === "4k" ? "4K" : state.exportRes})</button>
   </aside>`;
   return main + panel;
 }
@@ -845,6 +861,8 @@ async function setLan(enable) {
 function render() {
   renderTop();
   const v = $("#view");
+  if (state.view === "setup" && state.setup) { v.innerHTML = viewSetup(); return; }
+  if (state.view === "queue") { v.innerHTML = viewQueue(); return; }
   if (!P()) {
     v.innerHTML = `<main class="main" style="max-width:600px;margin:56px auto;align-items:center">
       <div class="hero"><img src="/static/logo.png" alt="DeHazeIQ">
@@ -855,7 +873,8 @@ function render() {
         <form class="pathrow" id="welcomePath"><label class="sr" for="welcomeInput">Sökväg</label><input class="field" id="welcomeInput" placeholder="… eller klistra in en sökväg"><button class="btn" type="submit">Starta</button></form>`}</div></main>`;
     return;
   }
-  const views = { import: viewImport, analyze: viewAnalyze, proposals: viewProposals, export: viewExport };
+  const views = { import: viewImport, analyze: viewAnalyze, proposals: viewProposals, export: viewExport,
+    queue: viewQueue, setup: viewSetup, edit: viewEdit };
   v.innerHTML = (views[state.view] || viewImport)();
 }
 

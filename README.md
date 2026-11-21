@@ -1,4 +1,4 @@
-# DeHazeIQ – AI-powered video editing, without the hassle (v0.9)
+# DeHazeIQ – AI-powered video editing, without the hassle (v0.10)
 
 Lokalt AI-videoredigeringsprogram för dyk-, natur- och resefilm. Fungerar på **Mac och Windows**,
 och kan styras från **mobil och surfplatta** via wifi.
@@ -103,6 +103,25 @@ varje sekvens, och klippens tidsstämplar delar materialet i dyk (mer än 40 min
 = nytt dyk). Med *AI väljer berättelser* blir de tre förslagen tre olika teman; väljer du ett tema
 blir det tre versioner av samma berättelse. Varje ny generering väljer helst teman som inte
 användes de senaste gångerna, så att du får variation.
+
+## Filmtyper, plattformar och kö
+
+- **Välj filmtyp från start:** dykfilm, resefilm, reels och shorts, djurporträtt eller "Låt AI välja",
+  en eller flera, med plattform, längd och antal förslag för varje.
+- **Plattform per förslag:** Instagram Reels, TikTok, YouTube Shorts, YouTube, Instagram-flöde,
+  Facebook eller kvadrat. Format, längd och beskärning anpassas automatiskt. En film kan exporteras
+  till flera plattformar på en gång.
+- **Jobbkö:** import, analys, förslag, förhandsvisningar och exporter körs ett i taget i bakgrunden,
+  även från flera projekt. Ordningen kan ändras, jobb kan avbrytas och kön pausas.
+
+## Redigera i programmet
+
+Tidslinje med alla klipp. För valt klipp: längd (fäster på takten), slowmotion, snabbspolning,
+frysbild, långsam zoom, zoomryck, flytta utsnittet genom att klicka i originalbilden, byta mot en
+liknande sekvens som AI:n föreslår, flytta och ta bort. Fliken **Färg** har utseenden (bland annat
+svartvitt, sepia, film, varm, kall och livlig) med styrka, samt exponering, kontrast, mättnad,
+temperatur, nyans, skärpa och vinjett – för hela filmen eller ett klipp, med före/efter. Fliken
+**Text** ändrar titeln. Allt kan ångras.
 
 ## Effekter
 

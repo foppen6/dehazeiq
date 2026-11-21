@@ -20,8 +20,8 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import cv2
 
-from . import TAGLINE, __version__, ai, effects, media, pipeline, tagging, vlm
-from .config import FORMATS, HOME, PROJECTS_DIR, STYLES
+from . import TAGLINE, __version__, ai, editor, effects, generator, media, pipeline, render, tagging, vlm
+from .config import FILM_TYPES, FORMATS, HOME, LOOKS, PLATFORMS, PROJECTS_DIR, STYLES
 from .project import JOBS, Project, auto_name, save_default_settings
 
 WEB = Path(__file__).parent / "web"
@@ -246,6 +246,28 @@ def frame_jpeg(p: Project, cid: str, t: float, width: int) -> bytes:
 
 # ---------- HTTP ----------
 
+def _clean_plans(plans):
+    out = []
+    for pl in plans or []:
+        if not isinstance(pl, dict) or pl.get("type") not in FILM_TYPES:
+            continue
+        ft = FILM_TYPES[pl["type"]]
+        plat = pl.get("platform") if pl.get("platform") in PLATFORMS else ft["platform"]
+        try:
+            count = max(1, min(12, int(pl.get("count") or ft["count"])))
+            length = float(pl.get("length") or PLATFORMS[plat]["length"])
+        except (TypeError, ValueError):
+            continue
+        out.append({"type": pl["type"], "platform": plat, "count": count, "length": max(5.0, min(length, 900.0))})
+    return out
+
+
+def _auto_label(plans):
+    if not plans:
+        return "Import, analys och förslag"
+    return "Import, analys och " + ", ".join(FILM_TYPES[p["type"]]["label"].lower() for p in plans)
+
+
 def _vlm_download():
     try:
         vlm.download()
@@ -430,11 +452,15 @@ class Handler(BaseHTTPRequestHandler):
                 "hw_encoder": bool(media.hw_encoder()), "clip_ai": tagging.AVAILABLE or ai.available(),
                 "projects_dir": str(PROJECTS_DIR),
                 "analysis_version": pipeline.target_version(),
+                "platforms": PLATFORMS, "film_types": FILM_TYPES,
+                "looks": {k: v["label"] for k, v in LOOKS.items()},
                 "styles": {k: {"label": v["label"], "avg_shot": v["avg_shot"]} for k, v in STYLES.items()},
                 "formats": list(FORMATS),
             })
         if api == ["projects"]:
             return self._json(Project.list_all())
+        if api == ["queue"]:
+            return self._json(JOBS.queue())
         if api == ["vlm"]:
             return self._json(vlm.status())
         if len(api) >= 2 and api[0] == "p":
@@ -445,6 +471,21 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(JOBS.status(p.id))
             if api[2:] == ["themes"]:
                 return self._json(pipeline.themes(p.id))
+            if len(api) == 5 and api[2] == "proposal" and api[4] == "still":
+                prop = p.proposal(api[3])
+                if not prop:
+                    raise ApiError("Förslaget finns inte", HTTPStatus.NOT_FOUND)
+                i = int((q.get("i") or ["0"])[0])
+                if not 0 <= i < len(prop["shots"]):
+                    raise ApiError("Klippet finns inte", HTTPStatus.NOT_FOUND)
+                at = float((q.get("at") or ["0.5"])[0])
+                w = max(120, min(1080, int((q.get("w") or ["480"])[0])))
+                graded = (q.get("graded") or ["1"])[0] != "0"
+                try:
+                    data = render.still(p, prop, i, at, w, graded)
+                except Exception as e:  # noqa: BLE001
+                    raise ApiError(f"Bilden kunde inte tas fram: {e}")
+                return self._send(HTTPStatus.OK, data, "image/jpeg", {"Cache-Control": "no-store"})
             if api[2:] == ["frame"]:
                 cid = (q.get("clip") or [""])[0]
                 if cid not in p.data["clips"]:
@@ -473,9 +514,30 @@ class Handler(BaseHTTPRequestHandler):
             paths = [str(x) for x in body.get("paths") or [] if str(x).strip()]
             if not paths:
                 raise ApiError("Ange en mapp eller filer")
-            p = Project.create(auto_name(paths))
-            JOBS.start(p.id, "auto", pipeline.auto, p.id, paths)
+            name = (body.get("name") or "").strip()[:80] or auto_name(paths)
+            p = Project.create(name)
+            plans = _clean_plans(body.get("plans"))
+            if plans or "previews" in body:
+                p.reload()
+                st = p.data.setdefault("settings", {})
+                if plans:
+                    st["plans"] = plans
+                st["previews"] = bool(body.get("previews", True))
+                p.save()
+            JOBS.start(p.id, "auto", pipeline.auto, p.id, paths, label=_auto_label(plans),
+                       project_name=p.data["name"])
             return self._json(_project_view(p), HTTPStatus.CREATED)
+        if api == ["queue", "pause"]:
+            JOBS.pause(bool(body.get("paused", True)))
+            return self._json(JOBS.queue())
+        if api == ["queue", "clear"]:
+            JOBS.clear_done()
+            return self._json(JOBS.queue())
+        if len(api) == 3 and api[0] == "queue" and api[2] in ("cancel", "move"):
+            ok = JOBS.cancel(api[1]) if api[2] == "cancel" else JOBS.move(api[1], int(body.get("dir", 1)))
+            if not ok:
+                raise ApiError("Jobbet finns inte i kön", HTTPStatus.NOT_FOUND)
+            return self._json(JOBS.queue())
         if api == ["choose"]:
             if self.is_remote:
                 raise ApiError("Välj filer på datorn – dialogen öppnas där.", HTTPStatus.FORBIDDEN)
@@ -507,15 +569,23 @@ class Handler(BaseHTTPRequestHandler):
             paths = [str(x) for x in body.get("paths") or [] if str(x).strip()]
             if not paths:
                 raise ApiError("Ange en mapp eller filer")
-            if JOBS.busy(p.id):
-                raise ApiError(busy_msg, HTTPStatus.CONFLICT)
-            JOBS.start(p.id, "auto", pipeline.auto, p.id, paths)
+            JOBS.start(p.id, "auto", pipeline.auto, p.id, paths, label="Import, analys och förslag",
+                       project_name=p.data["name"])
             return self._json({"ok": True})
         if action == ["auto"]:
-            if JOBS.busy(p.id):
-                raise ApiError(busy_msg, HTTPStatus.CONFLICT)
-            JOBS.start(p.id, "auto", pipeline.auto, p.id, None)
+            JOBS.start(p.id, "auto", pipeline.auto, p.id, None, label="Analys och förslag",
+                       project_name=p.data["name"])
             return self._json({"ok": True})
+        if action == ["plans"]:
+            plans = _clean_plans(body.get("plans"))
+            p.reload()
+            p.data.setdefault("settings", {})["plans"] = plans
+            p.save()
+            if body.get("run") and plans:
+                JOBS.start(p.id, "plans", pipeline.generate_plans, p.id, plans, bool(body.get("previews", True)),
+                           label="Förslag: " + ", ".join(FILM_TYPES[x["type"]]["label"].lower() for x in plans),
+                           project_name=p.data["name"])
+            return self._json({"plans": plans})
         if action == ["diagnostics"]:
             out = pipeline.diagnostics(p.id)
             if not self.is_remote:
@@ -530,21 +600,22 @@ class Handler(BaseHTTPRequestHandler):
         if action == ["delete"]:
             if self.is_remote:
                 raise ApiError("Projekt tas bort på datorn.", HTTPStatus.FORBIDDEN)
-            if JOBS.busy(p.id):
+            if JOBS.running_now(p.id):
                 raise ApiError(busy_msg, HTTPStatus.CONFLICT)
+            for t in JOBS.queue()["tasks"]:
+                if t["pid"] == p.id:
+                    JOBS.cancel(t["id"])
             p.delete()
             return self._json({"deleted": p.id})
         if action == ["analyze"]:
-            if JOBS.busy(p.id):
-                raise ApiError(busy_msg, HTTPStatus.CONFLICT)
-            JOBS.start(p.id, "analyze", pipeline.analyze_all, p.id, bool(body.get("redo")))
+            JOBS.start(p.id, "analyze", pipeline.analyze_all, p.id, bool(body.get("redo")),
+                       label="Analys" + (" och djupanalys" if vlm.ready() else ""), project_name=p.data["name"])
             return self._json({"ok": True})
         if action == ["deep"]:
-            if JOBS.busy(p.id):
-                raise ApiError(busy_msg, HTTPStatus.CONFLICT)
             if not vlm.ready():
                 raise ApiError("Ladda ner modellen för djupanalys först")
-            JOBS.start(p.id, "deep", pipeline.deep_analyze, p.id, bool(body.get("redo")))
+            JOBS.start(p.id, "deep", pipeline.deep_analyze, p.id, bool(body.get("redo")),
+                       label="Djupanalys", project_name=p.data["name"])
             return self._json({"ok": True})
         if action == ["music"]:
             info = pipeline.set_music(p.id, body.get("path"))
@@ -603,10 +674,45 @@ class Handler(BaseHTTPRequestHandler):
                 res = body.get("resolution", "preview")
                 if res not in ("preview", "720p", "1080p", "4k"):
                     raise ApiError("Okänd upplösning")
-                if JOBS.busy(p.id):
-                    raise ApiError(busy_msg, HTTPStatus.CONFLICT)
-                JOBS.start(p.id, f"render:{res}:{prop_id}", pipeline.render_proposal, p.id, prop_id, res)
+                prop = p.proposal(prop_id)
+                what = "Förhandsvisning" if res == "preview" else f"Export {res}"
+                JOBS.start(p.id, f"render:{res}:{prop_id}", pipeline.render_proposal, p.id, prop_id, res,
+                           label=f"{what} · {prop.get('title') or prop['style_label']}", project_name=p.data["name"],
+                           front=res == "preview")
                 return self._json({"ok": True})
+            if verb == "export":
+                res = body.get("resolution", "1080p")
+                if res not in ("720p", "1080p", "4k"):
+                    raise ApiError("Okänd upplösning")
+                plats = [x for x in body.get("platforms") or [] if x in PLATFORMS]
+                if not plats:
+                    raise ApiError("Välj minst en plattform")
+                prop = p.proposal(prop_id)
+                for pf in plats:
+                    JOBS.start(p.id, f"render:{res}:{prop_id}", pipeline.export_for, p.id, prop_id, pf, res,
+                               label=f"Export {PLATFORMS[pf]['label']} · {prop.get('title') or prop['style_label']}",
+                               project_name=p.data["name"])
+                return self._json({"queued": len(plats)})
+            if verb == "edit":
+                try:
+                    return self._json({"proposal": pipeline.edit_proposal(p.id, prop_id, body.get("op"),
+                                                                          body.get("args") or {})})
+                except (editor.EditError, RuntimeError) as e:
+                    raise ApiError(str(e))
+            if verb == "platform":
+                pf = body.get("platform")
+                if pf not in PLATFORMS:
+                    raise ApiError("Okänd plattform")
+                try:
+                    return self._json({"proposal": pipeline.set_platform(p.id, prop_id, pf, body.get("length"))})
+                except (editor.EditError, RuntimeError, generator.GenerateError) as e:
+                    raise ApiError(str(e))
+            if verb == "alternatives":
+                try:
+                    return self._json({"alternatives": editor.alternatives(p, p.proposal(prop_id),
+                                                                         int(body.get("i", 0)))})
+                except editor.EditError as e:
+                    raise ApiError(str(e))
             if verb == "reveal":
                 name = body.get("file", "")
                 f = (p.renders / name).resolve()

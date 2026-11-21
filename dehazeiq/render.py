@@ -5,7 +5,9 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from .config import COLOR_PROFILES, FORMATS, OUTPUT_FPS, RESOLUTIONS, STYLES
+import numpy as np
+
+from .config import COLOR_PROFILES, FORMATS, GRADE_KEYS, LOOKS, OUTPUT_FPS, RESOLUTIONS, STYLES
 from . import effects as fx_mod
 from .media import MediaError, ffmpeg, run, video_encoder_args
 
@@ -81,8 +83,54 @@ def _title_filter(text, out_w, out_h, visible):
             f":alpha='{alpha}'")
 
 
+def grade_values(g):
+    """Färgutseende × styrka + egna reglage → värden (se config.LOOKS)."""
+    g = g or {}
+    look = LOOKS.get(g.get("look") or "none", {})
+    k = float(g.get("strength", 1.0))
+    v = {key: float(look.get(key, 0.0)) * k for key in GRADE_KEYS + ("bw", "sepia")}
+    for key in GRADE_KEYS:
+        v[key] += float(g.get(key, 0.0) or 0.0)
+    return v
+
+
+def grade_active(g):
+    if not g:
+        return False
+    v = grade_values(g)
+    return any(abs(x) > 1e-3 for x in v.values())
+
+
+def grade_filter(g):
+    """FFmpeg-filter för färgjusteringen (tom lista om inget är ändrat)."""
+    if not grade_active(g):
+        return []
+    v = grade_values(g)
+    out = []
+    t, tint = v["temperature"], v["tint"]
+    if abs(t) > 1e-3 or abs(tint) > 1e-3:
+        out.append(f"colorchannelmixer=rr={1 + 0.14 * t:.3f}:gg={1 - 0.07 * tint:.3f}:bb={1 - 0.14 * t:.3f}")
+    bw = max(0.0, min(1.0, v["bw"]))
+    sat = max(0.0, 1.0 + v["saturation"]) * (1.0 - bw)
+    br = 0.22 * v["exposure"]
+    con = max(0.2, 1.0 + 0.6 * v["contrast"])
+    if abs(br) > 1e-3 or abs(con - 1) > 1e-3 or abs(sat - 1) > 1e-3:
+        out.append(f"eq=brightness={br:.3f}:contrast={con:.3f}:saturation={sat:.3f}")
+    a = max(0.0, min(1.0, v["sepia"]))
+    if a > 1e-3:
+        out.append("colorchannelmixer="
+                   f"rr={1 - a + a * .393:.3f}:rg={a * .769:.3f}:rb={a * .189:.3f}:"
+                   f"gr={a * .349:.3f}:gg={1 - a + a * .686:.3f}:gb={a * .168:.3f}:"
+                   f"br={a * .272:.3f}:bg={a * .534:.3f}:bb={1 - a + a * .131:.3f}")
+    if v["sharpen"] > 1e-3:
+        out.append(f"unsharp=5:5:{min(2.0, 1.5 * v['sharpen']):.2f}")
+    if v["vignette"] > 1e-3:
+        out.append(f"vignette=angle={0.25 + 0.6 * min(1.0, v['vignette']):.3f}")
+    return out
+
+
 def _shot_filter(shot, src_w, src_h, out_w, out_h, style, wb=True, fade_in=0.0, fade_out=0.0,
-                 fx=None, pad=0.0, vignette=False, title=None):
+                 fx=None, pad=0.0, vignette=False, title=None, grade=None):
     """fx: {"speed": 0.5} slowmotion, {"zoom": 0.05} långsam inzoomning. pad: extra sekunder i slutet
     (för mjuka övergångar). title: text som visas i början (font.ttf/title.txt i arbetsmappen)."""
     fx = fx or {}
@@ -124,9 +172,11 @@ def _shot_filter(shot, src_w, src_h, out_w, out_h, style, wb=True, fade_in=0.0, 
         r, g, b = shot.get("wb_gains", [1, 1, 1])
         if max(abs(r - 1), abs(g - 1), abs(b - 1)) > 0.02:
             parts.append(f"colorchannelmixer=rr={r:.3f}:gg={g:.3f}:bb={b:.3f}")
-    color = COLOR_PROFILES.get(style.get("color", ""))
+    look_set = bool(grade and (grade.get("look") or "none") != "none")
+    color = None if look_set else COLOR_PROFILES.get(style.get("color", ""))
     if color:
         parts.append(color)
+    parts += grade_filter(grade)
     if vignette:
         parts.append("vignette=angle=PI/5")
     if title:
@@ -248,7 +298,8 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
                 vf = _shot_filter(shot, sw, sh, out_w, out_h, style, wb=wb,
                                   fade_in=style["fade"] if i == 0 else 0.0,
                                   fade_out=style["fade"] if i == len(shots) - 1 else 0.0,
-                                  fx=fx, pad=pad, vignette=vignette, title=title)
+                                  fx=fx, pad=pad, vignette=vignette, title=title,
+                                  grade=shot.get("grade") or proposal.get("grade"))
                 read = (out_len - pad - float(fx.get("freeze") or 0.0)) * fx.get("speed", 1.0) + 0.05
                 cmd = [ffmpeg(), "-hide_banner", "-loglevel", "error", "-y",
                        "-ss", f"{shot['src_start']:.3f}", "-t", f"{read:.3f}", "-i", str(src)]
@@ -307,3 +358,48 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
         return out_path
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def still(project, proposal, idx, at=0.5, width=480, graded=True):
+    """En bild ur ett klipp i förslaget, beskuren och färgsatt som i filmen (för redigeringen).
+    at: andel av klippets längd (0..1). Returnerar JPEG-bytes."""
+    import subprocess
+
+    from .media import subprocess_kwargs
+    shot = proposal["shots"][idx]
+    clip = project.data["clips"][shot["clip_id"]]
+    proxy = project.proxy_path(clip["id"])
+    src = proxy if proxy.exists() else Path(clip["path"])
+    sw, sh = (clip.get("proxy_width") or clip["width"], clip.get("proxy_height") or clip["height"]) if proxy.exists() else (clip["width"], clip["height"])
+    out_w, out_h = target_size(proposal["format"], "preview")
+    scale = width / out_w
+    out_w, out_h = int(out_w * scale) // 2 * 2, int(out_h * scale) // 2 * 2
+    speed = float((shot.get("fx") or {}).get("speed", 1.0))
+    rel = max(0.0, min(0.999, at)) * shot["duration"] * speed
+    t = shot["src_start"] + rel
+    # beskärningens position vid den tiden (banan är styckvis linjär)
+    cx, cy = shot.get("cx", 0.5), shot.get("cy", 0.5)
+    path = shot.get("path") or []
+    if path:
+        ts = [k[0] for k in path]
+        cx = float(np.interp(rel, ts, [k[1] for k in path]))
+        cy = float(np.interp(rel, ts, [k[2] for k in path]))
+    cw, ch, x, y = crop_box(sw, sh, out_w, out_h, cx, cy)
+    style = STYLES[proposal["style"]]
+    parts = [f"crop={cw}:{ch}:{x}:{y}", f"scale={out_w}:{out_h}:flags=bicubic", "setsar=1"]
+    if graded:
+        r, g, b = shot.get("wb_gains", [1, 1, 1])
+        if max(abs(r - 1), abs(g - 1), abs(b - 1)) > 0.02:
+            parts.append(f"colorchannelmixer=rr={r:.3f}:gg={g:.3f}:bb={b:.3f}")
+        grade = shot.get("grade") or proposal.get("grade")
+        look_set = bool(grade and (grade.get("look") or "none") != "none")
+        color = None if look_set else COLOR_PROFILES.get(style.get("color", ""))
+        if color:
+            parts.append(color)
+        parts += grade_filter(grade)
+    cmd = [ffmpeg(), "-hide_banner", "-loglevel", "error", "-ss", f"{t:.3f}", "-i", str(src),
+           "-frames:v", "1", "-vf", ",".join(parts), "-f", "image2", "-c:v", "mjpeg", "-q:v", "4", "pipe:1"]
+    r = subprocess.run(cmd, capture_output=True, timeout=60, **subprocess_kwargs())
+    if r.returncode != 0 or not r.stdout:
+        raise MediaError(r.stderr.decode("utf-8", "replace")[-400:])
+    return r.stdout

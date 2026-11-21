@@ -1,0 +1,499 @@
+/* DeHazeIQ – kö, filmtyper, plattformar och redigering. Delar globala hjälpare med app.js. */
+"use strict";
+
+const FT_ICON = {
+  auto: '<path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/>',
+  dive: '<path d="M2 14c2.5 0 2.5-3 5-3s2.5 3 5 3 2.5-3 5-3 2.5 3 5 3"/><path d="M2 19c2.5 0 2.5-3 5-3s2.5 3 5 3 2.5-3 5-3 2.5 3 5 3" opacity=".5"/>',
+  trip: '<path d="M2 16l20-7-20-7 4 7-4 7z"/>',
+  reels: '<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>',
+  animal: '<path d="M3 12c3-5 10-6 14-2l4-3v10l-4-3c-4 4-11 3-14-2z"/><path d="M8 11h.01"/>',
+};
+const FT_DESC = {
+  auto: "AI läser materialet och föreslår den mix av berättelser som passar bäst.",
+  dive: "Ett dyk som en berättelse: nedstigning, möten och uppstigning.",
+  trip: "Hela resan i kapitel per dag eller dyk, i tidsordning.",
+  reels: "Korta, snabba filmer i takt till musik – flera olika varianter.",
+  animal: "En film per djur: bläckfisken, krabban, sköldpaddan …",
+};
+const svgi = (p, s = 18) => `<svg aria-hidden="true" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
+const ICO = {
+  list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+  up: '<path d="m6 15 6-6 6 6"/>', down: '<path d="m6 9 6 6 6-6"/>', x: '<path d="M6 6l12 12M18 6 6 18"/>',
+  pause: '<path d="M8 5v14M16 5v14"/>', check: '<path d="m5 12 5 5L20 7"/>', undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>',
+  left: '<path d="m15 6-6 6 6 6"/>', right: '<path d="m9 6 6 6-6 6"/>', swap: '<path d="M7 4 3 8l4 4"/><path d="M3 8h14"/><path d="m17 20 4-4-4-4"/><path d="M21 16H7"/>',
+  scissors: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12"/>',
+  target: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/>',
+};
+const platforms = () => (state.info && state.info.platforms) || {};
+const filmTypes = () => (state.info && state.info.film_types) || {};
+const LOOK_CSS = {
+  none: "none", natural: "saturate(1.1) contrast(1.05)", underwater: "saturate(1.3) sepia(.12) brightness(1.05)",
+  warm: "sepia(.3) saturate(1.2)", cold: "hue-rotate(12deg) saturate(1.05) brightness(1.02)", vivid: "saturate(1.6) contrast(1.1)",
+  film: "contrast(1.15) saturate(.75) sepia(.15)", bw: "grayscale(1) contrast(1.15)", bw_soft: "grayscale(1) contrast(.9) brightness(1.06)",
+  sepia: "sepia(.9)",
+};
+const platformLabel = (k) => (platforms()[k] || {}).label || k;
+
+/* ================= kö ================= */
+state.queue = { paused: false, tasks: [], done: [] };
+async function loadQueue() {
+  try {
+    state.queue = await api("GET", "/api/queue");
+    const n = state.queue.tasks.length;
+    const b = document.querySelector("[data-qbadge]");
+    if (b) { b.textContent = n; b.hidden = !n; }
+    if (state.view === "queue") $("#view").innerHTML = viewQueue();
+  } catch (_) { /* tyst */ }
+}
+setInterval(loadQueue, 2500);
+
+function queueButton() {
+  const n = (state.queue.tasks || []).length;
+  return `<button class="btn small" data-act="queue" title="Jobbkö">${svgi(ICO.list, 15)}Kö<span class="qbadge num" data-qbadge ${n ? "" : "hidden"}>${n}</span></button>`;
+}
+
+function viewQueue() {
+  const q = state.queue;
+  const rows = (q.tasks || []).map((t, i) => {
+    const run = t.state === "running";
+    const pct = Math.round((t.progress || 0) * 100);
+    return `<div class="qrow ${run ? "run" : ""}">
+      <span class="qico">${run ? '<span class="spinner" style="width:18px;height:18px"></span>' : `<span class="num muted">${i + 1}</span>`}</span>
+      <div class="stack" style="gap:5px;min-width:0"><b>${esc(t.label)}</b><span class="muted" style="font-size:13px">${esc(t.project)} · ${esc(run ? t.message || "" : (q.paused ? "Kön är pausad" : "Väntar"))}</span>
+        ${run ? `<div class="bar"><div style="width:${pct}%"></div></div>` : ""}</div>
+      <span class="num muted" style="font-size:13px">${run ? `${pct} %` : ""}</span>
+      <span class="row" style="gap:6px;flex-wrap:nowrap">
+        ${run ? "" : `<button class="btn icon small" data-qmove="${t.id}" data-dir="-1" aria-label="Flytta upp" ${i <= 1 && q.tasks[0].state === "running" && i === 1 ? "" : ""}>${svgi(ICO.up, 15)}</button>
+        <button class="btn icon small" data-qmove="${t.id}" data-dir="1" aria-label="Flytta ned">${svgi(ICO.down, 15)}</button>`}
+        <button class="btn icon small" data-qcancel="${t.id}" aria-label="${run ? "Avbryt" : "Ta bort ur kön"}" title="${run ? "Avbryt" : "Ta bort ur kön"}">${svgi(ICO.x, 15)}</button></span>
+    </div>`;
+  }).join("");
+  const done = (q.done || []).map((t) => {
+    const ok = t.state === "done";
+    const when = t.finished ? new Date(t.finished * 1000).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" }) : "";
+    return `<div class="drow"><span style="color:${ok ? "var(--good)" : t.state === "cancelled" ? "var(--muted)" : "var(--bad)"}">${svgi(ok ? ICO.check : ICO.x, 16)}</span>
+      <span class="grow"><b style="font-weight:600">${esc(t.label)}</b><span class="muted"> · ${esc(t.project)}</span>${!ok ? `<br><small class="muted">${esc(t.message || "")}</small>` : ""}</span>
+      <span class="muted num" style="font-size:13px">${when}</span><button class="btn small" data-qopen="${esc(t.pid)}">Öppna</button></div>`;
+  }).join("");
+  return `<main class="main wide" style="max-width:1000px">
+    <div class="spread"><div class="head"><h1>Jobbkö</h1><p class="lead">Ett jobb i taget i bakgrunden – du kan stänga fönstret eller jobba med annat. Ordningen går att ändra.</p></div>
+      <div class="row"><button class="btn" data-act="qpause">${svgi(q.paused ? '<path d="M8 5v14l11-7z"/>' : ICO.pause, 16)}${q.paused ? "Fortsätt kön" : "Pausa kön"}</button>
+      ${P() ? `<button class="btn primary" data-act="setup-project">Nya filmer av ${esc(P().name)}</button>` : ""}</div></div>
+    <section class="stack" style="gap:10px"><span class="eyebrow">Pågår och väntar</span>${rows || '<div class="empty">Kön är tom.</div>'}</section>
+    ${done ? `<section class="stack" style="gap:4px"><div class="spread"><span class="eyebrow">Klart</span><button class="btn small" data-act="qclear">Rensa listan</button></div>${done}</section>` : ""}
+  </main>`;
+}
+
+/* ================= ny film: välj filmtyper ================= */
+function defaultPlans() {
+  return { auto: { on: true }, dive: { on: false }, trip: { on: false }, reels: { on: false }, animal: { on: false } };
+}
+function viewSetup() {
+  const su = state.setup || (state.setup = { mode: "project", plans: defaultPlans() });
+  const fts = filmTypes();
+  const pfs = platforms();
+  const cards = Object.entries(fts).map(([k, ft]) => {
+    const pl = su.plans[k] || (su.plans[k] = { on: false });
+    const on = !!pl.on;
+    return `<button class="ftcard" data-ft="${k}" aria-pressed="${on}">
+      <span class="ftmark">${on ? svgi(ICO.check, 14) : ""}</span>
+      <span class="ftico">${svgi(FT_ICON[k] || FT_ICON.auto, 22)}</span><b>${esc(ft.label)}</b><span class="muted">${esc(FT_DESC[k] || "")}</span></button>`;
+  }).join("");
+  const opts = Object.entries(fts).filter(([k]) => (su.plans[k] || {}).on).map(([k, ft]) => {
+    const pl = su.plans[k];
+    const plat = pl.platform || ft.platform;
+    const len = pl.length || (pfs[plat] || {}).length || 30;
+    const count = pl.count || ft.count;
+    const lens = [15, 30, 45, 60, 90, 180, 300].map((s) => `<option value="${s}" ${Number(len) === s ? "selected" : ""}>${s < 60 ? `${s} s` : `${s / 60} min`}</option>`).join("");
+    return `<div class="ftopt"><b>${esc(ft.label)}</b>
+      <label>Gör för<select data-ftplat="${k}">${Object.entries(pfs).map(([pk, pf]) => `<option value="${pk}" ${pk === plat ? "selected" : ""}>${esc(pf.label)} · ${pf.format}</option>`).join("")}</select></label>
+      <label>Längd<select data-ftlen="${k}">${lens}</select></label>
+      <label>Antal förslag<select data-ftcount="${k}">${[1, 2, 3, 4, 6, 8, 10].map((n) => `<option ${n === Number(count) ? "selected" : ""}>${n}</option>`).join("")}</select></label></div>`;
+  }).join("");
+  const isNew = su.mode === "new";
+  const nOn = Object.values(su.plans).filter((p) => p.on).length;
+  return `<main class="main wide" style="max-width:1200px">
+    <div class="head"><h1>Vad vill du göra av materialet?</h1>
+      <p class="lead">Välj en eller flera. AI:n ${isNew ? "analyserar först och " : ""}gör förslag av varje sort. Allt läggs i kön och körs i bakgrunden.</p></div>
+    <div class="ftgrid">${cards}</div>
+    ${opts ? `<section class="box stack" style="gap:14px">${opts}</section>` : ""}
+    <section class="box" style="flex-direction:row;flex-wrap:wrap;align-items:center;gap:16px">
+      ${isNew ? `<label class="stack" style="gap:6px;flex:1 1 260px;font-size:13px;color:var(--text-2)">Projektnamn (kan ändras senare)<input class="field" id="setupName" value="${esc(su.name || "")}" placeholder="Namnges efter mappen"></label>
+        <span class="muted" style="font-size:13px">${su.paths.length === 1 ? esc(su.paths[0]) : `${su.paths.length} filer/mappar`}</span>` : ""}
+      <label class="row" style="gap:10px;color:var(--text-2)"><input type="checkbox" id="setupPrev" ${su.previews === false ? "" : "checked"} style="width:18px;height:18px;accent-color:var(--accent)">Gör förhandsvisningar direkt</label>
+      <span class="grow"></span>
+      <button class="btn" data-act="setup-cancel">Avbryt</button>
+      <button class="btn primary big" data-act="setup-go" ${nOn ? "" : "disabled"}>${svgi(ICO.list, 17)}Lägg i kön och starta</button>
+    </section>
+  </main>`;
+}
+
+function setupPlans() {
+  const su = state.setup;
+  return Object.entries(su.plans).filter(([, p]) => p.on).map(([k, p]) => ({
+    type: k, platform: p.platform || filmTypes()[k].platform, length: p.length || null, count: p.count || null,
+  }));
+}
+
+async function setupGo() {
+  const su = state.setup;
+  const plans = setupPlans();
+  const previews = $("#setupPrev") ? $("#setupPrev").checked : true;
+  try {
+    if (su.mode === "new") {
+      const name = $("#setupName") ? $("#setupName").value.trim() : "";
+      const p = await api("POST", "/api/import", { paths: su.paths, plans, previews, name });
+      state.expectJob = true;
+      await loadProjects();
+      await loadProject(p.id);
+      state.view = "proposals";
+      await pollJob();
+    } else {
+      await api("POST", `/api/p/${state.pid}/plans`, { plans, run: true, previews });
+      state.expectJob = true;
+      state.view = "proposals";
+      await pollJob();
+    }
+    state.setup = null;
+    toast("Lagt i kön. Du kan jobba med annat under tiden.", true);
+    loadQueue();
+    render();
+  } catch (e) { fail(e); }
+}
+
+/* ================= förslag: filmtyp och plattform ================= */
+function planTabs() {
+  const props = (P() && P().proposals) || [];
+  const plans = [];
+  props.forEach((p) => { if (p.plan && !plans.includes(p.plan)) plans.push(p.plan); });
+  if (!plans.length) return "";
+  if (!state.planTab || (state.planTab !== "all" && !plans.includes(state.planTab))) state.planTab = plans[0];
+  const n = (k) => props.filter((p) => p.plan === k).length;
+  return `<div class="chips" role="tablist" aria-label="Filmtyp">${plans.map((k) => `<button class="chip" role="tab" data-plantab="${k}" aria-pressed="${state.planTab === k}">${esc((filmTypes()[k] || {}).label || k)} <span class="muted">· ${n(k)}</span></button>`).join("")}
+    <button class="chip" data-plantab="all" aria-pressed="${state.planTab === "all"}">Alla</button>
+    <button class="chip" data-act="setup-project">+ Fler filmtyper</button></div>`;
+}
+
+function planProposals() {
+  const props = (P() && P().proposals) || [];
+  if (!props.some((p) => p.plan)) return null;
+  const list = state.planTab === "all" ? props : props.filter((p) => p.plan === state.planTab);
+  return list;
+}
+
+function platformSelect(p) {
+  const pfs = platforms();
+  const cur = p.platform || Object.keys(pfs).find((k) => pfs[k].format === p.format) || "";
+  return `<label class="platsel"><span class="sr">Gör för</span><select data-platform="${p.id}" ${running() ? "" : ""}>
+    ${cur ? "" : `<option value="">${esc(p.format)}</option>`}
+    ${Object.entries(pfs).map(([k, pf]) => `<option value="${k}" ${k === cur ? "selected" : ""}>${esc(pf.label)} · ${pf.format}</option>`).join("")}</select></label>`;
+}
+
+async function changePlatform(propId, platform) {
+  if (!platform) return;
+  toast(`Anpassar för ${platformLabel(platform)} …`, true);
+  try {
+    const r = await api("POST", `/api/p/${state.pid}/proposal/${propId}/platform`, { platform });
+    const ps = P().proposals;
+    const i = ps.findIndex((x) => x.id === propId);
+    if (i >= 0) ps[i] = r.proposal;
+    toast(`Klart: ${platformLabel(platform)} · ${r.proposal.format} · ${fmtDur(r.proposal.length)}`, true);
+    render();
+  } catch (e) { fail(e); }
+}
+
+/* export till flera plattformar */
+state.exportPlats = null;
+function exportPlatforms(p) {
+  const pfs = platforms();
+  const cur = p.platform || Object.keys(pfs).find((k) => pfs[k].format === p.format);
+  if (!state.exportPlats || state.exportPlatsFor !== p.id) { state.exportPlats = cur ? [cur] : []; state.exportPlatsFor = p.id; }
+  return `<section class="stack"><h2>Plattformar</h2>
+    <p class="muted" style="margin:0;font-size:13px">Välj en eller flera. Filmen anpassas automatiskt (format, längd och beskärning) och varje export läggs i kön.</p>
+    <div class="chips">${Object.entries(pfs).map(([k, pf]) => `<button class="chip" data-explat="${k}" aria-pressed="${state.exportPlats.includes(k)}">${esc(pf.label)} <span class="muted">· ${pf.format}</span></button>`).join("")}</div></section>`;
+}
+
+async function exportQueued() {
+  const p = propById(state.exportProp);
+  if (!p) return;
+  try {
+    const r = await api("POST", `/api/p/${state.pid}/proposal/${p.id}/export`, { platforms: state.exportPlats, resolution: state.exportRes });
+    toast(`${r.queued} export${r.queued === 1 ? "" : "er"} lagda i kön.`, true);
+    state.expectJob = true;
+    loadQueue();
+    await pollJob();
+    render();
+  } catch (e) { fail(e); }
+}
+
+/* ================= redigering ================= */
+state.ed = { prop: null, i: 0, tab: "clip", scope: "film", alts: null, before: false, stamp: Date.now() };
+const edProp = () => propById(state.ed.prop);
+const stillUrl = (p, i, graded = true, w = 540) => `/api/p/${state.pid}/proposal/${p.id}/still?i=${i}&at=0.45&w=${w}&graded=${graded ? 1 : 0}&s=${state.ed.stamp}`;
+
+function openEditor(propId) {
+  state.ed = { prop: propId, i: 0, tab: "clip", scope: "film", alts: null, before: false, stamp: Date.now() };
+  state.view = "edit";
+  render();
+}
+
+async function edit(op, args = {}, { quiet = false } = {}) {
+  const p = edProp();
+  if (!p) return;
+  try {
+    const r = await api("POST", `/api/p/${state.pid}/proposal/${p.id}/edit`, { op, args });
+    const ps = P().proposals;
+    const k = ps.findIndex((x) => x.id === p.id);
+    if (k >= 0) ps[k] = r.proposal;
+    state.ed.i = Math.min(state.ed.i, r.proposal.shots.length - 1);
+    state.ed.stamp = Date.now();
+    if (op === "swap" || op === "delete" || op === "move" || op === "undo") state.ed.alts = null;
+    if (!quiet) render(); else refreshStill();
+  } catch (e) { fail(e); }
+}
+
+function refreshStill() {
+  const p = edProp();
+  if (!p) return;
+  const img = $("#edStill");
+  if (img) img.src = stillUrl(p, state.ed.i, !state.ed.before);
+  const tl = $("#edTimeline");
+  if (tl) tl.outerHTML = edTimeline(p);
+}
+
+function curGrade(p) {
+  const s = p.shots[state.ed.i] || {};
+  const g = state.ed.scope === "shot" ? (s.grade || p.grade) : p.grade;
+  return Object.assign({ look: "none", strength: 1, exposure: 0, contrast: 0, saturation: 0, temperature: 0, tint: 0, sharpen: 0, vignette: 0 }, g || {});
+}
+
+function edTimeline(p) {
+  const total = p.shots.reduce((a, s) => a + s.duration, 0) || 1;
+  const blocks = p.shots.map((s, i) => {
+    const fx = s.fx || {};
+    const tags = [fx.speed > 1 ? "2×" : "", fx.speed && fx.speed < 1 ? "0,5×" : "", fx.freeze ? "Frys" : "", fx.zoom ? "Zoom" : "", fx.punch ? "Ryck" : "", s.grade ? "Färg" : "", s.manual_center ? "Flyttad" : ""].filter(Boolean);
+    return `<button class="tlblock ${i === state.ed.i ? "sel" : ""}" data-edshot="${i}" style="flex:${s.duration} 1 0" aria-label="Klipp ${i + 1}, ${dec(s.duration)} sekunder">
+      <img alt="" loading="lazy" src="${frameUrl(s.clip_id, s.src_start + Math.min(s.duration, 1.5), 160)}"><span class="tlnum num">${i + 1}</span><span class="tldur num">${dec(s.duration)} s</span>${tags.length ? `<span class="tltags">${tags.join(" · ")}</span>` : ""}</button>`;
+  }).join("");
+  const title = (p.effects || {}).title;
+  return `<section class="tl" id="edTimeline" aria-label="Tidslinje">
+    ${title ? `<div class="tltrack"><span class="tllab">Text</span><div class="tlrow"><span class="tltitle" style="width:${Math.min(100, 3.4 / total * 100)}%">${esc(title)}</span></div></div>` : ""}
+    <div class="tltrack"><span class="tllab">Video</span><div class="tlrow">${blocks}</div></div>
+    <div class="tltrack"><span class="tllab">Ljud</span><div class="tlrow"><span class="tlaudio">${p.music_name ? `${esc(p.music_name)} · ${dec(p.bpm, 0)} BPM` : "Originalljud"}</span></div></div>
+    <div class="muted num" style="font-size:12px;text-align:right">${p.shots.length} klipp · ${fmtDur(total)}</div></section>`;
+}
+
+function chipBtn(attr, val, label, on) {
+  return `<button class="chip" ${attr}="${val}" aria-pressed="${!!on}">${label}</button>`;
+}
+
+function edInspectorClip(p, s) {
+  const fx = s.fx || {};
+  const speedMode = fx.freeze ? "freeze" : fx.speed > 1 ? "fast" : fx.speed && fx.speed < 1 ? "slow" : "normal";
+  const effect = fx.zoom ? "zoom" : fx.punch ? "punch" : "none";
+  const beat = p.bpm ? 60 / p.bpm : 0.5;
+  const alts = state.ed.alts;
+  return `<div class="stack" style="gap:4px"><span class="eyebrow">Klipp ${state.ed.i + 1} av ${p.shots.length}</span>
+      <b style="font-size:16px">${esc(s.desc || s.label || s.name)}</b>
+      <span class="muted" style="font-size:13px">${esc(s.name)} · ${dec(s.src_start)}–${dec(s.src_end)} s${s.species ? ` · ${esc(s.species)}` : ""}</span></div>
+    <div class="stack" style="gap:8px"><span class="flabel">Längd</span>
+      <div class="row" style="flex-wrap:nowrap"><button class="btn icon small" data-edtrim="${-beat}" aria-label="Kortare">−</button>
+      <input type="range" min="0.5" max="10" step="0.1" value="${s.duration}" data-edlen aria-label="Längd i sekunder" style="flex:1 1 auto;accent-color:var(--accent)">
+      <button class="btn icon small" data-edtrim="${beat}" aria-label="Längre">+</button><span class="num" style="width:48px;text-align:right" data-edlenval>${dec(s.duration)} s</span></div>
+      ${p.bpm ? '<span class="muted" style="font-size:12px">Fäster på musikens takt</span>' : ""}</div>
+    <div class="stack" style="gap:8px"><span class="flabel">Hastighet</span><div class="chips">
+      ${chipBtn("data-edspeed", "slow", "Slowmotion 0,5×", speedMode === "slow")}${chipBtn("data-edspeed", "normal", "Normal", speedMode === "normal")}
+      ${chipBtn("data-edspeed", "fast", "Snabbspola 2×", speedMode === "fast")}${chipBtn("data-edspeed", "freeze", "Frys slutet", speedMode === "freeze")}</div></div>
+    <div class="stack" style="gap:8px"><span class="flabel">Effekt</span><div class="chips">
+      ${chipBtn("data-edfx", "none", "Ingen", effect === "none")}${chipBtn("data-edfx", "zoom", "Långsam zoom", effect === "zoom")}${chipBtn("data-edfx", "punch", "Zoomryck", effect === "punch")}</div></div>
+    <div class="stack" style="gap:8px"><span class="flabel">Motivet i bilden</span>
+      <span class="muted" style="font-size:12px">Klicka i originalbilden till vänster för att flytta utsnittet.</span>
+      ${s.manual_center ? `<button class="btn small" data-act="ed-autocenter">${svgi(ICO.target, 14)}Låt AI följa motivet igen</button>` : ""}</div>
+    <div class="stack" style="gap:8px"><span class="flabel">${svgi(ICO.swap, 14)} Byt mot liknande</span>
+      ${alts === null ? `<button class="btn small" data-act="ed-alts">Visa förslag från AI</button>`
+        : alts === "loading" ? '<span class="muted" style="font-size:13px">Letar …</span>'
+        : alts.length ? `<div class="altgrid">${alts.map((a, k) => `<button class="altbtn" data-edalt="${k}" title="${esc(a.desc || a.name)}"><img alt="" loading="lazy" src="${frameUrl(a.clip_id, a.thumb_t, 200)}"><span>${esc(a.label || a.name)}</span></button>`).join("")}</div>`
+        : '<span class="muted" style="font-size:13px">Inga fler liknande sekvenser.</span>'}</div>
+    <div class="row push"><button class="btn small" data-edmove="-1">${svgi(ICO.left, 14)}Flytta</button><button class="btn small" data-edmove="1">Flytta${svgi(ICO.right, 14)}</button>
+      <span class="grow"></span><button class="btn small danger" data-act="ed-delete">${icon("trash", 14)}Ta bort</button></div>`;
+}
+
+function edInspectorColor(p) {
+  const g = curGrade(p);
+  const looks = (state.info && state.info.looks) || {};
+  const s = p.shots[state.ed.i] || {};
+  const thumb = frameUrl(s.clip_id, s.src_start + Math.min(s.duration, 1.5), 160);
+  const slider = (k, label, lo = -1) => `<label class="sl"><span>${label}</span><input type="range" min="${lo}" max="1" step="0.05" value="${g[k] || 0}" data-edgrade="${k}" style="accent-color:var(--accent)"><span class="num" data-edgv="${k}">${Math.round((g[k] || 0) * 100)}</span></label>`;
+  return `<div class="stack" style="gap:8px"><span class="flabel">Gäller</span><div class="chips">
+      ${chipBtn("data-edscope", "film", "Hela filmen", state.ed.scope === "film")}${chipBtn("data-edscope", "shot", `Klipp ${state.ed.i + 1}`, state.ed.scope === "shot")}</div>
+      ${state.ed.scope === "shot" && s.grade ? `<button class="btn small" data-act="ed-grade-reset">Använd filmens färg för klippet</button>` : ""}</div>
+    <div class="stack" style="gap:8px"><span class="flabel">Utseende</span><div class="lookgrid">
+      ${Object.entries(looks).map(([k, l]) => `<button class="lookbtn" data-edlook="${k}" aria-pressed="${g.look === k}"><img alt="" src="${thumb}" style="filter:${LOOK_CSS[k] || "none"}"><span>${esc(l)}</span></button>`).join("")}</div>
+      ${slider("strength", "Styrka", 0)}</div>
+    <div class="stack" style="gap:6px"><div class="spread" style="align-items:center"><span class="flabel">Justera</span><button class="btn small" data-act="ed-grade-zero">Nollställ</button></div>
+      ${slider("exposure", "Exponering")}${slider("contrast", "Kontrast")}${slider("saturation", "Mättnad")}${slider("temperature", "Temperatur")}${slider("tint", "Nyans")}${slider("sharpen", "Skärpa", 0)}${slider("vignette", "Vinjett", 0)}</div>
+    <p class="muted" style="margin:0;font-size:12px">AI:ns vitbalans för undervatten ligger kvar under din färgsättning. Håll in "Före" för att jämföra.</p>`;
+}
+
+function edInspectorText(p) {
+  const title = (p.effects || {}).title || "";
+  return `<label class="stack" style="gap:6px"><span class="flabel">Titel i början av filmen</span>
+      <input class="field" id="edTitle" value="${esc(title)}" maxlength="80" placeholder="Ingen titel"></label>
+    <div class="row"><button class="btn small primary" data-act="ed-title">Spara titel</button><button class="btn small" data-act="ed-title-clear">Ta bort titel</button></div>
+    <p class="muted" style="margin:0;font-size:12px">Titeln tonas in över första klippet. Slå av eller på den under Effekter i förslagsvyn.</p>`;
+}
+
+function viewEdit() {
+  const p = edProp() || propById(state.shown[0]) || ((P() && P().proposals) || [])[0];
+  if (!p) return `<main class="main"><div class="empty">Skapa ett filmförslag först.</div></main>`;
+  state.ed.prop = p.id;
+  const i = Math.min(state.ed.i, p.shots.length - 1);
+  state.ed.i = i;
+  const s = p.shots[i];
+  const tab = state.ed.tab;
+  const prev = p.renders && p.renders.preview;
+  const busyHere = running(`render:preview:${p.id}`);
+  const tabs = [["clip", "Klipp"], ["color", "Färg"], ["text", "Text"]].map(([k, l]) => `<button role="tab" aria-selected="${tab === k}" aria-pressed="${tab === k}" data-edtab="${k}">${l}</button>`).join("");
+  const inspector = tab === "color" ? edInspectorColor(p) : tab === "text" ? edInspectorText(p) : edInspectorClip(p, s);
+  const src = frameUrl(s.clip_id, s.src_start + Math.min(s.duration, 1.5) * ((s.fx || {}).speed || 1), 640);
+  const cx = s.cx ?? 0.5, cy = s.cy ?? 0.5;
+  return `<main class="main wide edmain">
+    <div class="spread"><div class="head"><h1>${esc(p.title || p.style_label)}</h1>
+      <p class="lead">${esc(p.style_label)} · ${esc(platformLabel(p.platform) || p.format)} · ${p.format} · ${fmtDur(p.length)}</p></div>
+      <div class="row">${platformSelect(p)}<button class="btn" data-act="ed-undo" ${(p.history || []).length ? "" : "disabled"}>${svgi(ICO.undo, 16)}Ångra</button>
+        ${prev ? "" : `<button class="btn" data-preview="${p.id}" ${busyHere ? "disabled" : ""}>${icon("play", 14)}${busyHere ? "Renderar …" : "Förhandsvisa filmen"}</button>`}
+        <button class="btn primary" data-export="${p.id}">Exportera</button></div></div>
+    <div class="edgrid">
+      <section class="edstage">
+        <div class="edviews">
+          <figure class="edfig"><figcaption>I filmen</figcaption>
+            <div class="edstill" style="aspect-ratio:${p.format.replace(":", "/")}">
+              <img id="edStill" alt="Klippet som det ser ut i filmen" src="${stillUrl(p, i, !state.ed.before)}">
+              <button class="beforebtn" data-act="ed-before" aria-pressed="${state.ed.before}">Före</button></div></figure>
+          ${tab === "clip" ? `<figure class="edfig"><figcaption>Originalbild – klicka för att flytta utsnittet</figcaption>
+            <div class="edsrc" data-edsrc><img alt="Originalbilden" src="${src}"><span class="edring" style="left:${cx * 100}%;top:${cy * 100}%"></span></div></figure>` : ""}
+        </div>
+        ${prev && !busyHere ? `<video class="edvideo" controls playsinline preload="metadata" src="${mediaUrl("renders", prev)}"></video>`
+          : busyHere ? `<div class="progress"><div class="spread" style="font-size:13px"><span class="muted" data-live-text>${esc(job().message || "")}</span><span class="num muted" data-live-pct></span></div><div class="bar"><div data-live-fill style="width:0%"></div></div></div>` : ""}
+      </section>
+      <aside class="edinsp"><div class="seg" role="tablist" style="grid-template-columns:repeat(3,minmax(0,1fr))">${tabs}</div>${inspector}</aside>
+    </div>
+    ${edTimeline(p)}
+  </main>`;
+}
+
+let gradeTimer = null;
+function onGradeInput(key, value) {
+  const p = edProp();
+  if (!p) return;
+  const g = curGrade(p);
+  g[key] = Number(value);
+  const v = document.querySelector(`[data-edgv="${key}"]`);
+  if (v) v.textContent = Math.round(Number(value) * 100);
+  stageGrade(g);
+}
+function stageGrade(g) {
+  const p = edProp();
+  const s = p.shots[state.ed.i];
+  if (state.ed.scope === "shot") s.grade = g; else p.grade = g;
+  clearTimeout(gradeTimer);
+  gradeTimer = setTimeout(() => edit("grade", { scope: state.ed.scope, i: state.ed.i, grade: g }, { quiet: true }), 350);
+}
+
+/* ================= händelser ================= */
+document.addEventListener("click", async (ev) => {
+  const t = ev.target.closest("button, [data-edsrc]");
+  if (!t) return;
+  const d = t.dataset;
+  if (d.edsrc !== undefined) {
+    const r = t.getBoundingClientRect();
+    const cx = (ev.clientX - r.left) / r.width, cy = (ev.clientY - r.top) / r.height;
+    const ring = t.querySelector(".edring");
+    if (ring) { ring.style.left = `${cx * 100}%`; ring.style.top = `${cy * 100}%`; }
+    return edit("center", { i: state.ed.i, cx, cy }, { quiet: true });
+  }
+  if (d.qmove) { state.queue = await api("POST", `/api/queue/${d.qmove}/move`, { dir: Number(d.dir) }); return render(); }
+  if (d.qcancel) { state.queue = await api("POST", `/api/queue/${d.qcancel}/cancel`, {}); loadQueue(); return render(); }
+  if (d.qopen) {
+    await loadProject(d.qopen);
+    state.view = (P().proposals || []).length ? "proposals" : "analyze";
+    return render();
+  }
+  if (d.ft) {
+    const pl = state.setup.plans[d.ft];
+    pl.on = !pl.on;
+    if (d.ft === "auto" && pl.on) Object.entries(state.setup.plans).forEach(([k, x]) => { if (k !== "auto") x.on = false; });
+    if (d.ft !== "auto" && pl.on) state.setup.plans.auto.on = false;
+    return render();
+  }
+  if (d.plantab) { state.planTab = d.plantab; return render(); }
+  if (d.explat) {
+    const set = new Set(state.exportPlats);
+    if (set.has(d.explat)) set.delete(d.explat); else set.add(d.explat);
+    state.exportPlats = [...set];
+    return render();
+  }
+  if (d.edit) return openEditor(d.edit);
+  if (d.edshot !== undefined) { state.ed.i = Number(d.edshot); state.ed.alts = null; return render(); }
+  if (d.edtab) { state.ed.tab = d.edtab; return render(); }
+  if (d.edtrim) { const s = edProp().shots[state.ed.i]; return edit("trim", { i: state.ed.i, duration: s.duration + Number(d.edtrim) }); }
+  if (d.edspeed) return edit("speed", { i: state.ed.i, mode: d.edspeed });
+  if (d.edfx) return edit("fx", { i: state.ed.i, effect: d.edfx });
+  if (d.edmove) { const j = state.ed.i + Number(d.edmove); await edit("move", { i: state.ed.i, dir: Number(d.edmove) }); state.ed.i = Math.max(0, Math.min(j, edProp().shots.length - 1)); return render(); }
+  if (d.edscope) { state.ed.scope = d.edscope; return render(); }
+  if (d.edlook) { const g = curGrade(edProp()); g.look = d.edlook; stageGrade(g); return render(); }
+  if (d.edalt !== undefined) {
+    const a = state.ed.alts[Number(d.edalt)];
+    return edit("swap", { i: state.ed.i, alt: { clip_id: a.clip_id, start: a.start } });
+  }
+  switch (d.act) {
+    case "queue": state.view = "queue"; await loadQueue(); return render();
+    case "qpause": state.queue = await api("POST", "/api/queue/pause", { paused: !state.queue.paused }); return render();
+    case "qclear": state.queue = await api("POST", "/api/queue/clear", {}); return render();
+    case "setup-project": state.setup = { mode: "project", plans: defaultPlans() }; state.view = "setup"; return render();
+    case "setup-cancel": state.setup = null; state.view = P() ? "proposals" : "import"; return render();
+    case "setup-go": return setupGo();
+    case "export-queue": return exportQueued();
+    case "ed-undo": return edit("undo");
+    case "ed-delete": return edit("delete", { i: state.ed.i });
+    case "ed-autocenter": return edit("auto_center", { i: state.ed.i });
+    case "ed-grade-reset": return edit("grade_reset_shot", { i: state.ed.i });
+    case "ed-grade-zero": { const g = curGrade(edProp()); ["exposure", "contrast", "saturation", "temperature", "tint", "sharpen", "vignette"].forEach((k) => { g[k] = 0; }); g.strength = 1; stageGrade(g); return render(); }
+    case "ed-title": return edit("title", { text: $("#edTitle").value });
+    case "ed-title-clear": return edit("title", { text: "" });
+    case "ed-before": return undefined;  // hålls in, se pointerdown/pointerup
+    case "ed-alts":
+      state.ed.alts = "loading"; render();
+      try { state.ed.alts = (await api("POST", `/api/p/${state.pid}/proposal/${state.ed.prop}/alternatives`, { i: state.ed.i })).alternatives; } catch (e) { state.ed.alts = null; fail(e); }
+      return render();
+    default: return undefined;
+  }
+});
+
+document.addEventListener("input", (ev) => {
+  const t = ev.target;
+  if (t.dataset.edgrade) return onGradeInput(t.dataset.edgrade, t.value);
+  if (t.dataset.edlen !== undefined) { const v = document.querySelector("[data-edlenval]"); if (v) v.textContent = `${dec(Number(t.value))} s`; }
+  return undefined;
+});
+
+document.addEventListener("change", (ev) => {
+  const t = ev.target;
+  const d = t.dataset;
+  if (d.edlen !== undefined) return edit("trim", { i: state.ed.i, duration: Number(t.value) });
+  if (d.platform) return changePlatform(d.platform, t.value);
+  if (d.ftplat) { const pl = state.setup.plans[d.ftplat]; pl.platform = t.value; pl.length = null; return render(); }
+  if (d.ftlen) { state.setup.plans[d.ftlen].length = Number(t.value); return undefined; }
+  if (d.ftcount) { state.setup.plans[d.ftcount].count = Number(t.value); return undefined; }
+  return undefined;
+});
+
+/* "Före": håll in för att jämföra */
+document.addEventListener("pointerdown", (ev) => {
+  if (ev.target.closest(".beforebtn")) { state.ed.before = true; refreshStill(); }
+});
+document.addEventListener("pointerup", () => {
+  if (state.ed.before && state.view === "edit") { state.ed.before = false; refreshStill(); }
+});
+
+loadQueue();

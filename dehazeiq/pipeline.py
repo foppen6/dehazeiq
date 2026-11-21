@@ -1,5 +1,6 @@
 """Jobb som körs i bakgrunden: import, analys, musik och rendering."""
 
+import time
 from pathlib import Path
 
 import numpy as np
@@ -134,6 +135,67 @@ def generate(pid, style, fmt, length, favorites=(), theme=None):
     save_default_settings(proj.data["settings"])
     proj.add_proposals(props)
     return props
+
+
+def generate_plans(progress, pid, plans, render_previews=False):
+    """Förslag för de valda filmtyperna (dykfilm, resefilm, reels, djurporträtt …)."""
+    from . import editor
+    proj = Project(pid)
+    music = proj.data.get("music")
+    favs = [c["id"] for c in proj.clips() if c.get("favorite") and c.get("analysis")]
+    ids, made = [], []
+    for k, plan in enumerate(plans):
+        progress(k / max(1, len(plans)), editor.describe_plan(plan))
+        recent = [p.get("theme") for p in (proj.data.get("proposals") or [])[:3] if p.get("theme")]
+        props = editor.plan_proposals(proj, plan, music, favs, recent)
+        made += props
+        ids += [p["id"] for p in props]
+    # i samma ordning som planerna
+    Project(pid).add_proposals(made)
+    if render_previews:
+        for i, pid_ in enumerate(ids):
+            render_proposal(_stage(progress, i / len(ids), (i + 1) / len(ids), f"Förhandsvisning {i + 1} av {len(ids)}"),
+                            pid, pid_, "preview")
+    return ids
+
+
+def edit_proposal(pid, prop_id, op, args):
+    from . import editor
+    proj = Project(pid)
+    prop = proj.proposal(prop_id)
+    if not prop:
+        raise RuntimeError("Förslaget finns inte")
+    prop = editor.apply(proj, prop, op, args or {})
+    proj.replace_proposal(prop)
+    return prop
+
+
+def set_platform(pid, prop_id, platform, length=None):
+    from . import editor
+    proj = Project(pid)
+    prop = proj.proposal(prop_id)
+    if not prop:
+        raise RuntimeError("Förslaget finns inte")
+    new = editor.retarget(proj, prop, platform, length, keep_id=True)
+    proj.replace_proposal(new)
+    return new
+
+
+def export_for(progress, pid, prop_id, platform, resolution="1080p"):
+    """Exportera ett förslag för en plattform. Har förslaget ett annat format görs en kopia
+    anpassad för plattformen (samma berättelse, stil, färg och titel)."""
+    from . import editor
+    proj = Project(pid)
+    prop = proj.proposal(prop_id)
+    if not prop:
+        raise RuntimeError("Förslaget finns inte")
+    from .config import PLATFORMS
+    if platform and platform != prop.get("platform") and PLATFORMS[platform]["format"] != prop["format"]:
+        progress(0.02, f"Anpassar för {PLATFORMS[platform]['label']}")
+        prop = editor.retarget(proj, prop, platform, keep_id=False)
+        prop["edited"] = time.time()  # gallras inte bort
+        proj.add_proposals([prop])
+    return render_proposal(progress, pid, prop["id"], resolution)
 
 
 def regenerate_one(pid, prop_id):
@@ -290,8 +352,15 @@ def auto(progress, pid, paths=None):
     progress(0.74, "3/4 Skapar filmförslag")
     s = proj.data.get("settings") or {}
     favs = [c["id"] for c in proj.clips() if c.get("favorite") and c.get("analysis")]
-    props = generate(pid, s.get("style", "auto"), s.get("format", "9:16"), s.get("length", 30), favs)
+    if s.get("plans"):
+        props = generate_plans(_stage(progress, 0.74, 0.78, "3/4 Filmförslag"), pid, s["plans"], render_previews=False)
+        props = [Project(pid).proposal(i) for i in props]
+        props = [p for p in props if p]
+    else:
+        props = generate(pid, s.get("style", "auto"), s.get("format", "9:16"), s.get("length", 30), favs)
     result["proposals"] = [p["id"] for p in props]
+    if not s.get("previews", True):
+        props = []
     for i, prop in enumerate(props):
         lo = 0.78 + 0.22 * i / len(props)
         hi = 0.78 + 0.22 * (i + 1) / len(props)
