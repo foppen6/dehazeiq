@@ -18,11 +18,19 @@ EFFECTS = {
     "punch": "Zoomryck",
     "labels": "Textskyltar",
     "sfx": "Ljudeffekter",
+    "enhance": "Bildförbättring",
+    "stabilize": "Stabilisering",
+    "grain": "Filmkorn",
+    "letterbox": "Svarta kanter",
+    "flash": "Blixt på takt",
+    "divedata": "Dykdata",
 }
 DEFAULT_EFFECTS = {k: True for k in EFFECTS}
 
 TRANSITION = {"cinematic": ("fade", 0.45), "calm": ("fade", 0.7), "action": ("cut", 0.0),
-              "playful": ("cut", 0.0), "documentary": ("cut", 0.0)}
+              "playful": ("cut", 0.0), "documentary": ("cut", 0.0), "widescreen": ("fade", 0.8),
+              "vintage": ("fade", 0.4), "musicvideo": ("cut", 0.0), "ambient": ("fade", 1.5),
+              "vlog": ("cut", 0.0), "minimal": ("cut", 0.0)}
 
 # Övergångar (FFmpeg xfade) som går att välja i redigeringen, i grupper
 TRANSITIONS = {
@@ -76,6 +84,19 @@ def plan_transitions(shots, style_key):
         elif style_key == "action":
             if not match and since >= 3:
                 t = "hblur" if dx == 0 else ("smoothright" if dx > 0 else "smoothleft")
+        elif style_key == "widescreen":
+            t = "fadeblack" if new_dive else ("cut" if match else "fade")
+        elif style_key == "vintage":
+            t = "fadewhite" if new_dive or (since >= 4 and i % 3 == 2) else ("cut" if match else "fade")
+        elif style_key == "musicvideo":
+            t = "fadewhite" if new_dive else "cut"
+        elif style_key == "ambient":
+            t = "fadeblack" if new_dive else "dissolve"
+        elif style_key == "vlog":
+            new_day = a.get("time") and b.get("time") and int(a["time"] // 86400) != int(b["time"] // 86400)
+            t = ("slideleft" if new_day or new_dive else "cut")
+        elif style_key == "minimal":
+            t = "fade" if new_dive else "cut"
         elif style_key == "playful":
             if not match and since >= 2:
                 t = fun_cycle[i % len(fun_cycle)] if dx == 0 else ("slideright" if dx > 0 else "slideleft")
@@ -102,6 +123,15 @@ def plan_texts(shots, style_key, proposal):
             if name and key not in seen and s["duration"] >= 2.5 and not s.get("context"):
                 seen.add(key)
                 s["text"] = {"kind": "label", "text": name, "sub": (s.get("species_sci") or "") if sure else ""}
+        elif style_key == "vlog":
+            ts = [x.get("time") for x in shots if x.get("time")]
+            if ts and s.get("time"):
+                import datetime
+                first = datetime.date.fromtimestamp(min(ts))
+                day = (datetime.date.fromtimestamp(s["time"]) - first).days + 1
+                prev = shots[i - 1].get("time") if i else None
+                if i == 0 or (prev and datetime.date.fromtimestamp(prev) != datetime.date.fromtimestamp(s["time"])):
+                    s["text"] = {"kind": "chapter", "text": f"Dag {day}"}
         elif style_key == "playful":
             if (s.get("fx") or {}).get("freeze"):
                 s["text"] = {"kind": "pop", "text": s.get("caption") or FUN_CAPTIONS[i % len(FUN_CAPTIONS)]}
@@ -117,7 +147,7 @@ def plan_texts(shots, style_key, proposal):
 
 def plan_sfx(shots, trans, style_key):
     """Ljudeffekter: svisch vid effektövergångar, pling vid frysbild (bara lekfullt och action)."""
-    if style_key not in ("playful", "action"):
+    if style_key not in ("playful", "action", "musicvideo", "vlog"):
         return []
     ev, pos = [], 0.0
     for i, s in enumerate(shots):
@@ -140,7 +170,7 @@ def plan(proposal, clips_by_id, style_key):
     """Bestämmer effekter för ett nyss genererat förslag (ändrar shots på plats)."""
     shots = proposal["shots"]
     kind, d = TRANSITION.get(style_key, ("fade", 0.45))
-    calm = style_key in ("calm", "cinematic")
+    calm = style_key in ("calm", "cinematic", "widescreen", "ambient")
 
     # Slowmotion: bara där källan har hög bildfrekvens (≥ 48 bps) och klippet är långt nog
     hfr = [i for i, s in enumerate(shots)
@@ -160,18 +190,24 @@ def plan(proposal, clips_by_id, style_key):
     # Lekfullt och action: snabbspola en lugn, lång tagning (t.ex. en krabba som går),
     # frys det roligaste ögonblicket och ge klippen ett zoomryck på takten
     fast, freeze, punch = [], [], []
-    if style_key in ("playful", "action"):
+    if style_key in ("playful", "action", "musicvideo", "vlog"):
         for i, s in enumerate(shots):
             clip = clips_by_id.get(s["clip_id"]) or {}
             room = float(clip.get("duration") or 0) - s["src_start"]
             if i not in slow and s["motion"] < med and s["duration"] >= 1.5 and room >= s["duration"] * 2 + 0.2:
                 fast.append(i)
-        fast = fast[:1] if style_key == "action" else fast[:2]
+        fast = fast[:1] if style_key in ("action", "vlog") else fast[:2]
         punch = [i for i in range(1, len(shots), 2) if i not in fast]
+        if style_key == "musicvideo":
+            punch = [i for i in range(len(shots)) if i not in fast]
+        if style_key == "vlog":
+            punch = []
     if style_key == "playful" and len(shots) >= 3:
         cand = [i for i, s in enumerate(shots) if s["duration"] >= 2.0 and i not in fast and i not in slow]
         if cand:
             freeze = [max(cand, key=lambda i: shots[i]["quality"] + shots[i]["motion"])]
+    if style_key == "minimal":
+        slow, zoom, fast, freeze, punch = [], [], [], [], []
     for i, s in enumerate(shots):
         fx = {}
         if i in fast:

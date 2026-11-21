@@ -9,6 +9,18 @@ const STYLE_INFO = {
     long: "Korta klipp som följer musikens takt, med fokus på rörelse och energi." },
   calm: { label: "Lugn natur", desc: "Långsamt, berättande", sw: "#16302A", color: "#6FD3A5",
     long: "Få och långa klipp med naturliga färger. Originalljudet hörs svagt under musiken." },
+  widescreen: { label: "Filmisk bredbild", desc: "Svarta kanter, dämpade färger", sw: "#15191E", color: "#C9B48A",
+    long: "Som en biofilm: svarta kanter upptill och nertill, dämpade färger och långsamma toningar." },
+  vintage: { label: "Vintage Super 8", desc: "Varmt, filmkorn, fladder", sw: "#3A2A1A", color: "#E7B37A",
+    long: "Varma blekta färger, filmkorn, glöd och lite ojämn bild som från en gammal projektor." },
+  musicvideo: { label: "Musikvideo", desc: "Klipp exakt på takten, blixtar", sw: "#2A1030", color: "#E86BD8",
+    long: "Mycket korta klipp exakt på musikens slag, zoomryck på varje klipp och blixt på kraftiga slag." },
+  ambient: { label: "Ambient", desc: "Mycket lugnt, bara naturljud", sw: "#0E2228", color: "#6FC3D0",
+    long: "Mycket långa tagningar, långsamma toningar, bara originalljudet och ingen text. För avkoppling." },
+  vlog: { label: "Vlogg", desc: "Tidsordning, \"Dag 1\", stämning", sw: "#1F2A22", color: "#9BD48A",
+    long: "Resan i tidsordning med dagsskyltar, snabbt men inte stressigt, lite snabbspolning." },
+  minimal: { label: "Minimal", desc: "Inga effekter, bara bra klipp", sw: "#202428", color: "#D7DEE5",
+    long: "Raka klipp, naturliga färger och inga effekter – bara ett snyggt urval." },
   documentary: { label: "Dokumentär", desc: "Seriöst, långa tagningar, artnamn", sw: "#1E2A30", color: "#A9C7D6",
     long: "Översikt, djuret, detaljer och beteende. Långa tagningar, raka klipp, artnamn som textskylt och originalljud." },
   playful: { label: "Lekfull", desc: "Roliga ögonblick, fart och frysbilder", sw: "#3A2A12", color: "#F2C14E",
@@ -324,7 +336,8 @@ async function saveSettings(patch) {
 }
 
 const EFFECT_INFO = { transitions: "Mjuka övergångar", slowmo: "Slowmotion", zoom: "Långsam zoom", title: "Titel",
-  vignette: "Vinjett", fast: "Snabbspolning", freeze: "Frysbild", punch: "Zoomryck", labels: "Textskyltar", sfx: "Ljudeffekter" };
+  vignette: "Vinjett", fast: "Snabbspolning", freeze: "Frysbild", punch: "Zoomryck", labels: "Textskyltar", sfx: "Ljudeffekter",
+  enhance: "Bildförbättring", stabilize: "Stabilisering", grain: "Filmkorn", letterbox: "Svarta kanter", flash: "Blixt på takt", divedata: "Dykdata" };
 const effectsOn = () => Object.assign(Object.fromEntries(Object.keys(EFFECT_INFO).map((k) => [k, true])), settings().effects || {});
 
 async function toggleEffect(key) {
@@ -670,6 +683,7 @@ function viewAnalyze() {
   const main = `<main class="main">
     ${outdatedBanner()}
     ${deepCard()}
+    ${diveCard()}
     <div class="spread"><div class="head"><h1>${busy ? "AI analyserar materialet" : "Analysresultat"}</h1>
       <p class="lead">Bara skarpa, stabila och välexponerade klipp används. Svaga klipp väljs bort automatiskt – du behöver inte gå igenom dem.</p></div>${prog}</div>
     <div class="chips" role="group" aria-label="Filtrera">${chips}</div>
@@ -836,7 +850,7 @@ function viewExport() {
   const panel = `<aside class="panel" aria-label="Exporterade filer">
     <section class="stack"><h2>Exporterade filer</h2><div class="files">${fileRows || '<p class="muted" style="margin:0">Inga exporter ännu för det här förslaget.</p>'}</div></section>
     <p class="muted" style="margin:0;font-size:12px">Filerna sparas i projektmappen under renders. Kodning: ${esc((state.info && state.info.encoder) || "")}.</p>
-    <button class="btn primary big push" data-act="export-queue" ${state.exportPlats && state.exportPlats.length ? "" : "disabled"}>Lägg ${state.exportPlats && state.exportPlats.length > 1 ? `${state.exportPlats.length} exporter` : "exporten"} i kön (${state.exportRes === "4k" ? "4K" : state.exportRes})</button>
+    <button class="btn primary big push" data-act="export-queue" ${state.exportPlats && state.exportPlats.length ? "" : "disabled"}>Lägg ${(state.exportPlats || []).length * (state.exportLangs || ["sv"]).length > 1 ? `${(state.exportPlats || []).length * (state.exportLangs || ["sv"]).length} exporter` : "exporten"} i kön (${state.exportRes === "4k" ? "4K" : state.exportRes})</button>
   </aside>`;
   return main + panel;
 }

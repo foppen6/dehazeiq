@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 
 from .config import COLOR_PROFILES, FORMATS, GRADE_KEYS, LOOKS, OUTPUT_FPS, RESOLUTIONS, STYLES
+from . import divelog, i18n
 from . import effects as fx_mod
 from .media import MediaError, ffmpeg, run, video_encoder_args
 
@@ -93,7 +94,7 @@ def _fit(text, out_w, base):
     return max(12, int(min(base, out_w * 0.86 / max(1, 0.56 * len(text)))))
 
 
-def text_filters(kind, text, sub, files, out_w, out_h, dur, freeze=0.0, start=0.5):
+def text_filters(kind, text, sub, files, out_w, out_h, dur, freeze=0.0, start=0.5, big=False):
     """drawtext för textskyltar. files: (fil för rad 1, fil för rad 2) i arbetsmappen."""
     m = min(out_w, out_h)
     fa, fb = files
@@ -120,11 +121,91 @@ def text_filters(kind, text, sub, files, out_w, out_h, dur, freeze=0.0, start=0.
         a = _alpha(t0, dur, 0.12)
         out.append(f"drawtext=fontfile=font.ttf:textfile={fa}:fontcolor=0x111111:fontsize={fs}:x=(w-text_w)/2"
                    f":y=h*0.16:box=1:boxcolor=white@0.92:boxborderw={max(10, fs // 2)}:alpha='{a}'")
+    elif kind == "dive":  # djup och temperatur från dykdatorn
+        fs = int(m * (0.05 if big else 0.034))
+        a = _alpha(0.0, dur, 0.2)
+        out.append(f"drawtext=fontfile=font.ttf:textfile={fa}:fontcolor=white:fontsize={fs}:x=w-text_w-{int(out_w * 0.05)}"
+                   f":y={int(out_h * 0.05)}:box=1:boxcolor=black@{0.45 if big else 0.3}:boxborderw={max(5, fs // 3)}"
+                   f":alpha='{a}'")
     elif kind == "subtitle":  # datum under titeln
         fs = _fit(text, out_w, m * 0.04)
         a = _alpha(0.6, min(3.6, dur - 0.1))
         out.append(f"drawtext=fontfile=font.ttf:textfile={fa}:fontcolor=0xDDE6EE:fontsize={fs}:x=(w-text_w)/2"
                    f":y=h*0.70+{int(m * 0.13)}:shadowcolor=black@0.5:shadowx=1:shadowy=1:alpha='{a}'")
+    return out
+
+
+# ---------- bildförbättring: dis, partiklar, skakighet ----------
+
+_HAZE = {}
+
+
+def haze_levels(src, clip_id):
+    """Svart- och vitnivå per färgkanal (percentiler ur några bilder) – grunden för dehaze."""
+    if clip_id in _HAZE:
+        return _HAZE[clip_id]
+    import cv2
+    cap = cv2.VideoCapture(str(src))
+    n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    lo, hi = [], []
+    for k in (0.2, 0.5, 0.8):
+        cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, int(n * k)))
+        ok, fr = cap.read()
+        if not ok:
+            continue
+        small = cv2.resize(fr, (320, int(320 * fr.shape[0] / fr.shape[1])))
+        px = small.reshape(-1, 3).astype(np.float32)
+        lo.append(np.percentile(px, 1.0, axis=0))
+        hi.append(np.percentile(px, 99.6, axis=0))
+    cap.release()
+    if not lo:
+        res = None
+    else:
+        b, g, r = np.mean(lo, axis=0) / 255.0
+        bh, gh, rh = np.mean(hi, axis=0) / 255.0
+        haze = float(min(b, g, r))  # hur högt "golvet" ligger = hur disigt
+        res = {"lo": (float(r), float(g), float(b)), "hi": (float(rh), float(gh), float(bh)), "haze": haze}
+    _HAZE[clip_id] = res
+    return res
+
+
+def enhance_filters(enh, levels):
+    """Dehaze (lyfter bort dis-slöjan per kanal + lokal kontrast) och partikelreducering."""
+    out = []
+    d = float(enh.get("dehaze") or 0.0)
+    if d > 0.01 and levels:
+        a = 0.85 * d
+        (rl, gl, bl), (rh, gh, bh) = levels["lo"], levels["hi"]
+        out.append("colorlevels="
+                   f"rimin={a * rl:.3f}:gimin={a * gl:.3f}:bimin={a * bl:.3f}:"
+                   f"rimax={1 - a * (1 - max(rh, 0.5)):.3f}:gimax={1 - a * (1 - max(gh, 0.5)):.3f}:"
+                   f"bimax={1 - a * (1 - max(bh, 0.5)):.3f}")
+        out.append(f"unsharp=lx=13:ly=13:la={0.55 * d:.2f}:cx=5:cy=5:ca=0")
+        out.append(f"eq=saturation={1 + 0.18 * d:.3f}")
+    pt = float(enh.get("particles") or 0.0)
+    if pt > 0.01:
+        k = 3 + 10 * pt
+        out.append(f"hqdn3d=luma_spatial={1 + 1.5 * pt:.2f}:chroma_spatial={1 + 1.5 * pt:.2f}"
+                   f":luma_tmp={k:.2f}:chroma_tmp={k:.2f}")
+    return out
+
+
+def style_filters(look_fx, out_w, out_h, beat_flash=False):
+    """Stileffekter: filmkorn, svarta kanter (bredbild), glöd, blixt på takt, Super 8-fladder."""
+    out = []
+    if look_fx.get("weave"):  # lite ojämn bild som i en gammal projektor
+        out += [f"crop=iw-8:ih-8:4+3*sin(t*11):4+3*cos(t*13)", f"scale={out_w}:{out_h}"]
+    if look_fx.get("glow"):
+        out.append("split[g0][g1];[g1]gblur=sigma=18[g2];[g0][g2]blend=all_mode=screen:all_opacity=0.28")
+    if beat_flash:
+        out.append("eq=brightness='0.35*max(0,1-t/0.14)':eval=frame")
+    if look_fx.get("grain"):
+        out.append(f"noise=alls={int(8 + 10 * float(look_fx['grain']))}:allf=t")
+    if look_fx.get("letterbox"):
+        bar = int(round((out_h - out_w / 2.39) / 2)) if out_w / out_h > 1.2 else int(out_h * 0.1)
+        if bar > 0:
+            out.append(f"drawbox=x=0:y=0:w=iw:h={bar}:color=black:t=fill,"
+                       f"drawbox=x=0:y=ih-{bar}:w=iw:h={bar}:color=black:t=fill")
     return out
 
 
@@ -175,7 +256,8 @@ def grade_filter(g):
 
 
 def _shot_filter(shot, src_w, src_h, out_w, out_h, style, wb=True, fade_in=0.0, fade_out=0.0,
-                 fx=None, pad=0.0, vignette=False, title=None, grade=None, texts=None):
+                 fx=None, pad=0.0, vignette=False, title=None, grade=None, texts=None,
+                 enh=None, levels=None, look_fx=None, flash=False):
     """fx: {"speed": 0.5} slowmotion, {"zoom": 0.05} långsam inzoomning. pad: extra sekunder i slutet
     (för mjuka övergångar). title: text som visas i början (font.ttf/title.txt i arbetsmappen)."""
     fx = fx or {}
@@ -188,7 +270,10 @@ def _shot_filter(shot, src_w, src_h, out_w, out_h, style, wb=True, fade_in=0.0, 
     else:
         crop = f"crop={cw}:{ch}:{x}:{y}"
     dur = shot["duration"]
-    parts = [crop]  # banan följer källans tid, därför före ev. slowmotion
+    parts = []
+    if (enh or {}).get("stabilize"):
+        parts.append("deshake=rx=32:ry=32:edge=mirror")
+    parts.append(crop)  # banan följer källans tid, därför före ev. slowmotion
     speed = fx.get("speed")
     if speed:
         parts.append(f"setpts=(PTS-STARTPTS)/{speed:.3f}")
@@ -209,7 +294,7 @@ def _shot_filter(shot, src_w, src_h, out_w, out_h, style, wb=True, fade_in=0.0, 
     if terms:
         z = "(1+" + "+".join(terms) + ")"
         parts += [f"scale=w='2*trunc({out_w}*{z}/2)':h='2*trunc({out_h}*{z}/2)':eval=frame:flags=bicubic",
-                  f"crop={out_w}:{out_h}"]
+                  f"crop={out_w}:{out_h}", f"scale={out_w}:{out_h}"]  # ny bildbuffert: vissa filter kraschar annars
     else:
         parts.append(f"scale={out_w}:{out_h}:flags=lanczos")
     parts += [f"fps={OUTPUT_FPS}", "setsar=1"]
@@ -217,11 +302,13 @@ def _shot_filter(shot, src_w, src_h, out_w, out_h, style, wb=True, fade_in=0.0, 
         r, g, b = shot.get("wb_gains", [1, 1, 1])
         if max(abs(r - 1), abs(g - 1), abs(b - 1)) > 0.02:
             parts.append(f"colorchannelmixer=rr={r:.3f}:gg={g:.3f}:bb={b:.3f}")
+    parts += enhance_filters(enh or {}, levels)
     look_set = bool(grade and (grade.get("look") or "none") != "none")
     color = None if look_set else COLOR_PROFILES.get(style.get("color", ""))
     if color:
         parts.append(color)
     parts += grade_filter(grade)
+    parts += style_filters(look_fx or {}, out_w, out_h, flash)
     if vignette:
         parts.append("vignette=angle=PI/5")
     if title:
@@ -313,7 +400,7 @@ def _join_copy(seg_paths, durs, tmp, out, padded):
 
 
 def render(project, proposal, resolution="preview", out_path=None, progress=None,
-           wb=True, use_proxies=None, effects=None):
+           wb=True, use_proxies=None, effects=None, lang="sv", free=None):
     """Rendera ett förslag. 'preview' använder proxyfiler och går snabbt.
     effects: vilka effekter som är påslagna (se effects.enabled)."""
     style = STYLES[proposal["style"]]
@@ -353,22 +440,39 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
     if any_tr:  # raka klipp i en kedja med övergångar: en bildruta lång toning
         pads = [p if p > 0 else 0.04 for p in pads]
     pads.append(0.0)
+    # Texter på valt språk
+    bio = None
+    try:
+        from . import ai as _ai
+        bio = _ai.get_bio()
+    except Exception:  # noqa: BLE001
+        pass
+    sp_map = {}
+    if bio:
+        for row in bio.species:
+            sp_map[row[0]] = row
+            sp_map[row[1]] = row
+    loc = i18n.localize(proposal, lang, sp_map, free)
+    if style.get("no_text"):
+        on = dict(on, title=False, labels=False)
     title = None
-    texts_needed = (on["title"] and plan.get("title")) or (on["labels"] and any(s.get("text") for s in shots))
+    dive_on = bool(on.get("divedata") and (project.data.get("divelog") or {}).get("dives"))
+    texts_needed = (on["title"] and loc["title"]) or (on["labels"] and any(loc["shots"])) or dive_on
     font = fx_mod.title_font() if texts_needed else None
     if font:
         shutil.copyfile(font, tmp / "font.ttf")
-    if font and on["title"] and plan.get("title"):
-        (tmp / "title.txt").write_text(plan["title"], "utf-8")
-        title = plan["title"]
-        if plan.get("subtitle"):
-            (tmp / "subtitle.txt").write_text(plan["subtitle"], "utf-8")
+    if font and on["title"] and loc["title"]:
+        (tmp / "title.txt").write_text(loc["title"], "utf-8")
+        title = loc["title"]
+        if loc["subtitle"]:
+            (tmp / "subtitle.txt").write_text(loc["subtitle"], "utf-8")
+    units = (project.data.get("settings") or {}).get("units", "metric")
 
     def overlays(i, shot, fx, out_len):
         out = []
-        if i == 0 and title and plan.get("subtitle"):
-            out += text_filters("subtitle", plan["subtitle"], "", ("subtitle.txt", ""), out_w, out_h, out_len)
-        tx = shot.get("text")
+        if i == 0 and title and loc["subtitle"]:
+            out += text_filters("subtitle", loc["subtitle"], "", ("subtitle.txt", ""), out_w, out_h, out_len)
+        tx = loc["shots"][i] if i < len(loc["shots"]) else None
         if font and on["labels"] and tx and tx.get("text"):
             fa, fb = f"t{i}a.txt", f"t{i}b.txt"
             (tmp / fa).write_text(tx["text"], "utf-8")
@@ -376,7 +480,16 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
             start = 0.5 if not (i == 0 and title) else max(0.5, min(3.8, shot["duration"] - 1.6))
             out += text_filters(tx.get("kind", "label"), tx["text"], tx.get("sub"), (fa, fb), out_w, out_h,
                                 shot["duration"], float(fx.get("freeze") or 0.0), start)
+        if font and dive_on:
+            mid = shot["src_start"] + (shot["src_end"] - shot["src_start"]) / 2
+            dd = divelog.at(project, shot["clip_id"], mid)
+            if dd and dd[0] >= 0.5:
+                fd = f"d{i}.txt"
+                (tmp / fd).write_text(i18n.dive_text(dd[0], dd[1], lang, units), "utf-8")
+                out += text_filters("dive", "", "", (fd, ""), out_w, out_h, shot["duration"],
+                                    big=proposal["style"] in ("playful", "action", "musicvideo", "vlog"))
         return out
+
     vignette = bool(on["vignette"] and plan.get("vignette"))
     try:
         seg_paths = []
@@ -400,13 +513,38 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
             seg = tmp / f"seg_{i:03d}.mp4"
             has_audio = clip.get("has_audio", False)
             out_len = dur + pad
+            # bildförbättring: användarens värden, annars AI:ns automatik för undervattensklipp
+            g = shot.get("grade") or proposal.get("grade") or {}
+            a = clip.get("analysis") or {}
+            enh = {}
+            if on.get("enhance"):
+                if a.get("underwater") or shot.get("underwater"):
+                    lv = haze_levels(src, clip["id"])
+                    enh["dehaze"] = round(min(0.8, max(0.25, ((lv or {}).get("haze", 0.1) - 0.03) * 6)), 2)
+                    enh["particles"] = 0.35
+            if on.get("stabilize") and float(a.get("best_stab", 1.0)) < 0.72:
+                enh["stabilize"] = True
+            for k in ("dehaze", "particles", "stabilize"):
+                if g.get(k) is not None:
+                    enh[k] = g[k]
+            levels = haze_levels(src, clip["id"]) if float(enh.get("dehaze") or 0) > 0.01 else None
+            lfx = dict(style.get("look_fx") or {})
+            if not on.get("grain"):
+                lfx.pop("grain", None)
+                lfx.pop("weave", None)
+                lfx.pop("glow", None)
+            if not on.get("letterbox"):
+                lfx.pop("letterbox", None)
+            flash = bool(on.get("flash") and style.get("beat_flash") and i % int(style["beat_flash"]) == 0 and i > 0)
 
             def encode(fx, vignette, title, texts):
                 vf = _shot_filter(shot, sw, sh, out_w, out_h, style, wb=wb,
                                   fade_in=style["fade"] if i == 0 else 0.0,
                                   fade_out=style["fade"] if i == len(shots) - 1 else 0.0,
                                   fx=fx, pad=pad, vignette=vignette, title=title,
-                                  grade=shot.get("grade") or proposal.get("grade"), texts=texts)
+                                  grade=shot.get("grade") or proposal.get("grade"), texts=texts,
+                                  enh=enh if texts is not None else {}, levels=levels,
+                                  look_fx=lfx if texts is not None else {}, flash=flash and texts is not None)
                 read = (out_len - pad - float(fx.get("freeze") or 0.0)) * fx.get("speed", 1.0) + 0.05
                 cmd = [ffmpeg(), "-hide_banner", "-loglevel", "error", "-y",
                        "-ss", f"{shot['src_start']:.3f}", "-t", f"{read:.3f}", "-i", str(src)]
@@ -420,11 +558,14 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
                 run(cmd, cwd=str(tmp))
 
             try:
-                encode(fx, vignette, title if i == 0 else None, overlays(i, shot, fx, out_len))
+                try:
+                    encode(fx, vignette, title if i == 0 else None, overlays(i, shot, fx, out_len))
+                except MediaError:  # ett försök till (FFmpeg kan krascha sporadiskt med många filter)
+                    encode(fx, vignette, title if i == 0 else None, overlays(i, shot, fx, out_len))
             except MediaError:
-                if not (fx or vignette or (title and i == 0) or shot.get("text")):
+                if not (fx or vignette or (title and i == 0) or shot.get("text") or enh or lfx or flash or dive_on):
                     raise
-                encode({}, False, None, [])  # effekten stöds inte av FFmpeg-versionen: rendera utan
+                encode({}, False, None, None)  # effekten stöds inte av FFmpeg-versionen: rendera utan
             seg_paths.append(seg)
             if progress:
                 progress((i + 1) / steps, f"Klipp {i + 1} av {len(shots)}")
@@ -455,7 +596,7 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
 
         if progress:
             progress(len(shots) / steps, "Mixar ljud")
-        music = proposal.get("music")
+        music = None if style.get("no_music") else proposal.get("music")
         orig = style["orig_audio"]
         tmp_out = out_path.with_suffix(".tmp.mp4")
         if music and Path(music).exists():
@@ -523,3 +664,24 @@ def still(project, proposal, idx, at=0.5, width=480, graded=True):
     if r.returncode != 0 or not r.stdout:
         raise MediaError(r.stderr.decode("utf-8", "replace")[-400:])
     return r.stdout
+
+
+def write_srt(project, proposal, path, lang="sv", free=None):
+    """Undertextfil med filmens texter (titel, artnamn, kapitel, pratbubblor)."""
+    loc = i18n.localize(proposal, lang, None, free)
+    cues = []
+    if loc["title"]:
+        cues.append((0.3, min(3.6, proposal["shots"][0]["duration"] if proposal["shots"] else 3.6), loc["title"]))
+    for s, tx in zip(proposal["shots"], loc["shots"]):
+        if tx and tx.get("text"):
+            line = tx["text"] + (f"\n{tx['sub']}" if tx.get("sub") else "")
+            cues.append((s["at"] + 0.3, s["at"] + min(s["duration"] - 0.1, 4.5), line))
+    if not cues:
+        return False
+
+    def ts(x):
+        ms = int(round(x * 1000))
+        return f"{ms // 3600000:02d}:{ms // 60000 % 60:02d}:{ms // 1000 % 60:02d},{ms % 1000:03d}"
+    Path(path).write_text("".join(f"{k + 1}\n{ts(a)} --> {ts(b)}\n{t}\n\n" for k, (a, b, t) in enumerate(cues)),
+                          "utf-8")
+    return True

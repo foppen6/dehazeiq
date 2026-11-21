@@ -335,8 +335,11 @@ def find_themes(cands, clips_by_id):
 
 STYLE_FOR = {"subject": "documentary", "session": "documentary", "trip": "action",
              "detail": "calm", "blue": "calm", "motion": "action", "fun": "playful", "calm": "calm"}
+from . import i18n as _i18n  # noqa: E402
+_i18n.register_titles(PORTRAIT_TITLE)
+
 KIND_PRIORITY = ["subject", "fun", "session", "detail", "motion", "calm", "blue", "trip"]
-ALL_STYLES = ("documentary", "cinematic", "calm", "action", "playful")
+ALL_STYLES = ("documentary", "cinematic", "calm", "action", "playful", "widescreen", "vintage", "musicvideo")
 
 
 def auto_plan(themes, avoid=(), rng=None):

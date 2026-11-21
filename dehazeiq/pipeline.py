@@ -181,7 +181,7 @@ def set_platform(pid, prop_id, platform, length=None):
     return new
 
 
-def export_for(progress, pid, prop_id, platform, resolution="1080p"):
+def export_for(progress, pid, prop_id, platform, resolution="1080p", lang="sv"):
     """Exportera ett förslag för en plattform. Har förslaget ett annat format görs en kopia
     anpassad för plattformen (samma berättelse, stil, färg och titel)."""
     from . import editor
@@ -195,7 +195,7 @@ def export_for(progress, pid, prop_id, platform, resolution="1080p"):
         prop = editor.retarget(proj, prop, platform, keep_id=False)
         prop["edited"] = time.time()  # gallras inte bort
         proj.add_proposals([prop])
-    return render_proposal(progress, pid, prop["id"], resolution)
+    return render_proposal(progress, pid, prop["id"], resolution, lang)
 
 
 def regenerate_one(pid, prop_id):
@@ -209,27 +209,49 @@ def regenerate_one(pid, prop_id):
     return new
 
 
-def render_proposal(progress, pid, prop_id, resolution="preview"):
+def render_proposal(progress, pid, prop_id, resolution="preview", lang="sv"):
+    from . import i18n
     proj = Project(pid)
     prop = proj.proposal(prop_id)
     if not prop:
         raise RuntimeError("Förslaget finns inte")
+    lang = lang if lang in i18n.LANGS else "sv"
     if resolution == "preview":
-        out = proj.renders / f"{prop_id}_preview.mp4"
+        out = proj.renders / (f"{prop_id}_preview.mp4" if lang == "sv" else f"{prop_id}_preview_{lang}.mp4")
     else:
         safe = f"{proj.data['name']} - {prop.get('title') or ''} {prop['style_label']} {prop['format'].replace(':', 'x')} {resolution}"
+        if lang != "sv":
+            safe += f" {lang.upper()}"
         safe = "".join(ch if (ch.isalnum() or ch in "-_") else " " for ch in safe)
         safe = " ".join(safe.split())
         out = proj.renders / f"{safe}.mp4"
-    render.render(proj, prop, resolution, out, progress)
+    free = {}
+    if lang != "sv":
+        need = i18n.free_texts(prop, lang)
+        cache = (proj.data.get("i18n_cache") or {}).get(lang, {})
+        missing = [t for t in need if t not in cache]
+        if missing:
+            progress(0.01, "Översätter texterna")
+            got = i18n.translate_free(missing, lang)
+            if got:
+                proj.reload()
+                proj.data.setdefault("i18n_cache", {}).setdefault(lang, {}).update(got)
+                proj.save()
+                cache = dict(cache, **got)
+        free = cache
+    render.render(proj, prop, resolution, out, progress, lang=lang, free=free)
     renders = dict(prop.get("renders") or {})
-    renders[resolution] = out.name
+    key = resolution if lang == "sv" else f"{resolution}:{lang}"
+    renders[key] = out.name
     result = {"file": out.name, "path": str(out)}
     if resolution != "preview":
         otio = out.with_suffix(".otio")
         timeline.write_otio(proj, prop, otio)
         renders["otio"] = otio.name
         result["otio"] = otio.name
+        srt = out.with_suffix(".srt")
+        if render.write_srt(proj, prop, srt, lang, free):
+            result["srt"] = srt.name
     proj.update_proposal(prop_id, renders=renders)
     return result
 

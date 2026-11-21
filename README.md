@@ -1,4 +1,4 @@
-# DeHazeIQ – AI-powered video editing, without the hassle (v0.11)
+# DeHazeIQ – AI-powered video editing, without the hassle (v0.12)
 
 Lokalt AI-videoredigeringsprogram för dyk-, natur- och resefilm. Fungerar på **Mac och Windows**,
 och kan styras från **mobil och surfplatta** via wifi.
@@ -134,6 +134,35 @@ temperatur, nyans, skärpa och vinjett – för hela filmen eller ett klipp, med
 - **Övergångar:** AI:n väljer per klippbyte – raka klipp när motivet står still på samma plats
   (matchklipp), svep i rörelsens riktning, toning via svart vid nytt dyk och aldrig för många
   effektövergångar i rad. I redigeringen kan varje byte ändras (ett 20-tal övergångar).
+
+## Fler stilar
+
+Filmisk bredbild (svarta kanter, dämpade färger), Vintage Super 8 (varmt, filmkorn, glöd, fladder),
+Musikvideo (klipp på takten, zoomryck, blixt), Ambient (långa tagningar, bara naturljud, ingen
+text), Vlogg (tidsordning med "Dag 1"-skyltar) och Minimal (inga effekter).
+
+## Texter på flera språk
+
+Svenska, engelska, tyska, spanska, franska, italienska, nederländska, norska, danska och finska.
+Djurgrupper, berättelsernas namn, kapitel, pratbubblor, datum och dykdata översätts med inbyggda
+tabeller. Egna texter översätts av djupanalysens modell på Mac och kan rättas per språk under
+Redigera › Text. Vid export väljs ett eller flera språk; varje version blir ett jobb i kön och får
+en undertextfil (.srt).
+
+## Bildförbättring
+
+- **Ta bort dis:** lyfter bort dis-slöjan per färgkanal och ökar den lokala kontrasten.
+- **Partiklar:** tidsfilter som dämpar svävande partiklar från lampan.
+- **Stabilisering:** skakiga klipp lugnas (FFmpeg deshake).
+
+AI:n slår på dis- och partikelreducering för undervattensklipp och stabilisering för skakiga klipp;
+allt kan justeras per film eller klipp under Redigera › Färg.
+
+## Dykdata
+
+Importera dykloggen (Subsurface-XML, UDDF, Suunto DM5/SML eller CSV) i analysvyn. Klippen kopplas
+till dyken via tidsstämplarna; klockskillnaden räknas fram automatiskt (även tidszoner) och kan
+justeras. Djup och temperatur visas i filmen (m/°C eller ft/°F).
 
 ## Effekter
 

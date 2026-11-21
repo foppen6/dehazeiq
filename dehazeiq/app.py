@@ -20,7 +20,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import cv2
 
-from . import TAGLINE, __version__, ai, editor, effects, generator, media, pipeline, render, tagging, vlm
+from . import TAGLINE, __version__, ai, divelog, editor, effects, generator, i18n, media, pipeline, render, tagging, vlm
 from .config import FILM_TYPES, FORMATS, HOME, LOOKS, PLATFORMS, PROJECTS_DIR, STYLES
 from .project import JOBS, Project, auto_name, save_default_settings
 
@@ -66,6 +66,7 @@ _PS_HEAD = ("$ErrorActionPreference='Stop';[Console]::OutputEncoding=[Text.Encod
 _PS_FILTERS = {
     "files": "Video|*.mp4;*.mov;*.m4v;*.mts;*.m2ts;*.avi;*.mkv;*.insv|Alla filer|*.*",
     "music": "Ljud|*.mp3;*.m4a;*.aac;*.wav;*.aif;*.aiff;*.flac;*.ogg|Alla filer|*.*",
+    "divelog": "Dykloggar|*.ssrf;*.xml;*.uddf;*.udcf;*.sml;*.csv|Alla filer|*.*",
 }
 
 
@@ -76,7 +77,7 @@ def _powershell(kind: str):
                 "if($d.ShowDialog($owner) -eq 'OK'){$d.SelectedPath}")
     else:
         multi = "$true" if kind == "files" else "$false"
-        title = "Välj filmklipp" if kind == "files" else "Välj musik"
+        title = {"files": "Välj filmklipp", "music": "Välj musik", "divelog": "Välj dyklogg"}[kind]
         body = ("$d=New-Object System.Windows.Forms.OpenFileDialog;"
                 f"$d.Multiselect={multi};$d.Title='{title}';$d.Filter='{_PS_FILTERS[kind]}';"
                 "if($d.ShowDialog($owner) -eq 'OK'){$d.FileNames -join \"`n\"}")
@@ -100,7 +101,7 @@ def _zenity(kind: str):
 
 
 def choose(kind: str):
-    if kind not in ("folder", "files", "music"):
+    if kind not in ("folder", "files", "music", "divelog"):
         raise ApiError("Okänd dialog")
     if sys.platform == "darwin":
         if kind == "folder":
@@ -111,6 +112,8 @@ def choose(kind: str):
                 'set out to ""\n'
                 'repeat with f in fs\n set out to out & POSIX path of f & linefeed\nend repeat\n'
                 'return out')
+        if kind == "divelog":
+            return _osascript('POSIX path of (choose file with prompt "Välj dyklogg (Subsurface, UDDF, Suunto, CSV)")')
         return _osascript('POSIX path of (choose file with prompt "Välj musik" '
                           'of type {"public.audio"})')
     if sys.platform.startswith("win"):
@@ -245,6 +248,16 @@ def frame_jpeg(p: Project, cid: str, t: float, width: int) -> bytes:
 
 
 # ---------- HTTP ----------
+
+def _species_map():
+    bio = ai.get_bio()
+    out = {}
+    if bio:
+        for row in bio.species:
+            out[row[0]] = row
+            out[row[1]] = row
+    return out
+
 
 def _clean_plans(plans):
     out = []
@@ -455,6 +468,7 @@ class Handler(BaseHTTPRequestHandler):
                 "platforms": PLATFORMS, "film_types": FILM_TYPES,
                 "looks": {k: v["label"] for k, v in LOOKS.items()},
                 "transitions": effects.TRANSITIONS,
+                "languages": i18n.LANGS,
                 "styles": {k: {"label": v["label"], "avg_shot": v["avg_shot"]} for k, v in STYLES.items()},
                 "formats": list(FORMATS),
             })
@@ -472,6 +486,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(JOBS.status(p.id))
             if api[2:] == ["themes"]:
                 return self._json(pipeline.themes(p.id))
+            if api[2:] == ["divelog"]:
+                return self._json(divelog.summary(p))
             if len(api) == 5 and api[2] == "proposal" and api[4] == "still":
                 prop = p.proposal(api[3])
                 if not prop:
@@ -618,6 +634,21 @@ class Handler(BaseHTTPRequestHandler):
             JOBS.start(p.id, "deep", pipeline.deep_analyze, p.id, bool(body.get("redo")),
                        label="Djupanalys", project_name=p.data["name"])
             return self._json({"ok": True})
+        if action == ["divelog"]:
+            try:
+                return self._json(divelog.import_log(p, body.get("path", "")))
+            except (divelog.DiveLogError, OSError) as e:
+                raise ApiError(str(e))
+        if action == ["divelog", "offset"]:
+            try:
+                return self._json(divelog.set_offset(p, body.get("offset", 0), bool(body.get("auto"))))
+            except divelog.DiveLogError as e:
+                raise ApiError(str(e))
+        if action == ["divelog", "remove"]:
+            p.reload()
+            p.data.pop("divelog", None)
+            p.save()
+            return self._json({"ok": True})
         if action == ["music"]:
             info = pipeline.set_music(p.id, body.get("path"))
             return self._json({"music": info})
@@ -627,6 +658,10 @@ class Handler(BaseHTTPRequestHandler):
             for k in ("format", "length", "style"):
                 if k in body:
                     s[k] = body[k]
+            if body.get("units") in ("metric", "imperial"):
+                s["units"] = body["units"]
+                for prop in p.data.get("proposals", []):
+                    (prop.get("renders") or {}).pop("preview", None)
             if isinstance(body.get("effects"), dict):
                 eff = effects.enabled(s)
                 eff.update({k: bool(v) for k, v in body["effects"].items() if k in effects.EFFECTS})
@@ -689,11 +724,14 @@ class Handler(BaseHTTPRequestHandler):
                 if not plats:
                     raise ApiError("Välj minst en plattform")
                 prop = p.proposal(prop_id)
+                langs = [x for x in body.get("langs") or ["sv"] if x in i18n.LANGS] or ["sv"]
                 for pf in plats:
-                    JOBS.start(p.id, f"render:{res}:{prop_id}", pipeline.export_for, p.id, prop_id, pf, res,
-                               label=f"Export {PLATFORMS[pf]['label']} · {prop.get('title') or prop['style_label']}",
-                               project_name=p.data["name"])
-                return self._json({"queued": len(plats)})
+                    for lg in langs:
+                        JOBS.start(p.id, f"render:{res}:{prop_id}", pipeline.export_for, p.id, prop_id, pf, res, lg,
+                                   label=f"Export {PLATFORMS[pf]['label']} · {lg.upper()} · "
+                                         f"{prop.get('title') or prop['style_label']}",
+                                   project_name=p.data["name"])
+                return self._json({"queued": len(plats) * len(langs)})
             if verb == "edit":
                 try:
                     return self._json({"proposal": pipeline.edit_proposal(p.id, prop_id, body.get("op"),
@@ -708,6 +746,15 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({"proposal": pipeline.set_platform(p.id, prop_id, pf, body.get("length"))})
                 except (editor.EditError, RuntimeError, generator.GenerateError) as e:
                     raise ApiError(str(e))
+            if verb == "texts":
+                lg = body.get("lang", "en")
+                if lg not in i18n.LANGS:
+                    raise ApiError("Okänt språk")
+                prop = p.proposal(prop_id)
+                free = (p.data.get("i18n_cache") or {}).get(lg, {})
+                return self._json({"lang": lg, "texts": i18n.localize(prop, lg, _species_map(), free),
+                                   "original": i18n.localize(prop, "sv"),
+                                   "missing": [t for t in i18n.free_texts(prop, lg) if t not in free]})
             if verb == "alternatives":
                 try:
                     return self._json({"alternatives": editor.alternatives(p, p.proposal(prop_id),

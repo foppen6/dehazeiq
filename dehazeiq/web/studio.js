@@ -210,14 +210,17 @@ function exportPlatforms(p) {
   if (!state.exportPlats || state.exportPlatsFor !== p.id) { state.exportPlats = cur ? [cur] : []; state.exportPlatsFor = p.id; }
   return `<section class="stack"><h2>Plattformar</h2>
     <p class="muted" style="margin:0;font-size:13px">Välj en eller flera. Filmen anpassas automatiskt (format, längd och beskärning) och varje export läggs i kön.</p>
-    <div class="chips">${Object.entries(pfs).map(([k, pf]) => `<button class="chip" data-explat="${k}" aria-pressed="${state.exportPlats.includes(k)}">${esc(pf.label)} <span class="muted">· ${pf.format}</span></button>`).join("")}</div></section>`;
+    <div class="chips">${Object.entries(pfs).map(([k, pf]) => `<button class="chip" data-explat="${k}" aria-pressed="${state.exportPlats.includes(k)}">${esc(pf.label)} <span class="muted">· ${pf.format}</span></button>`).join("")}</div></section>
+    <section class="stack"><h2>Språk för texterna</h2>
+    <p class="muted" style="margin:0;font-size:13px">En version per språk. Artnamn, kapitel och datum översätts automatiskt; egna texter översätts av djupanalysen på Mac eller rättas under Redigera › Text. En undertextfil (.srt) följer med.</p>
+    <div class="chips">${Object.entries((state.info && state.info.languages) || { sv: "Svenska" }).map(([k, l]) => `<button class="chip" data-exlang="${k}" aria-pressed="${(state.exportLangs || ["sv"]).includes(k)}">${esc(l)}</button>`).join("")}</div></section>`;
 }
 
 async function exportQueued() {
   const p = propById(state.exportProp);
   if (!p) return;
   try {
-    const r = await api("POST", `/api/p/${state.pid}/proposal/${p.id}/export`, { platforms: state.exportPlats, resolution: state.exportRes });
+    const r = await api("POST", `/api/p/${state.pid}/proposal/${p.id}/export`, { platforms: state.exportPlats, resolution: state.exportRes, langs: state.exportLangs || ["sv"] });
     toast(`${r.queued} export${r.queued === 1 ? "" : "er"} lagda i kön.`, true);
     state.expectJob = true;
     loadQueue();
@@ -264,7 +267,7 @@ function refreshStill() {
 function curGrade(p) {
   const s = p.shots[state.ed.i] || {};
   const g = state.ed.scope === "shot" ? (s.grade || p.grade) : p.grade;
-  return Object.assign({ look: "none", strength: 1, exposure: 0, contrast: 0, saturation: 0, temperature: 0, tint: 0, sharpen: 0, vignette: 0 }, g || {});
+  return Object.assign({ look: "none", strength: 1, exposure: 0, contrast: 0, saturation: 0, temperature: 0, tint: 0, sharpen: 0, vignette: 0, dehaze: null, particles: null, stabilize: null }, g || {});
 }
 
 function edTimeline(p) {
@@ -330,6 +333,11 @@ function edInspectorClip(p, s) {
       <span class="grow"></span><button class="btn small danger" data-act="ed-delete">${icon("trash", 14)}Ta bort</button></div>`;
 }
 
+function encSlider(g, k, label) {
+  const auto = g[k] == null;
+  return `<label class="sl"><span>${label}</span><input type="range" min="0" max="1" step="0.05" value="${auto ? 0.4 : g[k]}" data-edgrade="${k}" style="accent-color:var(--accent)${auto ? ";opacity:.5" : ""}"><span class="num" data-edgv="${k}">${auto ? "AI" : Math.round(g[k] * 100)}</span></label>`;
+}
+
 function edInspectorColor(p) {
   const g = curGrade(p);
   const looks = (state.info && state.info.looks) || {};
@@ -344,12 +352,37 @@ function edInspectorColor(p) {
       ${slider("strength", "Styrka", 0)}</div>
     <div class="stack" style="gap:6px"><div class="spread" style="align-items:center"><span class="flabel">Justera</span><button class="btn small" data-act="ed-grade-zero">Nollställ</button></div>
       ${slider("exposure", "Exponering")}${slider("contrast", "Kontrast")}${slider("saturation", "Mättnad")}${slider("temperature", "Temperatur")}${slider("tint", "Nyans")}${slider("sharpen", "Skärpa", 0)}${slider("vignette", "Vinjett", 0)}</div>
-    <p class="muted" style="margin:0;font-size:12px">AI:ns vitbalans för undervatten ligger kvar under din färgsättning. Håll in "Före" för att jämföra.</p>`;
+    <div class="stack" style="gap:6px"><div class="spread" style="align-items:center"><span class="flabel">Bildförbättring</span><button class="btn small" data-act="ed-enh-auto">Låt AI välja</button></div>
+      ${encSlider(g, "dehaze", "Ta bort dis")}${encSlider(g, "particles", "Partiklar")}
+      <label class="row" style="gap:10px;color:var(--text-2);font-size:13px"><input type="checkbox" data-edstab ${g.stabilize ? "checked" : ""} style="width:18px;height:18px;accent-color:var(--accent)">Stabilisera skakig bild${g.stabilize == null ? ' <span class="muted">(AI: automatiskt)</span>' : ""}</label></div>
+    <p class="muted" style="margin:0;font-size:12px">AI:ns vitbalans för undervatten ligger kvar under din färgsättning. Håll in "Före" för att jämföra. Bildförbättring syns i förhandsvisningen av filmen.</p>`;
 }
 
 function edInspectorText(p) {
+  const langs = (state.info && state.info.languages) || { sv: "Svenska" };
+  const lang = state.ed.lang || "sv";
+  const sel = `<label class="stack" style="gap:6px"><span class="flabel">Språk</span><select class="selfield" data-edlang>${Object.entries(langs).map(([k, l]) => `<option value="${k}" ${k === lang ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label>`;
+  if (lang !== "sv") {
+    if (!state.ed.texts || state.ed.texts.lang !== lang || state.ed.texts.prop !== p.id) {
+      state.ed.texts = { lang, prop: p.id, loading: true };
+      api("POST", `/api/p/${state.pid}/proposal/${p.id}/texts`, { lang }).then((r) => { state.ed.texts = Object.assign(r, { prop: p.id }); render(); }).catch(fail);
+      return `${sel}<span class="muted">Hämtar texterna …</span>`;
+    }
+    if (state.ed.texts.loading) return `${sel}<span class="muted">Hämtar texterna …</span>`;
+    const tx = state.ed.texts.texts, orig = state.ed.texts.original;
+    const rows = p.shots.map((s, i) => tx.shots[i] ? `<div class="stack" style="gap:6px;padding-top:8px;border-top:1px solid var(--line)">
+        <span class="muted" style="font-size:12px">Klipp ${i + 1} · original: ${esc(orig.shots[i] ? orig.shots[i].text : "")}</span>
+        <input class="field" data-i18ntext="${i}" value="${esc(tx.shots[i].text)}" maxlength="60">
+        ${tx.shots[i].sub || (orig.shots[i] && orig.shots[i].sub) ? `<input class="field" data-i18nsub="${i}" value="${esc(tx.shots[i].sub || "")}" maxlength="60">` : ""}</div>` : "").join("");
+    return `${sel}
+      <label class="stack" style="gap:6px"><span class="flabel">Titel</span><span class="muted" style="font-size:12px">Original: ${esc(orig.title || "–")}</span>
+        <input class="field" id="i18nTitle" value="${esc(tx.title || "")}" maxlength="80"></label>
+      ${rows}
+      ${state.ed.texts.missing.length ? `<p class="muted" style="margin:0;font-size:12px">${state.ed.texts.missing.length} egna texter är inte översatta än. De översätts av djupanalysen vid export på Macen – eller skriv in dem här.</p>` : ""}
+      <div class="row"><button class="btn small primary" data-act="ed-i18n-save">Spara ${esc(langs[lang])}</button></div>`;
+  }
   const title = (p.effects || {}).title || "";
-  return `<label class="stack" style="gap:6px"><span class="flabel">Titel i början av filmen</span>
+  return `${sel}<label class="stack" style="gap:6px"><span class="flabel">Titel i början av filmen</span>
       <input class="field" id="edTitle" value="${esc(title)}" maxlength="80" placeholder="Ingen titel"></label>
     <div class="row"><button class="btn small primary" data-act="ed-title">Spara titel</button><button class="btn small" data-act="ed-title-clear">Ta bort titel</button></div>
     <p class="muted" style="margin:0;font-size:12px">Titeln tonas in över första klippet. Slå av eller på den under Effekter i förslagsvyn.</p>`;
@@ -445,6 +478,14 @@ document.addEventListener("click", async (ev) => {
     state.exportPlats = [...set];
     return render();
   }
+  if (d.exlang) {
+    const set = new Set(state.exportLangs || ["sv"]);
+    if (set.has(d.exlang)) set.delete(d.exlang); else set.add(d.exlang);
+    if (!set.size) set.add("sv");
+    state.exportLangs = [...set];
+    return render();
+  }
+  if (d.dvoff) return diveOffset(Number(d.dvoff));
   if (d.edit) return openEditor(d.edit);
   if (d.edshot !== undefined) { state.ed.i = Number(d.edshot); state.ed.alts = null; return render(); }
   if (d.edtab) { state.ed.tab = d.edtab; return render(); }
@@ -470,6 +511,12 @@ document.addEventListener("click", async (ev) => {
     case "ed-delete": return edit("delete", { i: state.ed.i });
     case "ed-autocenter": return edit("auto_center", { i: state.ed.i });
     case "ed-grade-reset": return edit("grade_reset_shot", { i: state.ed.i });
+    case "ed-enh-auto": { const g = curGrade(edProp()); g.dehaze = null; g.particles = null; g.stabilize = null; stageGrade(g); return render(); }
+    case "dive-import": return diveImport();
+    case "dive-auto": return diveOffset(null);
+    case "dive-remove": await api("POST", `/api/p/${state.pid}/divelog/remove`, {}); state.dive = null; return render();
+    case "dive-units": { const u = (settings().units || "metric") === "metric" ? "imperial" : "metric"; await saveSettings({ units: u }); return render(); }
+    case "ed-i18n-save": return saveI18n();
     case "ed-grade-zero": { const g = curGrade(edProp()); ["exposure", "contrast", "saturation", "temperature", "tint", "sharpen", "vignette"].forEach((k) => { g[k] = 0; }); g.strength = 1; stageGrade(g); return render(); }
     case "ed-title": return edit("title", { text: $("#edTitle").value });
     case "ed-text": return edit("text", { i: state.ed.i, kind: $("#edTxtKind").value, text: $("#edTxt").value, sub: $("#edTxtSub").value });
@@ -496,6 +543,8 @@ document.addEventListener("change", (ev) => {
   const d = t.dataset;
   if (d.edlen !== undefined) return edit("trim", { i: state.ed.i, duration: Number(t.value) });
   if (d.edtr !== undefined) return edit("transition", { i: state.ed.i, type: t.value });
+  if (d.edstab !== undefined) { const g = curGrade(edProp()); g.stabilize = t.checked; stageGrade(g); return render(); }
+  if (d.edlang !== undefined) { state.ed.lang = t.value; state.ed.texts = null; return render(); }
   if (d.platform) return changePlatform(d.platform, t.value);
   if (d.ftplat) { const pl = state.setup.plans[d.ftplat]; pl.platform = t.value; pl.length = null; return render(); }
   if (d.ftlen) { state.setup.plans[d.ftlen].length = Number(t.value); return undefined; }
@@ -512,3 +561,82 @@ document.addEventListener("pointerup", () => {
 });
 
 loadQueue();
+
+
+async function saveI18n() {
+  const p = edProp();
+  const shots = {};
+  document.querySelectorAll("[data-i18ntext]").forEach((el) => {
+    const i = el.dataset.i18ntext;
+    const sub = document.querySelector(`[data-i18nsub="${i}"]`);
+    shots[i] = { text: el.value, sub: sub ? sub.value : "" };
+  });
+  await edit("i18n", { lang: state.ed.lang, title: $("#i18nTitle").value, shots });
+  state.ed.texts = null;
+  toast("Sparat. Exportera med språket valt för att få filmen med de här texterna.", true);
+  render();
+}
+
+/* ================= dykdata ================= */
+state.dive = null;
+async function loadDive() {
+  if (!state.pid) return;
+  try { state.dive = await api("GET", `/api/p/${state.pid}/divelog`); state.divePid = state.pid; render(); } catch (_) { /* tyst */ }
+}
+function fmtOffset(s) {
+  const sign = s < 0 ? "−" : "+";
+  const a = Math.abs(Math.round(s));
+  const h = Math.floor(a / 3600), m = Math.floor((a % 3600) / 60), ss = a % 60;
+  return `${sign}${h ? `${h} h ` : ""}${m} min${ss ? ` ${ss} s` : ""}`;
+}
+function diveProfile(dv) {
+  if (!dv.dives.length) return "";
+  const W = 640, H = 120;
+  const t0 = Math.min(...dv.dives.map((d) => d.start)), t1 = Math.max(...dv.dives.map((d) => d.start + d.duration));
+  const span = Math.max(60, t1 - t0);
+  const maxd = Math.max(...dv.dives.map((d) => d.max_depth)) || 10;
+  const x = (t) => ((t - t0) / span) * W;
+  const y = (d) => 8 + (d / maxd) * (H - 16);
+  const paths = dv.dives.map((d) => `<path d="${d.profile.map((p, k) => `${k ? "L" : "M"}${x(d.start + p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`).join(" ")}" fill="none" stroke="var(--accent)" stroke-width="2"/>`).join("");
+  const marks = dv.clip_marks.map((c) => { const tt = c.t + dv.offset; if (tt < t0 - 600 || tt > t1 + 600) return ""; return `<rect x="${x(tt).toFixed(1)}" y="0" width="${Math.max(2, (c.dur / span) * W).toFixed(1)}" height="${H}" fill="#F2C14E" opacity=".35"><title>${esc(c.name)}</title></rect>`; }).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Dykprofil med klippen markerade" style="width:100%;height:auto;background:#0B1016;border-radius:10px">${marks}${paths}</svg>`;
+}
+function diveCard() {
+  if (remote()) return "";
+  if (state.pid && state.divePid !== state.pid) { state.divePid = state.pid; loadDive(); }
+  const dv = state.dive;
+  const units = (settings().units || "metric");
+  if (!dv || !dv.dives.length) {
+    return `<section class="box" style="flex-direction:row;align-items:center;gap:14px;flex-wrap:wrap">
+      <div class="stack grow" style="gap:4px"><b>Dykdata från dykdatorn</b>
+      <span class="muted" style="font-size:13px">Visa djup och temperatur i filmerna. Exportera loggen från Subsurface (eller Suunto DM5) och välj filen här – UDDF, Subsurface-XML, SML och CSV fungerar.</span></div>
+      <button class="btn" data-act="dive-import">Importera dyklogg</button></section>`;
+  }
+  const md = Math.max(...dv.dives.map((d) => d.max_depth));
+  return `<section class="box stack" style="gap:12px">
+    <div class="spread" style="align-items:center"><div class="stack" style="gap:4px"><b>Dykdata · ${esc(dv.source || "")}</b>
+      <span class="muted" style="font-size:13px">${dv.dives.length} dyk · max ${md} m · ${dv.matched} av ${dv.clips} klipp ligger i ett dyk</span></div>
+      <div class="row"><button class="btn small" data-act="dive-units">${units === "metric" ? "m · °C" : "ft · °F"}</button><button class="btn small" data-act="dive-import">Byt logg</button><button class="btn small" data-act="dive-remove">Ta bort</button></div></div>
+    ${diveProfile(dv)}
+    <div class="row" style="flex-wrap:wrap;gap:8px;align-items:center"><span class="muted" style="font-size:13px">Klockskillnad kamera → dykdator: <b class="num" style="color:var(--text)">${fmtOffset(dv.offset)}</b></span>
+      <button class="btn small" data-dvoff="-3600">−1 h</button><button class="btn small" data-dvoff="-60">−1 min</button><button class="btn small" data-dvoff="60">+1 min</button><button class="btn small" data-dvoff="3600">+1 h</button><button class="btn small" data-act="dive-auto">Automatiskt</button></div>
+    <span class="muted" style="font-size:12px">Gula fält är klippen. De ska ligga i dyket (kurvan). Slå av eller på dykdata under Effekter i förslagsvyn.</span></section>`;
+}
+async function diveImport() {
+  try {
+    const r = await api("POST", "/api/choose", { kind: "divelog" });
+    if (!r.paths || !r.paths.length) return;
+    state.dive = await api("POST", `/api/p/${state.pid}/divelog`, { path: r.paths[0] });
+    toast(`${state.dive.dives.length} dyk inlästa – ${state.dive.matched} av ${state.dive.clips} klipp matchade.`, true);
+    if (state.dive.matched) await saveSettings({ effects: Object.assign({}, settings().effects || {}, { divedata: true }) });
+    render();
+  } catch (e) { fail(e); }
+}
+async function diveOffset(delta) {
+  try {
+    const body = delta == null ? { auto: true } : { offset: (state.dive.offset || 0) + delta };
+    state.dive = await api("POST", `/api/p/${state.pid}/divelog/offset`, body);
+    (P().proposals || []).forEach((p) => { if (p.renders) delete p.renders.preview; });
+    render();
+  } catch (e) { fail(e); }
+}

@@ -65,6 +65,48 @@ STYLES = {
         "temperature": 0.2, "color": "natural", "orig_audio": 0.85,
         "fade": 1.0,
     },
+    "widescreen": {
+        "label": "Filmisk bredbild",
+        "avg_shot": 4.2, "min_shot": 2.6, "max_shot": 7.0,
+        "beat_sync": 0.5, "motion_pref": 0.0, "variety": 0.55,
+        "temperature": 0.22, "color": "muted", "orig_audio": 0.25,
+        "fade": 1.4, "look_fx": {"letterbox": 1},
+    },
+    "vintage": {
+        "label": "Vintage Super 8",
+        "avg_shot": 2.8, "min_shot": 1.6, "max_shot": 4.5,
+        "beat_sync": 0.6, "motion_pref": 0.1, "variety": 0.5,
+        "temperature": 0.3, "color": "vintage", "orig_audio": 0.15,
+        "fade": 0.8, "look_fx": {"grain": 0.8, "weave": 1, "glow": 1},
+    },
+    "musicvideo": {
+        "label": "Musikvideo",
+        "avg_shot": 1.1, "min_shot": 0.5, "max_shot": 2.2,
+        "beat_sync": 1.0, "motion_pref": 0.7, "variety": 0.45,
+        "temperature": 0.3, "color": "punchy", "orig_audio": 0.0,
+        "fade": 0.2, "look_fx": {}, "beat_flash": 4,
+    },
+    "ambient": {
+        "label": "Ambient",
+        "avg_shot": 9.0, "min_shot": 6.0, "max_shot": 14.0,
+        "beat_sync": 0.0, "motion_pref": -0.5, "variety": 0.6,
+        "temperature": 0.15, "color": "natural", "orig_audio": 1.0,
+        "fade": 2.0, "look_fx": {}, "no_music": True, "no_text": True,
+    },
+    "vlog": {
+        "label": "Vlogg",
+        "avg_shot": 2.4, "min_shot": 1.4, "max_shot": 4.0,
+        "beat_sync": 0.7, "motion_pref": 0.2, "variety": 0.6,
+        "temperature": 0.3, "color": "natural", "orig_audio": 0.35,
+        "fade": 0.5, "look_fx": {},
+    },
+    "minimal": {
+        "label": "Minimal",
+        "avg_shot": 3.2, "min_shot": 2.0, "max_shot": 5.5,
+        "beat_sync": 0.7, "motion_pref": 0.0, "variety": 0.55,
+        "temperature": 0.2, "color": "natural", "orig_audio": 0.2,
+        "fade": 0.6, "look_fx": {}, "no_effects": True,
+    },
     "playful": {
         "label": "Lekfull",
         "avg_shot": 2.2, "min_shot": 1.0, "max_shot": 3.6,
@@ -79,6 +121,8 @@ COLOR_PROFILES = {
     "punchy": "eq=contrast=1.12:saturation=1.18",
     "natural": "eq=contrast=1.03:saturation=1.05",
     "playful": "eq=contrast=1.08:saturation=1.25:brightness=0.01,colorbalance=rm=0.03:bm=-0.02",
+    "muted": "eq=contrast=1.1:saturation=0.85:gamma=0.97,colorbalance=bs=0.03:rh=0.03",
+    "vintage": "colorbalance=rs=0.07:gs=0.02:bs=-0.07:rm=0.05:bm=-0.05:rh=0.03:bh=-0.03,eq=saturation=0.8:contrast=1.06:gamma=1.03",
 }
 
 PROXY_SHORT_SIDE = 540

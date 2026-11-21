@@ -74,6 +74,11 @@ def clean_grade(g):
     for k in GRADE_KEYS:
         lo = 0.0 if k in ("sharpen", "vignette") else -1.0
         out[k] = float(min(1.0, max(lo, float(g.get(k, 0.0) or 0.0))))
+    for k in ("dehaze", "particles"):  # None = AI:ns automatik
+        if g.get(k) is not None:
+            out[k] = float(min(1.0, max(0.0, float(g[k]))))
+    if g.get("stabilize") is not None:
+        out["stabilize"] = bool(g["stabilize"])
     return out
 
 
@@ -188,6 +193,17 @@ def apply(project, prop, op, args):
         else:
             kind = args.get("kind") if args.get("kind") in ("label", "chapter", "pop") else "label"
             s["text"] = {"kind": kind, "text": text, "sub": str(args.get("sub", "")).strip()[:60]}
+    elif op == "i18n":
+        lang = args.get("lang")
+        from .i18n import LANGS
+        if lang not in LANGS or lang == "sv":
+            raise EditError("Välj ett annat språk än svenska")
+        over = prop.setdefault("i18n", {}).setdefault(lang, {})
+        if "title" in args:
+            over["title"] = str(args["title"]).strip()[:80]
+        for k, v in (args.get("shots") or {}).items():
+            over.setdefault("shots", {})[str(k)] = {"text": str(v.get("text", "")).strip()[:60],
+                                                   "sub": str(v.get("sub", "")).strip()[:60]}
     elif op == "title":
         text = str(args.get("text", "")).strip()[:80]
         prop.setdefault("effects", {})["title"] = text
