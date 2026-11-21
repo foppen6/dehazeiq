@@ -31,10 +31,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p llz packaging/llama
-          gh release download --repo ggml-org/llama.cpp --pattern '*bin-macos-arm64.zip' -D llz \
-            || gh release download --repo ggml-org/llama.cpp --pattern '*bin-macos-arm64.tar.gz' -D llz
+          gh release view --repo ggml-org/llama.cpp --json tagName,assets --jq '.tagName, .assets[].name' | tee llz/names.txt
+          asset=$(grep -i 'macos' llz/names.txt | grep -i 'arm64' | grep -iv 'xcframework\|kleidiai' | grep -i '\.zip$\|\.tar\.gz$' | head -1)
+          echo "Valt: $asset"
+          gh release download --repo ggml-org/llama.cpp --pattern "$asset" -D llz
           cd llz
           for f in *; do case "$f" in *.zip) unzip -q "$f";; *.tar.gz) tar xzf "$f";; esac; done
+          find . -maxdepth 4 | head -50
           srv=$(find . -name llama-server -type f | head -1)
           echo "llama-server: $srv"
           cp -R "$(dirname "$srv")"/. ../packaging/llama/
