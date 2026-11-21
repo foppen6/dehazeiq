@@ -20,7 +20,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import cv2
 
-from . import TAGLINE, __version__, ai, effects, media, pipeline, tagging
+from . import TAGLINE, __version__, ai, effects, media, pipeline, tagging, vlm
 from .config import FORMATS, HOME, PROJECTS_DIR, STYLES
 from .project import JOBS, Project, auto_name, save_default_settings
 
@@ -246,6 +246,13 @@ def frame_jpeg(p: Project, cid: str, t: float, width: int) -> bytes:
 
 # ---------- HTTP ----------
 
+def _vlm_download():
+    try:
+        vlm.download()
+    except Exception as e:  # noqa: BLE001
+        print("Nedladdning av djupanalysmodellen misslyckades:", e)
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = f"DeHazeIQ/{__version__}"
 
@@ -422,11 +429,14 @@ class Handler(BaseHTTPRequestHandler):
                 "remote": self.is_remote, "encoder": media.encoder_label(),
                 "hw_encoder": bool(media.hw_encoder()), "clip_ai": tagging.AVAILABLE or ai.available(),
                 "projects_dir": str(PROJECTS_DIR),
+                "analysis_version": pipeline.target_version(),
                 "styles": {k: {"label": v["label"], "avg_shot": v["avg_shot"]} for k, v in STYLES.items()},
                 "formats": list(FORMATS),
             })
         if api == ["projects"]:
             return self._json(Project.list_all())
+        if api == ["vlm"]:
+            return self._json(vlm.status())
         if len(api) >= 2 and api[0] == "p":
             p = _project(api[1])
             if len(api) == 2:
@@ -476,6 +486,15 @@ class Handler(BaseHTTPRequestHandler):
             if body.get("enable"):
                 return self._json(start_lan(self.server.server_address[1] + 1))
             return self._json(stop_lan())
+        if api == ["vlm", "download"]:
+            if self.is_remote:
+                raise ApiError("Det här görs på datorn.", HTTPStatus.FORBIDDEN)
+            st = vlm.status()
+            if not st["supported"]:
+                raise ApiError("Djupanalys stöds inte på den här datorn")
+            if st["download"].get("state") != "running":
+                threading.Thread(target=_vlm_download, daemon=True).start()
+            return self._json({"ok": True})
         if len(api) < 3 or api[0] != "p":
             raise ApiError("Hittades inte", HTTPStatus.NOT_FOUND)
         p = _project(api[1])
@@ -518,7 +537,14 @@ class Handler(BaseHTTPRequestHandler):
         if action == ["analyze"]:
             if JOBS.busy(p.id):
                 raise ApiError(busy_msg, HTTPStatus.CONFLICT)
-            JOBS.start(p.id, "analyze", pipeline.analyze, p.id, bool(body.get("redo")))
+            JOBS.start(p.id, "analyze", pipeline.analyze_all, p.id, bool(body.get("redo")))
+            return self._json({"ok": True})
+        if action == ["deep"]:
+            if JOBS.busy(p.id):
+                raise ApiError(busy_msg, HTTPStatus.CONFLICT)
+            if not vlm.ready():
+                raise ApiError("Ladda ner modellen för djupanalys först")
+            JOBS.start(p.id, "deep", pipeline.deep_analyze, p.id, bool(body.get("redo")))
             return self._json({"ok": True})
         if action == ["music"]:
             info = pipeline.set_music(p.id, body.get("path"))

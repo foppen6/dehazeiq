@@ -13,7 +13,7 @@ import numpy as np
 from . import ai, tagging
 
 SAMPLE_FPS = 4.0
-ANALYSIS_VERSION = 2  # 2: djurets position via AI-rutnät (loc_*), etiketter på utsnittet
+ANALYSIS_VERSION = 3  # 2: djurets position via AI-rutnät (loc_*); 3: artigenkänning (bio_emb)
 WORK_WIDTH = 320
 TAG_EVERY = 2.0  # sekunder mellan bildrutor till CLIP
 
@@ -105,7 +105,8 @@ def analyze_clip(proxy_path, out_npz, progress=None, with_tags=True) -> dict:
     ai_step = max(1, int(round(SAMPLE_FPS)))  # en AI-bild per sekund
     ai_buf, ai_buf_t = [], []
     ai_rec = {"t": [], "emb": [], "int": [], "beauty": [], "probs": [], "crop": []}
-    loc_rec = {"t": [], "x": [], "y": [], "conf": [], "score": [], "emb": []}
+    loc_rec = {"t": [], "x": [], "y": [], "conf": [], "score": [], "emb": [], "crop": []}
+    bio = ai.get_bio() if model else None
     clip_len = total / fps if total else 0.0
     loc_every = 1 if clip_len and clip_len < 10 else 2  # korta klipp: varje sekund
 
@@ -122,13 +123,15 @@ def analyze_clip(proxy_path, out_npz, progress=None, with_tags=True) -> dict:
         for img, tt in zip(ai_buf, ai_buf_t):
             # Var i bilden är djuret? (rutnät av utsnitt, varannan sekund)
             if len(ai_rec["crop"]) % loc_every == 0:
-                x_, y_, conf_, score_, e_ = model.locate(img)
+                x_, y_, conf_, score_, e_, crop_ = model.locate(img)
                 loc_rec["t"].append(tt)
                 loc_rec["x"].append(x_)
                 loc_rec["y"].append(y_)
                 loc_rec["conf"].append(conf_)
                 loc_rec["score"].append(score_)
                 loc_rec["emb"].append(e_)
+                if bio:
+                    loc_rec["crop"].append(crop_)
             ai_rec["crop"].append(np.full(len(ai.CROP_CENTERS), np.nan, np.float32))
         ai_buf.clear()
         ai_buf_t.clear()
@@ -271,6 +274,8 @@ def analyze_clip(proxy_path, out_npz, progress=None, with_tags=True) -> dict:
             for k in ("t", "x", "y", "conf", "score"):
                 arr[f"loc_{k}"] = np.asarray(loc_rec[k], np.float32)
             arr["loc_emb"] = np.stack(loc_rec["emb"]).astype(np.float16)
+            if bio and loc_rec["crop"]:
+                arr["bio_emb"] = bio.embed(loc_rec["crop"]).astype(np.float16)
             # Etiketter: utsnittet med djuret säger mer än hela bilden (sand, partiklar …)
             lp = model.label_probs(np.stack(loc_rec["emb"]))
             j = np.clip(np.searchsorted(arr["loc_t"], arr["emb_t"]), 0, len(lp) - 1)
@@ -364,7 +369,7 @@ def analyze_clip(proxy_path, out_npz, progress=None, with_tags=True) -> dict:
         "scenes": int(arr["cut"].sum()) + 1,
         "tags": tags,
         "has_embeddings": "emb" in arr,
-        "v": ANALYSIS_VERSION if "loc_t" in arr else 1,
+        "v": (3 if "bio_emb" in arr else 2) if "loc_t" in arr else 1,
         "subject_conf": round(float(np.percentile(arr["loc_conf"], 75)), 4) if "loc_conf" in arr else None,
     }
 

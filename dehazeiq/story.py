@@ -69,11 +69,13 @@ def annotate(cands, clips_by_id):
     """Lägger till motiv, bildutsnitt, sammanhang och session på varje kandidatsekvens."""
     sess_of, _ = sessions(list(clips_by_id.values()))
     model = ai.get()
+    bio = ai.get_bio() if model else None
     for c in cands:
         c["session"] = sess_of.get(c["clip"]["id"], 1)
         c["label"], c["label_p"], c["shot"], c["context"] = None, 0.0, "medium", None
         c["closeness"] = 0.0
         c["fun"], c["calm_p"], c["subj_emb"], c["subj_conf"] = 0.0, 0.5, None, 0.0
+        c["species"], c["species_p"], c["bio_emb"], c["desc"], c["role"] = None, 0.0, None, "", None
         d = c["data"]
         if model is None or "emb" not in d or "tag_probs" not in d:
             # Utan AI: bara undervatten/ovan ytan som sammanhang
@@ -125,7 +127,70 @@ def annotate(cands, clips_by_id):
             g = groups[int(np.argmax(p))]
             if g != "subject" and p.max() > 0.45:
                 c["context"] = g
+        _annotate_species(c, d, bio, model)
+    for c in cands:
+        _annotate_vlm(c, bio)
     return cands
+
+
+def _annotate_species(c, d, bio, model):
+    """Art med BioCLIP på utsnittet med djuret (analysversion 3)."""
+    if not bio or "bio_emb" not in d or "loc_t" not in d or not len(d["loc_t"]):
+        return
+    lt = d["loc_t"]
+    m = (lt >= c["start"] - 1.0) & (lt <= c["end"] + 1.0)
+    if not m.any():
+        m = np.zeros(len(lt), bool)
+        m[int(np.argmin(np.abs(lt - (c["start"] + c["end"]) / 2)))] = True
+    e = d["bio_emb"][m].astype(np.float32)
+    if e.shape[1] != bio.text.shape[1]:
+        return
+    v = e.mean(axis=0)
+    c["bio_emb"] = v / max(float(np.linalg.norm(v)), 1e-6)
+    p = bio.probs(e).mean(axis=0)
+    i = int(np.argmax(p))
+    c["species"], c["species_p"] = bio.species[i], float(p[i])
+    # Gruppnivå (summan över arterna i gruppen) är stabilare än enskild art
+    gp = {}
+    for row, pi in zip(bio.species, p):
+        gp[row[4]] = gp.get(row[4], 0.0) + float(pi)
+    group = max(gp, key=gp.get)
+    c["bio_group"], c["bio_group_p"] = group, gp[group]
+    if gp[group] >= 0.5 and not c.get("context") and model and group in model.labels:
+        c["label"], c["label_p"] = group, max(c["label_p"], gp[group])
+
+
+def _annotate_vlm(c, bio):
+    """Djupanalysens beskrivningar (Qwen3-VL): vad händer, hur roligt, hur vackert, skärpa."""
+    frames = ((c["clip"].get("vlm") or {}).get("frames")) or []
+    if not frames:
+        return
+    near = [f for f in frames if c["start"] - 1.0 <= f["t"] <= c["end"] + 1.0]
+    if not near:
+        f = min(frames, key=lambda f: abs(f["t"] - (c["start"] + c["end"]) / 2))
+        if abs(f["t"] - (c["start"] + c["end"]) / 2) > 3.0:
+            return
+        near = [f]
+    act = float(np.mean([f["action"] for f in near])) / 10
+    fun = float(np.mean([f["fun"] for f in near])) / 10
+    beauty = float(np.mean([f["beauty"] for f in near])) / 10
+    sharp = float(np.mean([1.0 if f.get("sharp", True) else 0.0 for f in near]))
+    best = max(near, key=lambda f: f["action"] + f["fun"] + f["beauty"])
+    c["desc"] = best.get("what", "")
+    c["vlm_action"], c["vlm_beauty"], c["vlm_sharp"] = act, beauty, sharp
+    c["fun"] = 0.4 * c.get("fun", 0.0) + 0.6 * fun
+    roles = [f.get("role") for f in near]
+    c["role"] = max(set(roles), key=roles.count)
+    # Bättre urval: vackrare och skarpare sekvenser väger tyngre
+    if "util_n" in c:
+        c["util_n"] *= (0.75 + 0.5 * beauty) * (0.6 if sharp == 0 else 1.0)
+    # Arten från beskrivningen, om artmodellen var osäker
+    sp = (best.get("species") or "").strip().lower()
+    if bio and sp and c.get("species_p", 0) < 0.5:
+        for row in bio.species:
+            if row[2].lower() == sp:
+                c["species"], c["species_p"] = row, 0.5
+                break
 
 
 # ---------- teman ----------
@@ -134,10 +199,11 @@ def same_animal(cs, margin=0.035, extra=()):
     """Behåll bara sekvenser där det är samma sorts djur. AI-etiketten kan blanda ihop t.ex.
     en dvärgbläckfisk med en knot eller ett kammanet, men utsnitten av djuret ser olika ut:
     jämför varje sekvens med medelbilden av de säkraste och släng de som avviker."""
-    with_emb = [c for c in cs if c.get("subj_emb") is not None]
+    key = "bio_emb" if cs and all(c.get("bio_emb") is not None for c in cs) else "subj_emb"
+    with_emb = [c for c in cs if c.get(key) is not None]
     if len(with_emb) < 4:
         return cs
-    E = np.stack([c["subj_emb"] for c in with_emb])
+    E = np.stack([c[key] for c in with_emb])
     p = np.array([c.get("label_p", 0) for c in with_emb])
     # kärnan: de som liknar flest andra (det vanligaste djuret), med etikettens säkerhet som tillägg
     dens = (E @ E.T).mean(axis=1)
@@ -159,13 +225,13 @@ def same_animal(cs, margin=0.035, extra=()):
     kept = [c for c, k in zip(with_emb, keep) if k]
     # sekvenser där AI:n var osäker på arten men djuret ser likadant ut tas också med
     for c in extra:
-        if c.get("subj_emb") is None or c.get("context") or any(c is k for k in kept) \
+        if c.get(key) is None or c.get("context") or any(c is k for k in kept) \
                 or any(c is k for k in with_emb):
             continue
-        if float(c["subj_emb"] @ cen) >= thr + 0.01:
-            c["animal_sim"] = float(c["subj_emb"] @ cen)
+        if float(c[key] @ cen) >= thr + 0.01:
+            c["animal_sim"] = float(c[key] @ cen)
             kept.append(c)
-    return kept + [c for c in cs if c.get("subj_emb") is None]
+    return kept + [c for c in cs if c.get(key) is None]
 
 
 def _share(cands, k=None):
@@ -210,11 +276,28 @@ def find_themes(cands, clips_by_id):
     for c in cands:
         if c.get("label") in SUBJECT_LABELS and c.get("label_p", 0) >= 0.22 and not c.get("context"):
             by_label.setdefault(c["label"], []).append(c)
+    # Arter (BioCLIP/djupanalys): en film per art när artmodellen är säker
+    by_species = {}
+    for c in cands:
+        sp = c.get("species")
+        if sp and c.get("species_p", 0) >= 0.5 and not c.get("context"):
+            by_species.setdefault(sp[2], []).append(c)
+    covered = set()
+    for sci, cs in by_species.items():
+        cs = same_animal(cs)
+        sp = cs[0]["species"]
+        group_n = sum(1 for c in cands if c.get("label") == sp[4] and not c.get("context"))
+        # bara när arten dominerar sin grupp – annars är artnamnet troligen en gissning
+        if len(cs) >= 3 and len(cs) >= 0.6 * max(1, group_n):
+            themes.append({"id": f"subject:{sci}", "kind": "subject", "label": sp[4], "species": sci,
+                           "title": sp[1], "count": len(cs), "clips": len({c["clip"]["id"] for c in cs}),
+                           "score": sum(c["util_n"] for c in cs) * 1.05})
+            covered.add(sp[4])
     for label in list(by_label):
         by_label[label] = same_animal(by_label[label], extra=cands)
     for label, cs in by_label.items():
         n_clips = len({c["clip"]["id"] for c in cs})
-        if len(cs) >= 3:
+        if len(cs) >= 3 and label not in covered:
             score = sum(c["util_n"] for c in cs)
             themes.append({"id": f"subject:{label}", "kind": "subject", "label": label,
                            "title": PORTRAIT_TITLE.get(label, label), "count": len(cs),
@@ -330,8 +413,12 @@ def build(theme, cands, ctx_pool, n, select):
     _sel = select
     select = lambda pool, k: _sel(_top(pool, k), k)  # noqa: E731
     if kind == "subject":
-        pool = same_animal([c for c in cands if c.get("label") == theme["label"] and c.get("label_p", 0) >= 0.2],
-                           extra=cands)
+        if theme.get("species"):
+            pool = same_animal([c for c in cands if (c.get("species") or [None] * 3)[2] == theme["species"]
+                                and c.get("species_p", 0) >= 0.3])
+        else:
+            pool = same_animal([c for c in cands if c.get("label") == theme["label"]
+                                and c.get("label_p", 0) >= 0.2], extra=cands)
         if len(pool) < 2:
             pool = cands
         # Håll ihop berättelsen: helst ett och samma dyk
@@ -347,9 +434,15 @@ def build(theme, cands, ctx_pool, n, select):
         leaving = [c for c in body if c.get("context") == "leaving"]
         rest = [c for c in body if not _has(leaving, c)]
         # översikt/halvbild först, närbilder i mitten, höjdpunkt (mest rörelse + skönhet) mot slutet
-        rest.sort(key=lambda c: (order.get(c.get("shot"), 1), c["time"]))
+        roles = {"intro": 0, "calm": 1, "detail": 1, "action": 2, "climax": 3}
+        if any(c.get("role") for c in rest):
+            # djupanalysen vet vad som händer: lugn inledning → handling → klimax
+            rest.sort(key=lambda c: (roles.get(c.get("role"), 2), order.get(c.get("shot"), 1), c["time"]))
+        else:
+            rest.sort(key=lambda c: (order.get(c.get("shot"), 1), c["time"]))
         if len(rest) >= 3:
-            peak = max(rest, key=lambda c: c["motion"] + c["util_n"])
+            peak = max(rest, key=lambda c: c["motion"] + c["util_n"] + c.get("vlm_action", 0) + c.get("fun", 0)
+                       + (0.5 if c.get("role") == "climax" else 0))
             rest = [c for c in rest if c is not peak]
             rest.insert(max(1, int(round(0.7 * len(rest)))), peak)
         first_t = min(c["time"] for c in body)

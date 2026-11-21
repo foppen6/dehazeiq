@@ -448,6 +448,16 @@ def _resolve_theme(theme, cands, project):
         for t in found:
             if t["id"] == theme:
                 return t
+        # samma sorts berättelse även om exakt id saknas (t.ex. art ↔ djurgrupp, andra klipplängder)
+        kind, _, rest = str(theme).partition(":")
+        for t in found:
+            if t["kind"] == kind and (not rest or rest in (t.get("label"), t.get("species"))):
+                return t
+        if kind == "subject":
+            want = rest
+            for t in found:
+                if t["kind"] == "subject" and want and (t.get("label") == want or want in t.get("title", "")):
+                    return t
     return found[-1]  # resan/höjdpunkterna
 
 
@@ -490,14 +500,24 @@ def generate(project, style_key="cinematic", fmt="9:16", length=30.0, seed=None,
             "label": c.get("label"), "shot": c.get("shot"), "context": c.get("context"),
             "quality": round(c["quality"], 3), "motion": round(c["motion"], 3),
             "favorite": bool(c.get("favorite")),
+            "species": (c.get("species") or [None])[0] if c.get("species_p", 0) >= 0.35 else None,
+            "desc": c.get("desc") or "",
         })
         pos += float(dur)
+
+    # Berättartext från djupanalysen: hur det börjar och vad som är höjdpunkten
+    story_text = story.THEME_TEXT.get(th["kind"], "")
+    descs = [(c, c.get("desc")) for c in seq if c.get("desc")]
+    if len(descs) >= 2:
+        first = descs[0][1].rstrip(". ")
+        peak = max(descs[1:], key=lambda x: x[0].get("vlm_action", 0) + x[0].get("fun", 0))[1].rstrip(". ")
+        story_text = f"{first} … {peak[0].lower() + peak[1:] if peak else peak}."
 
     prop = {
         "id": uuid.uuid4().hex[:10],
         "style": style_key, "style_label": style["label"],
         "theme": th["id"], "theme_kind": th["kind"], "title": th["title"],
-        "story": story.THEME_TEXT.get(th["kind"], ""),
+        "story": story_text,
         "format": fmt, "target_length": length, "length": round(pos, 2),
         "seed": seed, "created": time.time(),
         "n_shots": len(shots),

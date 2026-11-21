@@ -74,6 +74,22 @@ def selftest() -> int:
         img = (np.random.rand(240, 427, 3) * 255).astype("uint8")
         e = m.embed([img])
         print("AI-modell:", m.folder, "inbäddning", e.shape, "intresse", round(float(m.interest(e)[0]), 3))
+        b = ai.get_bio()
+        assert b is not None, "artmodellen (BioCLIP) saknas"
+        print("Artmodell:", len(b.species), "arter, topp:", b.top(b.embed([img]), 1)[0][0][0])
+    except Exception:  # noqa: BLE001
+        traceback.print_exc()
+        ok = False
+    try:
+        from . import vlm
+        srv = vlm.server_binary()
+        print("Djupanalys: llama-server", srv or "saknas", "| minne", round(vlm.ram_gb()), "GB",
+              "| modellval", (vlm.choose_model() or {}).get("name"))
+        if srv and sys.platform == "darwin":
+            import subprocess as _s
+            r = _s.run([str(srv), "--version"], capture_output=True, text=True, timeout=60)
+            print("llama-server --version:", (r.stdout + r.stderr).strip().splitlines()[-1:])
+            assert r.returncode == 0, "llama-server startar inte i appen"
     except Exception:  # noqa: BLE001
         traceback.print_exc()
         ok = False

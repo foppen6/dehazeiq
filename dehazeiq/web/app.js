@@ -122,7 +122,7 @@ function handleJob(j, initial = false) {
   const bar = $("#jobbar");
   if (j.state === "running") {
     bar.hidden = false;
-    const titles = { import: "Importerar", analyze: "Analyserar material", auto: "Skapar filmer automatiskt" };
+    const titles = { import: "Importerar", analyze: "Analyserar material", auto: "Skapar filmer automatiskt", deep: "Djupanalys" };
     const kind = (j.kind || "").split(":");
     $("#jobTitle").textContent = titles[kind[0]] || (kind[1] === "preview" ? "Skapar förhandsvisning" : `Exporterar ${kind[1] || ""}`);
     $("#jobPct").textContent = `${Math.round((j.progress || 0) * 100)} %`;
@@ -543,12 +543,52 @@ function meter(v) {
   return `<span class="meter"><i style="width:${Math.round(v * 100)}%;background:${c}"></i></span>`;
 }
 
+async function loadVlm() {
+  try {
+    state.vlm = await api("GET", "/api/vlm");
+    const dl = state.vlm.download || {};
+    if (dl.state === "running") {
+      if (!state.vlmPoll) state.vlmPoll = setInterval(loadVlm, 1500);
+    } else if (state.vlmPoll) {
+      clearInterval(state.vlmPoll); state.vlmPoll = null;
+      if (dl.state === "done") toast("Djupanalysen är klar att använda. Den körs automatiskt efter varje analys.", true);
+      if (dl.state === "error") toast(`Nedladdningen avbröts: ${dl.message}. Försök igen – den fortsätter där den slutade.`);
+    }
+    const el = $("#vlmCard");
+    if (el) el.outerHTML = deepCard();
+  } catch (e) { /* ingen djupanalys */ }
+}
+
+function deepCard() {
+  const v = state.vlm;
+  if (!v || !v.supported || (state.info && state.info.remote)) return '<div id="vlmCard"></div>';
+  const dl = v.download || {};
+  const described = clips().filter((c) => c.vlm && c.vlm.frames).length;
+  const usable = clips().filter((c) => c.analysis && !c.excluded && !c.auto_excluded).length;
+  let body, btn = "";
+  if (dl.state === "running") {
+    body = `${esc(dl.message || "Laddar ner …")}`;
+    btn = `<div class="bar" style="width:160px"><i style="width:${Math.round((dl.progress || 0) * 100)}%"></i></div>`;
+  } else if (!v.ready) {
+    body = `AI:n tittar på klippen och beskriver vad som händer: vilket djur, vad det gör, hur roligt och vackert det är. Ger bättre urval, dramaturgi och berättartext. Körs lokalt på din ${v.ram_gb} GB-Mac.`;
+    btn = `<button class="btn primary" data-act="vlm-download">Ladda ner ${esc(v.model)} (${v.size_gb} GB)</button>`;
+  } else {
+    body = described ? `${described} av ${usable} klipp är beskrivna med ${esc(v.model)}. Körs automatiskt efter varje analys.`
+      : `${esc(v.model)} är redo. Körs automatiskt efter varje analys.`;
+    btn = `<button class="btn" data-act="deep" ${running() ? "disabled" : ""}>${described ? "Beskriv igen" : "Kör djupanalys"}</button>`;
+  }
+  return `<section class="box" id="vlmCard" style="flex-direction:row;align-items:center;gap:14px">
+    <div class="stack grow" style="gap:4px"><b>Djupanalys · ${esc(v.model || "Qwen3-VL")}</b>
+      <span class="muted" style="font-size:13px">${body}</span></div>${btn}</section>`;
+}
+
 function outdatedBanner() {
   if (!(state.info && state.info.clip_ai) || running()) return "";
-  const n = clips().filter((c) => c.analysis && c.analysis.ai !== false && (c.analysis.v || 1) < 2).length;
+  const want = state.info.analysis_version || 2;
+  const n = clips().filter((c) => c.analysis && c.analysis.ai !== false && (c.analysis.v || 1) < want).length;
   if (!n) return "";
   return `<section class="box" style="flex-direction:row;align-items:center;gap:14px;border-color:var(--accent)">
-    <div class="stack grow" style="gap:4px"><b>Ny AI: hittar djuret i bilden och känner igen arterna bättre</b>
+    <div class="stack grow" style="gap:4px"><b>Ny AI: hittar djuret i bilden och känner igen arten</b>
       <span class="muted" style="font-size:13px">${n} klipp är analyserade med den äldre versionen. Uppdatera för bättre centrering och renare berättelser (några minuter).</span></div>
     <button class="btn primary" data-act="update-analysis">Uppdatera analysen</button></section>`;
 }
@@ -610,6 +650,7 @@ function viewAnalyze() {
 
   const main = `<main class="main">
     ${outdatedBanner()}
+    ${deepCard()}
     <div class="spread"><div class="head"><h1>${busy ? "AI analyserar materialet" : "Analysresultat"}</h1>
       <p class="lead">Bara skarpa, stabila och välexponerade klipp används. Svaga klipp väljs bort automatiskt – du behöver inte gå igenom dem.</p></div>${prog}</div>
     <div class="chips" role="group" aria-label="Filtrera">${chips}</div>
@@ -857,6 +898,13 @@ document.addEventListener("click", async (ev) => {
     case "analyze": return startAnalyze(false);
     case "reanalyze": return startAnalyze(true);
     case "update-analysis": return startAnalyze(false);
+    case "vlm-download":
+      await api("POST", "/api/vlm/download", {});
+      return loadVlm();
+    case "deep":
+      await api("POST", `/api/p/${state.pid}/deep`, { redo: true });
+      state.expectJob = true;
+      return pollJob();
     case "generate": return generate();
     case "music": return chooseMusic();
     case "music-remove": return removeMusic();
@@ -902,6 +950,7 @@ document.addEventListener("submit", async (ev) => {
 (async function init() {
   try {
     state.info = await api("GET", "/api/info");
+    loadVlm();
     await loadProjects();
     const saved = localStorage.getItem("tv.pid");
     const pid = state.projects.find((p) => p.id === saved) ? saved : (state.projects[0] && state.projects[0].id);

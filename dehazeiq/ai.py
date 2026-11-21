@@ -157,7 +157,65 @@ class Clip:
         c = (wgt[:, None] * np.asarray(centers, np.float32)).sum(axis=0)
         conf = float(s.max() - np.median(s))
         best = int(np.argmax(s))
-        return float(c[0]), float(c[1]), conf, float(s.max()), e[best]
+        return float(c[0]), float(c[1]), conf, float(s.max()), e[best], crops[best]
+
+
+class Bio:
+    """Artigenkänning med BioCLIP (tränad på miljontals bilder av organismer med artnamn).
+    Används på utsnittet där djuret syns."""
+
+    def __init__(self, folder: Path):
+        import onnxruntime as ort
+        opts = ort.SessionOptions()
+        opts.intra_op_num_threads = max(1, (os.cpu_count() or 2) // 2)
+        opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        self.sess = ort.InferenceSession(str(folder / "bioclip_vision.onnx"), opts,
+                                         providers=["CPUExecutionProvider"])
+        self.input = self.sess.get_inputs()[0].name
+        with np.load(folder / "bio_text.npz") as t:
+            self.text = t["species"].astype(np.float32)
+        self.species = json.loads((folder / "bio_species.json").read_text("utf-8"))["species"]
+        self._lock = threading.Lock()
+
+    def embed(self, images_bgr, batch=16):
+        if not images_bgr:
+            return np.zeros((0, self.text.shape[1]), np.float32)
+        out = []
+        for i in range(0, len(images_bgr), batch):
+            x = np.stack([Clip._prep(im) for im in images_bgr[i:i + batch]])
+            x = (x - MEAN) / STD
+            with self._lock:
+                e = self.sess.run(None, {self.input: x})[0]
+            out.append(e / np.maximum(np.linalg.norm(e, axis=1, keepdims=True), 1e-6))
+        return np.concatenate(out).astype(np.float32)
+
+    def probs(self, emb):
+        return Clip._softmax(100.0 * np.asarray(emb, np.float32) @ self.text.T)
+
+    def top(self, emb, k=3):
+        p = self.probs(np.atleast_2d(emb)).mean(axis=0)
+        idx = np.argsort(-p)[:k]
+        return [(self.species[i], float(p[i])) for i in idx]
+
+
+_BIO = None
+_BIO_LOCK = threading.Lock()
+
+
+def get_bio():
+    global _BIO
+    with _BIO_LOCK:
+        if _BIO is None:
+            _BIO = False
+            for d in model_dirs():
+                if (d / "bioclip_vision.onnx").exists() and (d / "bio_text.npz").exists():
+                    try:
+                        _BIO = Bio(d)
+                        print(f"Artigenkänning (BioCLIP) laddad från {d}")
+                    except Exception as e:  # noqa: BLE001
+                        print("Artigenkänningen kunde inte laddas:", e)
+                    break
+        return _BIO or None
 
 
 _MODEL = None

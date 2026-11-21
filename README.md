@@ -1,4 +1,4 @@
-# DeHazeIQ – AI-powered video editing, without the hassle (v0.8)
+# DeHazeIQ – AI-powered video editing, without the hassle (v0.9)
 
 Lokalt AI-videoredigeringsprogram för dyk-, natur- och resefilm. Fungerar på **Mac och Windows**,
 och kan styras från **mobil och surfplatta** via wifi.
@@ -118,6 +118,21 @@ generera om):
 - **Snabbspolning** – en lugn tagning spelas i dubbel fart (Lekfull och Action).
 - **Frysbild** – det roligaste ögonblicket fryses med en snabb inzoomning (Lekfull).
 - **Zoomryck** – en kort zoom på klippet, i takt (Lekfull och Action).
+
+## Artigenkänning (BioCLIP)
+
+Utsnittet med djuret körs också genom BioCLIP (MIT-licens), en CLIP-modell tränad på miljontals
+bilder av organismer med artnamn. Den skiljer t.ex. bläckfisk, knot och maneter åt, och arterna
+grupperas så att en djurfilm bara innehåller samma sorts djur. Artlistan finns i
+`packaging/bio_species.json` och kan byggas ut.
+
+## Djupanalys med Qwen3-VL (Mac med Apple-chip)
+
+På en Mac med M-chip kan DeHazeIQ låta en språk- och bildmodell titta på klippen och beskriva vad
+som händer: vilket djur, vad det gör, hur roligt och vackert ögonblicket är och om motivet är
+skarpt. Det används till urval, dramaturgi (lugn början → handling → höjdpunkt) och berättartext.
+Modellen körs lokalt med llama.cpp och väljs efter datorns minne (30B vid 32 GB eller mer, annars
+8B eller 4B). Den laddas ner med en knapp i analysvyn första gången och körs sedan automatiskt.
 
 ## Djuret i mitten
 

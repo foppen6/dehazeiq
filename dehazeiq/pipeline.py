@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import numpy as np
+
 from . import ai, analysis, generator, media, music, quality, render, timeline
 from .config import AUDIO_EXT, FORMATS
 from .project import Project, clip_id_for, collect_video_files, save_default_settings
@@ -54,11 +56,17 @@ def import_media(progress, pid, paths):
     return {"added": len(added), "skipped": skipped, "failed": failed}
 
 
+def target_version():
+    """Den analysversion den här installationen kan ge (3 kräver artmodellen)."""
+    if not ai.available():
+        return 1
+    return analysis.ANALYSIS_VERSION if ai.get_bio() else 2
+
+
 def outdated(clip):
-    """Analyserad med en äldre version (saknar t.ex. AI-positionen för djuret)?"""
+    """Analyserad med en äldre version (saknar t.ex. AI-positionen eller arten)?"""
     a = clip.get("analysis") or {}
-    return bool(a) and a.get("ai") is not False and a.get("v", 1) < analysis.ANALYSIS_VERSION \
-        and ai.available()
+    return bool(a) and a.get("ai") is not False and a.get("v", 1) < target_version()
 
 
 def analyze(progress, pid, redo=False):
@@ -164,6 +172,96 @@ def render_proposal(progress, pid, prop_id, resolution="preview"):
     return result
 
 
+def _keyframe_times(proj, clip, max_frames=8):
+    """Tidpunkter att visa för djupanalysen: jämnt fördelade över klippets bättre delar."""
+    a = clip.get("analysis") or {}
+    dur = float(a.get("duration") or clip.get("duration") or 0)
+    if dur <= 0:
+        return []
+    cands = np.arange(min(1.0, dur / 2), dur, 2.5)
+    try:
+        with np.load(proj.npz_path(clip["id"])) as d:
+            t, q = d["t"], d["quality"]
+        if len(t) > 4:
+            ok = q >= np.percentile(q, 40)
+            good = [x for x in cands if ok[int(np.argmin(np.abs(t - x)))]]
+            cands = np.array(good or list(cands))
+    except (OSError, KeyError, ValueError):
+        pass
+    if len(cands) > max_frames:
+        cands = cands[np.linspace(0, len(cands) - 1, max_frames).round().astype(int)]
+    return [round(float(x), 2) for x in cands]
+
+
+def _species_hint(proj, cid, t, bio):
+    if not bio:
+        return ()
+    try:
+        with np.load(proj.npz_path(cid)) as d:
+            if "bio_emb" not in d:
+                return ()
+            lt, be = d["loc_t"], d["bio_emb"]
+        near = np.abs(lt - t) <= 2.5
+        if not near.any():
+            return ()
+        return tuple((sp[0], sp[2]) for sp, p in bio.top(be[near].astype(np.float32), 3) if p >= 0.08)
+    except (OSError, KeyError, ValueError):
+        return ()
+
+
+def deep_analyze(progress, pid, redo=False):
+    """Djupanalys med Qwen3-VL: beskriver vad som händer i de klipp som kom med."""
+    import cv2
+
+    from . import vlm
+    proj = Project(pid)
+    clips = [c for c in proj.clips() if quality.is_usable(c) and c.get("analysis")
+             and (redo or (c.get("vlm") or {}).get("v") != vlm.VLM_VERSION)]
+    if not clips:
+        return {"described": 0}
+    jobs = [(c, t) for c in clips for t in _keyframe_times(proj, c)]
+    bio = ai.get_bio()
+    model = (vlm.choose_model() or {}).get("name")
+    progress(0.0, f"Startar {model} …")
+    done = 0
+    with vlm.Server() as server:
+        for c in clips:
+            frames = []
+            src = proj.proxy_path(c["id"])
+            if not src.exists():
+                src = Path(c["path"])
+            cap = cv2.VideoCapture(str(src))
+            under = bool((c.get("analysis") or {}).get("underwater", True))
+            for t in _keyframe_times(proj, c):
+                done += 1
+                progress(done / max(1, len(jobs)), f"Beskriver {c['name']} ({done} av {len(jobs)})")
+                cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
+                ok, img = cap.read()
+                if not ok:
+                    continue
+                r = vlm.describe(server, img, under, _species_hint(proj, c["id"], t, bio))
+                if r:
+                    r["t"] = t
+                    frames.append(r)
+            cap.release()
+            proj.update_clip(c["id"], vlm={"v": vlm.VLM_VERSION, "model": model, "frames": frames})
+    return {"described": len(clips), "frames": len(jobs)}
+
+
+def analyze_all(progress, pid, redo=False):
+    """Analys och – om modellen finns – djupanalys i samma jobb."""
+    from . import vlm
+    deep = vlm.ready()
+    res = analyze(_stage(progress, 0.0, 0.7 if deep else 1.0, "Analys"), pid, redo)
+    if deep:
+        try:
+            res["deep"] = deep_analyze(_stage(progress, 0.7, 1.0, "Djupanalys"), pid, redo)
+        except Exception as e:  # noqa: BLE001
+            print("Djupanalysen misslyckades:", e)
+            res["deep_error"] = str(e)
+    return res
+
+
 def _stage(progress, lo, hi, label):
     def sub(frac=None, message=None):
         progress(None if frac is None else lo + (hi - lo) * frac,
@@ -177,7 +275,14 @@ def auto(progress, pid, paths=None):
     result = {}
     if paths:
         result["import"] = import_media(_stage(progress, 0.0, 0.35, "1/4 Läser in"), pid, paths)
-    result["analysis"] = analyze(_stage(progress, 0.35, 0.72, "2/4 Analyserar"), pid)
+    from . import vlm
+    deep = vlm.ready()
+    result["analysis"] = analyze(_stage(progress, 0.35, 0.6 if deep else 0.72, "2/4 Analyserar"), pid)
+    if deep:
+        try:
+            result["deep"] = deep_analyze(_stage(progress, 0.6, 0.72, "2/4 Djupanalys"), pid)
+        except Exception as e:  # noqa: BLE001
+            print("Djupanalysen misslyckades, fortsätter utan:", e)
     proj = Project(pid)
     if not proj.usable_clips():
         raise RuntimeError("Inget klipp klarade kvalitetskraven (skärpa, exponering, stabilitet). "

@@ -33,6 +33,11 @@ if not os.path.exists(os.path.join(models, "clip_vision.onnx")):
     raise SystemExit("packaging/models saknas – hämta AI-modellen först")
 datas.append((models, "models"))
 
+# llama.cpp (llama-server) för djupanalysen med Qwen3-VL – bara Mac, hämtas av byggsystemet
+llama = os.path.join(PKG, "llama")
+if os.path.isdir(llama):
+    datas.append((llama, "llama"))
+
 a = Analysis(
     [os.path.join(PKG, "run_dehazeiq.py")],
     pathex=[ROOT],
