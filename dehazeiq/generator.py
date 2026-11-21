@@ -498,6 +498,10 @@ def generate(project, style_key="cinematic", fmt="9:16", length=30.0, seed=None,
             "cx": round(cx, 3), "cy": round(cy, 3), "path": path, "wb_gains": a.get("wb_gains", [1, 1, 1]),
             "underwater": a.get("underwater", False), "tags": a.get("tags", []),
             "label": c.get("label"), "shot": c.get("shot"), "context": c.get("context"),
+            "session": c.get("session"), "time": c.get("time"),
+            "species_sci": (c.get("species") or [None] * 3)[2] if c.get("species_p", 0) >= 0.35 else None,
+            "species_p": round(float(c.get("species_p", 0)), 3),
+            "caption": c.get("caption") or "",
             "quality": round(c["quality"], 3), "motion": round(c["motion"], 3),
             "favorite": bool(c.get("favorite")),
             "species": (c.get("species") or [None])[0] if c.get("species_p", 0) >= 0.35 else None,
@@ -541,7 +545,7 @@ def generate_set(project, style="auto", fmt="9:16", length=30.0, music=None, fav
     if theme:
         if style == "auto":
             kind = str(theme).split(":")[0]
-            styles = ["cinematic", "playful", "action"] if kind in ("fun", "subject") else ["cinematic", "calm", "action"]
+            styles = ["documentary", "playful", "cinematic"] if kind in ("fun", "subject") else ["documentary", "cinematic", "action"]
             if kind == "fun":
                 styles = ["playful", "action", "cinematic"]
         else:

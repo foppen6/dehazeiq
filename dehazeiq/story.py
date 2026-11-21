@@ -177,6 +177,8 @@ def _annotate_vlm(c, bio):
     sharp = float(np.mean([1.0 if f.get("sharp", True) else 0.0 for f in near]))
     best = max(near, key=lambda f: f["action"] + f["fun"] + f["beauty"])
     c["desc"] = best.get("what", "")
+    funniest = max(near, key=lambda f: f["fun"])
+    c["caption"] = funniest.get("caption", "") if funniest["fun"] >= 5 else ""
     c["vlm_action"], c["vlm_beauty"], c["vlm_sharp"] = act, beauty, sharp
     c["fun"] = 0.4 * c.get("fun", 0.0) + 0.6 * fun
     roles = [f.get("role") for f in near]
@@ -331,10 +333,10 @@ def find_themes(cands, clips_by_id):
     return themes
 
 
-STYLE_FOR = {"subject": "cinematic", "session": "cinematic", "trip": "action",
+STYLE_FOR = {"subject": "documentary", "session": "documentary", "trip": "action",
              "detail": "calm", "blue": "calm", "motion": "action", "fun": "playful", "calm": "calm"}
 KIND_PRIORITY = ["subject", "fun", "session", "detail", "motion", "calm", "blue", "trip"]
-ALL_STYLES = ("cinematic", "calm", "action", "playful")
+ALL_STYLES = ("documentary", "cinematic", "calm", "action", "playful")
 
 
 def auto_plan(themes, avoid=(), rng=None):

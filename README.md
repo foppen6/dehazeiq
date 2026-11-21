@@ -1,4 +1,4 @@
-# DeHazeIQ – AI-powered video editing, without the hassle (v0.10)
+# DeHazeIQ – AI-powered video editing, without the hassle (v0.11)
 
 Lokalt AI-videoredigeringsprogram för dyk-, natur- och resefilm. Fungerar på **Mac och Windows**,
 och kan styras från **mobil och surfplatta** via wifi.
@@ -122,6 +122,18 @@ liknande sekvens som AI:n föreslår, flytta och ta bort. Fliken **Färg** har u
 svartvitt, sepia, film, varm, kall och livlig) med styrka, samt exponering, kontrast, mättnad,
 temperatur, nyans, skärpa och vinjett – för hela filmen eller ett klipp, med före/efter. Fliken
 **Text** ändrar titeln. Allt kan ångras.
+
+## Stilar och övergångar
+
+- **Dokumentär:** översikt → djuret → detaljer → beteende, långa tagningar, raka klipp och toning
+  via svart vid nytt dyk, artnamn som textskylt (artnamn bara när artmodellen är säker, annars
+  djurgruppen), datum under titeln och originalljud.
+- **Lekfull:** lekfulla övergångar (cirkel, zoom, pixlar, skjut i rörelsens riktning), frysbild med
+  pratbubbla (skriven av djupanalysen på Mac, annars en kort mall), snabbspolning, zoomryck och
+  ljudeffekter (svisch och pling, genereras av programmet).
+- **Övergångar:** AI:n väljer per klippbyte – raka klipp när motivet står still på samma plats
+  (matchklipp), svep i rörelsens riktning, toning via svart vid nytt dyk och aldrig för många
+  effektövergångar i rad. I redigeringen kan varje byte ändras (ett 20-tal övergångar).
 
 ## Effekter
 

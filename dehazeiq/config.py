@@ -58,6 +58,13 @@ STYLES = {
         "temperature": 0.22, "color": "natural", "orig_audio": 0.12,
         "fade": 1.2,
     },
+    "documentary": {
+        "label": "Dokumentär",
+        "avg_shot": 5.5, "min_shot": 3.5, "max_shot": 8.5,
+        "beat_sync": 0.2, "motion_pref": -0.3, "variety": 0.6,
+        "temperature": 0.2, "color": "natural", "orig_audio": 0.85,
+        "fade": 1.0,
+    },
     "playful": {
         "label": "Lekfull",
         "avg_shot": 2.2, "min_shot": 1.0, "max_shot": 3.6,

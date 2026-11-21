@@ -9,6 +9,8 @@ const STYLE_INFO = {
     long: "Korta klipp som följer musikens takt, med fokus på rörelse och energi." },
   calm: { label: "Lugn natur", desc: "Långsamt, berättande", sw: "#16302A", color: "#6FD3A5",
     long: "Få och långa klipp med naturliga färger. Originalljudet hörs svagt under musiken." },
+  documentary: { label: "Dokumentär", desc: "Seriöst, långa tagningar, artnamn", sw: "#1E2A30", color: "#A9C7D6",
+    long: "Översikt, djuret, detaljer och beteende. Långa tagningar, raka klipp, artnamn som textskylt och originalljud." },
   playful: { label: "Lekfull", desc: "Roliga ögonblick, fart och frysbilder", sw: "#3A2A12", color: "#F2C14E",
     long: "Snabba klipp i takt, snabbspolning, frysbilder och zoomryck med varma, glada färger." },
 };
@@ -322,7 +324,7 @@ async function saveSettings(patch) {
 }
 
 const EFFECT_INFO = { transitions: "Mjuka övergångar", slowmo: "Slowmotion", zoom: "Långsam zoom", title: "Titel",
-  vignette: "Vinjett", fast: "Snabbspolning", freeze: "Frysbild", punch: "Zoomryck" };
+  vignette: "Vinjett", fast: "Snabbspolning", freeze: "Frysbild", punch: "Zoomryck", labels: "Textskyltar", sfx: "Ljudeffekter" };
 const effectsOn = () => Object.assign(Object.fromEntries(Object.keys(EFFECT_INFO).map((k) => [k, true])), settings().effects || {});
 
 async function toggleEffect(key) {
@@ -337,7 +339,12 @@ function effectList(p) {
   const plan = p.effects || {};
   const shots = p.shots || [];
   const out = [];
-  if (on.transitions && plan.transition === "fade") out.push("Mjuka övergångar");
+  const trs = shots.slice(0, -1).map((s) => s.tr).filter((t) => t && t !== "cut");
+  if (on.transitions && trs.length) out.push(`Övergångar ×${trs.length}`);
+  else if (on.transitions && plan.transition === "fade" && !shots.some((s) => "tr" in s)) out.push("Mjuka övergångar");
+  const texts = shots.filter((s) => s.text).length;
+  if (on.labels && texts) out.push(`Textskyltar ×${texts}`);
+  if (on.sfx && ["playful", "action"].includes(p.style) && trs.length) out.push("Ljudeffekter");
   const slow = shots.filter((s) => s.fx && s.fx.speed && s.fx.speed < 1).length;
   const fast = shots.filter((s) => s.fx && s.fx.speed > 1).length;
   const freeze = shots.filter((s) => s.fx && s.fx.freeze).length;

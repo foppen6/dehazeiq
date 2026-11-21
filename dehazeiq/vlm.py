@@ -27,7 +27,7 @@ import cv2
 from .config import HOME
 from .media import subprocess_kwargs
 
-VLM_VERSION = 1
+VLM_VERSION = 2  # 2: pratbubbla (caption)
 HF = "https://huggingface.co"
 MODELS = [  # (minsta minne i GB, repo, visningsnamn, ungefärlig nedladdning i GB)
     (32, "Qwen/Qwen3-VL-30B-A3B-Instruct-GGUF", "Qwen3-VL 30B", 19),
@@ -305,8 +305,9 @@ Fields:
  "beauty": 0-10 visual beauty of the frame
  "sharp": true if the main subject is in focus
  "role": one of "intro", "action", "climax", "calm", "detail"
+ "caption": a funny Swedish speech bubble from the animal's point of view, max 4 words
 Example: {{"subject": "bläckfisk", "species": "Sepiola atlantica", "what": "Bläckfisken gräver ner sig i sanden",
-"action": 6, "fun": 8, "beauty": 7, "sharp": true, "role": "climax"}}"""
+"action": 6, "fun": 8, "beauty": 7, "sharp": true, "role": "climax", "caption": "Ni ser mig inte!"}}"""
 
 
 def parse(text):
@@ -332,6 +333,7 @@ def parse(text):
         "sharp": bool(d.get("sharp", True)) if not isinstance(d.get("sharp"), str)
         else d["sharp"].strip().lower() in ("true", "ja", "yes"),
         "role": role if role in ("intro", "action", "climax", "calm", "detail") else "action",
+        "caption": " ".join(str(d.get("caption", "") or "").split()[:5])[:40],
     }
 
 

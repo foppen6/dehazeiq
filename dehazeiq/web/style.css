@@ -376,3 +376,4 @@ dl.stats dd { margin: 0; font-weight: 600; white-space: nowrap; overflow: hidden
 .tltags { position: absolute; left: 4px; right: 4px; bottom: 3px; font-size: 10px; font-weight: 600; color: #FFE7A8; text-shadow: 0 1px 2px #000; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tltitle { display: block; height: 26px; line-height: 26px; padding: 0 8px; border-radius: 6px; background: #2A2340; border: 1px solid #4B3F73; color: #D7CCFF; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 90px; }
 .tlaudio { flex: 1 1 auto; height: 28px; line-height: 28px; padding: 0 10px; border-radius: 6px; background: #13232A; border: 1px solid #22404A; color: #9FD8E2; font-size: 11px; }
+.selfield { height: 38px; padding: 0 10px; border-radius: 9px; border: 1px solid var(--line-2); background: #0B1016; color: var(--text); font: inherit; font-size: 14px; }

@@ -173,6 +173,21 @@ def apply(project, prop, op, args):
     elif op == "grade_reset_shot":
         i, s = shot_at()
         s.pop("grade", None)
+    elif op == "transition":
+        i, s = shot_at()
+        from .effects import TRANSITIONS
+        t = args.get("type", "cut")
+        if t not in TRANSITIONS:
+            raise EditError("Okänd övergång")
+        s["tr"] = t
+    elif op == "text":
+        i, s = shot_at()
+        text = str(args.get("text", "")).strip()[:60]
+        if not text:
+            s.pop("text", None)
+        else:
+            kind = args.get("kind") if args.get("kind") in ("label", "chapter", "pop") else "label"
+            s["text"] = {"kind": kind, "text": text, "sub": str(args.get("sub", "")).strip()[:60]}
     elif op == "title":
         text = str(args.get("text", "")).strip()[:80]
         prop.setdefault("effects", {})["title"] = text
@@ -328,7 +343,7 @@ def plan_proposals(project, plan, music=None, favorites=(), avoid=()):
             theme = sess[0]["id"]
         else:
             theme = "trip"
-        styles = ["cinematic", "calm", "action", "playful"]
+        styles = ["documentary", "cinematic", "calm", "action"]
         for k in range(count):
             add(theme if kind == "trip" or k < 3 or len(by.get("session", [])) < 2
                 else by["session"][k % len(by["session"])]["id"], styles[k % len(styles)])
@@ -337,7 +352,7 @@ def plan_proposals(project, plan, music=None, favorites=(), avoid=()):
         subs = sorted(by.get("subject", []), key=lambda t: -t.get("score", 0))
         if not subs:
             subs = [{"id": "fun"}]
-        styles = ["cinematic", "playful", "calm", "action"]
+        styles = ["documentary", "playful", "cinematic", "action"]
         for k in range(count):
             add(subs[k % len(subs)]["id"], styles[(k // len(subs)) % len(styles)])
     elif kind == "reels":

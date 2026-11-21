@@ -276,9 +276,13 @@ function edTimeline(p) {
       <img alt="" loading="lazy" src="${frameUrl(s.clip_id, s.src_start + Math.min(s.duration, 1.5), 160)}"><span class="tlnum num">${i + 1}</span><span class="tldur num">${dec(s.duration)} s</span>${tags.length ? `<span class="tltags">${tags.join(" · ")}</span>` : ""}</button>`;
   }).join("");
   const title = (p.effects || {}).title;
+  const trLabel = (state.info && state.info.transitions) || {};
+  const textRow = p.shots.map((s, i) => `<span style="flex:${s.duration} 1 0;min-width:28px">${i === 0 && title ? `<span class="tltitle">${esc(title)}${s.text ? ` · ${esc(s.text.text)}` : ""}</span>` : s.text ? `<span class="tltitle" title="${esc(s.text.text)}">${esc(s.text.text)}</span>` : ""}</span>`).join("");
+  const trRow = p.shots.map((s, i) => `<span style="flex:${s.duration} 1 0;min-width:28px;text-align:right;font-size:10px;color:${s.tr && s.tr !== "cut" ? "var(--accent)" : "var(--dim)"}">${i < p.shots.length - 1 ? esc(s.tr && s.tr !== "cut" ? trLabel[s.tr] || s.tr : "|") : ""}</span>`).join("");
   return `<section class="tl" id="edTimeline" aria-label="Tidslinje">
-    ${title ? `<div class="tltrack"><span class="tllab">Text</span><div class="tlrow"><span class="tltitle" style="width:${Math.min(100, 3.4 / total * 100)}%">${esc(title)}</span></div></div>` : ""}
+    <div class="tltrack"><span class="tllab">Text</span><div class="tlrow">${textRow}</div></div>
     <div class="tltrack"><span class="tllab">Video</span><div class="tlrow">${blocks}</div></div>
+    <div class="tltrack"><span class="tllab">Byte</span><div class="tlrow">${trRow}</div></div>
     <div class="tltrack"><span class="tllab">Ljud</span><div class="tlrow"><span class="tlaudio">${p.music_name ? `${esc(p.music_name)} · ${dec(p.bpm, 0)} BPM` : "Originalljud"}</span></div></div>
     <div class="muted num" style="font-size:12px;text-align:right">${p.shots.length} klipp · ${fmtDur(total)}</div></section>`;
 }
@@ -314,6 +318,14 @@ function edInspectorClip(p, s) {
         : alts === "loading" ? '<span class="muted" style="font-size:13px">Letar …</span>'
         : alts.length ? `<div class="altgrid">${alts.map((a, k) => `<button class="altbtn" data-edalt="${k}" title="${esc(a.desc || a.name)}"><img alt="" loading="lazy" src="${frameUrl(a.clip_id, a.thumb_t, 200)}"><span>${esc(a.label || a.name)}</span></button>`).join("")}</div>`
         : '<span class="muted" style="font-size:13px">Inga fler liknande sekvenser.</span>'}</div>
+    ${state.ed.i < p.shots.length - 1 ? `<label class="stack" style="gap:8px"><span class="flabel">Övergång till nästa klipp</span>
+      <select class="selfield" data-edtr>${Object.entries((state.info && state.info.transitions) || { cut: "Rakt klipp" }).map(([k, l]) => `<option value="${k}" ${(s.tr || "cut") === k ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label>` : ""}
+    <div class="stack" style="gap:8px"><span class="flabel">Text på klippet</span>
+      <div class="row" style="flex-wrap:nowrap"><select class="selfield" id="edTxtKind" style="flex:0 0 130px">
+        ${[["label", "Artnamn"], ["chapter", "Kapitel"], ["pop", "Pratbubbla"]].map(([k, l]) => `<option value="${k}" ${((s.text || {}).kind || "label") === k ? "selected" : ""}>${l}</option>`).join("")}</select>
+        <input class="field" id="edTxt" value="${esc((s.text || {}).text || "")}" maxlength="60" placeholder="Ingen text" style="flex:1 1 auto;min-width:0"></div>
+      <input class="field" id="edTxtSub" value="${esc((s.text || {}).sub || "")}" maxlength="60" placeholder="Andra raden, t.ex. latinskt namn">
+      <div class="row"><button class="btn small" data-act="ed-text">Spara text</button>${s.text ? '<button class="btn small" data-act="ed-text-clear">Ta bort</button>' : ""}</div></div>
     <div class="row push"><button class="btn small" data-edmove="-1">${svgi(ICO.left, 14)}Flytta</button><button class="btn small" data-edmove="1">Flytta${svgi(ICO.right, 14)}</button>
       <span class="grow"></span><button class="btn small danger" data-act="ed-delete">${icon("trash", 14)}Ta bort</button></div>`;
 }
@@ -359,7 +371,7 @@ function viewEdit() {
   const cx = s.cx ?? 0.5, cy = s.cy ?? 0.5;
   return `<main class="main wide edmain">
     <div class="spread"><div class="head"><h1>${esc(p.title || p.style_label)}</h1>
-      <p class="lead">${esc(p.style_label)} · ${esc(platformLabel(p.platform) || p.format)} · ${p.format} · ${fmtDur(p.length)}</p></div>
+      <p class="lead">${esc(p.style_label)} · ${p.platform ? `${esc(platformLabel(p.platform))} · ` : ""}${p.format} · ${fmtDur(p.length)}</p></div>
       <div class="row">${platformSelect(p)}<button class="btn" data-act="ed-undo" ${(p.history || []).length ? "" : "disabled"}>${svgi(ICO.undo, 16)}Ångra</button>
         ${prev ? "" : `<button class="btn" data-preview="${p.id}" ${busyHere ? "disabled" : ""}>${icon("play", 14)}${busyHere ? "Renderar …" : "Förhandsvisa filmen"}</button>`}
         <button class="btn primary" data-export="${p.id}">Exportera</button></div></div>
@@ -460,6 +472,8 @@ document.addEventListener("click", async (ev) => {
     case "ed-grade-reset": return edit("grade_reset_shot", { i: state.ed.i });
     case "ed-grade-zero": { const g = curGrade(edProp()); ["exposure", "contrast", "saturation", "temperature", "tint", "sharpen", "vignette"].forEach((k) => { g[k] = 0; }); g.strength = 1; stageGrade(g); return render(); }
     case "ed-title": return edit("title", { text: $("#edTitle").value });
+    case "ed-text": return edit("text", { i: state.ed.i, kind: $("#edTxtKind").value, text: $("#edTxt").value, sub: $("#edTxtSub").value });
+    case "ed-text-clear": return edit("text", { i: state.ed.i, text: "" });
     case "ed-title-clear": return edit("title", { text: "" });
     case "ed-before": return undefined;  // hålls in, se pointerdown/pointerup
     case "ed-alts":
@@ -481,6 +495,7 @@ document.addEventListener("change", (ev) => {
   const t = ev.target;
   const d = t.dataset;
   if (d.edlen !== undefined) return edit("trim", { i: state.ed.i, duration: Number(t.value) });
+  if (d.edtr !== undefined) return edit("transition", { i: state.ed.i, type: t.value });
   if (d.platform) return changePlatform(d.platform, t.value);
   if (d.ftplat) { const pl = state.setup.plans[d.ftplat]; pl.platform = t.value; pl.length = null; return render(); }
   if (d.ftlen) { state.setup.plans[d.ftlen].length = Number(t.value); return undefined; }

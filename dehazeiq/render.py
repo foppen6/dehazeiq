@@ -83,6 +83,51 @@ def _title_filter(text, out_w, out_h, visible):
             f":alpha='{alpha}'")
 
 
+def _alpha(t0, t1, f=0.35):
+    t1 = max(t0 + 2 * f + 0.05, t1)
+    return (f"if(lt(t,{t0:.2f}),0,if(lt(t,{t0 + f:.2f}),(t-{t0:.2f})/{f},"
+            f"if(lt(t,{t1 - f:.2f}),1,if(lt(t,{t1:.2f}),({t1:.2f}-t)/{f},0))))")
+
+
+def _fit(text, out_w, base):
+    return max(12, int(min(base, out_w * 0.86 / max(1, 0.56 * len(text)))))
+
+
+def text_filters(kind, text, sub, files, out_w, out_h, dur, freeze=0.0, start=0.5):
+    """drawtext för textskyltar. files: (fil för rad 1, fil för rad 2) i arbetsmappen."""
+    m = min(out_w, out_h)
+    fa, fb = files
+    out = []
+    if kind == "label":  # artnamn nere till vänster, som i en naturdokumentär
+        fs = _fit(text, out_w, m * 0.058)
+        fs2 = max(11, int(fs * 0.62))
+        y1 = int(out_h * 0.80)
+        a = _alpha(start, min(dur - 0.2, start + 4.3))
+        x = int(out_w * 0.06)
+        out.append(f"drawtext=fontfile=font.ttf:textfile={fa}:fontcolor=white:fontsize={fs}:x={x}:y={y1}"
+                   f":box=1:boxcolor=black@0.38:boxborderw={max(6, fs // 3)}:alpha='{a}'")
+        if sub:
+            out.append(f"drawtext=fontfile=font.ttf:textfile={fb}:fontcolor=0xD9E4EC:fontsize={fs2}:x={x}"
+                       f":y={y1 + int(fs * 1.55)}:box=1:boxcolor=black@0.38:boxborderw={max(5, fs2 // 3)}:alpha='{a}'")
+    elif kind == "chapter":
+        fs = _fit(text, out_w, m * 0.075)
+        a = _alpha(0.15, min(dur - 0.15, 2.8))
+        out.append(f"drawtext=fontfile=font.ttf:textfile={fa}:fontcolor=white:fontsize={fs}:x=(w-text_w)/2"
+                   f":y=(h-text_h)/2:box=1:boxcolor=black@0.45:boxborderw={max(8, fs // 2)}:alpha='{a}'")
+    elif kind == "pop":  # pratbubbla på frysbilden
+        fs = _fit(text, out_w, m * 0.09)
+        t0 = max(0.0, dur - freeze - 0.05) if freeze else dur * 0.45
+        a = _alpha(t0, dur, 0.12)
+        out.append(f"drawtext=fontfile=font.ttf:textfile={fa}:fontcolor=0x111111:fontsize={fs}:x=(w-text_w)/2"
+                   f":y=h*0.16:box=1:boxcolor=white@0.92:boxborderw={max(10, fs // 2)}:alpha='{a}'")
+    elif kind == "subtitle":  # datum under titeln
+        fs = _fit(text, out_w, m * 0.04)
+        a = _alpha(0.6, min(3.6, dur - 0.1))
+        out.append(f"drawtext=fontfile=font.ttf:textfile={fa}:fontcolor=0xDDE6EE:fontsize={fs}:x=(w-text_w)/2"
+                   f":y=h*0.70+{int(m * 0.13)}:shadowcolor=black@0.5:shadowx=1:shadowy=1:alpha='{a}'")
+    return out
+
+
 def grade_values(g):
     """Färgutseende × styrka + egna reglage → värden (se config.LOOKS)."""
     g = g or {}
@@ -130,7 +175,7 @@ def grade_filter(g):
 
 
 def _shot_filter(shot, src_w, src_h, out_w, out_h, style, wb=True, fade_in=0.0, fade_out=0.0,
-                 fx=None, pad=0.0, vignette=False, title=None, grade=None):
+                 fx=None, pad=0.0, vignette=False, title=None, grade=None, texts=None):
     """fx: {"speed": 0.5} slowmotion, {"zoom": 0.05} långsam inzoomning. pad: extra sekunder i slutet
     (för mjuka övergångar). title: text som visas i början (font.ttf/title.txt i arbetsmappen)."""
     fx = fx or {}
@@ -181,6 +226,7 @@ def _shot_filter(shot, src_w, src_h, out_w, out_h, style, wb=True, fade_in=0.0, 
         parts.append("vignette=angle=PI/5")
     if title:
         parts.append(_title_filter(title, out_w, out_h, dur + pad))
+    parts += texts or []
     if fade_in > 0:
         parts.append(f"fade=t=in:st=0:d={min(fade_in, dur / 2):.3f}")
     if fade_out > 0:
@@ -204,9 +250,35 @@ def _audio_filter(fx, total):
     return ",".join(parts)
 
 
-def _join_xfade(seg_paths, durs, T, out, out_w, out_h, quality):
-    """Mjuka övergångar: xfade/acrossfade. Varje segment utom det sista är T sekunder längre,
-    så att klippen fortfarande byts exakt på takten."""
+SFX = {
+    "whoosh": "anoisesrc=d=0.5:c=pink:a=0.6,highpass=f=500,lowpass=f=4000,"
+              "afade=t=in:st=0:d=0.22,afade=t=out:st=0.22:d=0.28,volume=0.55",
+    "pling": "sine=frequency=1568:duration=0.6,afade=t=out:st=0.03:d=0.55,volume=0.35",
+}
+
+
+def _mix_sfx(src, events, out, total):
+    """Lägg in ljudeffekter (genererade, inga ljudfiler behövs) vid givna tider."""
+    cmd = [ffmpeg(), "-hide_banner", "-loglevel", "error", "-y", "-i", str(src)]
+    fc = []
+    for k, e in enumerate(events):
+        cmd += ["-f", "lavfi", "-i", SFX[e["kind"]]]
+        ms = int(max(0.0, min(e["t"], total - 0.1)) * 1000)
+        fc.append(f"[{k + 1}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+                  f"adelay={ms}|{ms}[s{k}]")
+    mix = "".join(f"[s{k}]" for k in range(len(events)))
+    fc.append(f"[0:a]{mix}amix=inputs={len(events) + 1}:duration=first:normalize=0[a]")
+    cmd += ["-filter_complex", ";".join(fc), "-map", "0:v", "-map", "[a]", "-c:v", "copy",
+            "-c:a", "aac", "-b:a", "192k", str(out)]
+    run(cmd)
+
+
+def _join_xfade(seg_paths, durs, pads, out, out_w, out_h, quality, kinds=None):
+    """Övergångar med xfade/acrossfade. Klipp i som inte är sist är pads[i] sekunder längre,
+    så att bytena fortfarande ligger exakt på takten. kinds: övergång per byte."""
+    if not isinstance(pads, (list, tuple)):
+        pads = [pads] * (len(seg_paths) - 1)
+    kinds = kinds or ["fade"] * len(pads)
     n = len(seg_paths)
     cmd = [ffmpeg(), "-hide_banner", "-loglevel", "error", "-y"]
     for p in seg_paths:
@@ -216,8 +288,10 @@ def _join_xfade(seg_paths, durs, T, out, out_w, out_h, quality):
     vprev, aprev, acc = "v0", "a0", 0.0
     for i in range(1, n):
         acc += durs[i - 1]
+        T = pads[i - 1]
+        kind = kinds[i - 1] if kinds[i - 1] != "cut" else "fade"
         vo, ao = f"vx{i}", f"ax{i}"
-        fc.append(f"[{vprev}][v{i}]xfade=transition=fade:duration={T:.3f}:offset={acc:.3f}[{vo}]")
+        fc.append(f"[{vprev}][v{i}]xfade=transition={kind}:duration={T:.3f}:offset={acc:.3f}[{vo}]")
         fc.append(f"[{aprev}][a{i}]acrossfade=d={T:.3f}:c1=tri:c2=tri[{ao}]")
         vprev, aprev = vo, ao
     cmd += ["-filter_complex", ";".join(fc), "-map", f"[{vprev}]", "-map", f"[{aprev}]",
@@ -259,18 +333,50 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
     total = sum(s["duration"] for s in shots)
     steps = len(shots) + 1
     durs = [float(s["duration"]) for s in shots]
-    T = 0.0
-    if on["transitions"] and plan.get("transition") == "fade" and len(shots) > 1:
-        T = round(min(plan.get("transition_d", 0.45), min(durs) * 0.4), 3)
-        if T < 0.12:
-            T = 0.0
+    # Övergång efter varje klipp (AI:ns val eller användarens). Äldre förslag: en sort för alla.
+    n = len(shots)
+    trs = []
+    for i in range(n - 1):
+        t = shots[i].get("tr")
+        if t is None and "tr" not in shots[i]:
+            t = "fade" if plan.get("transition") == "fade" else "cut"
+        trs.append(t if on["transitions"] and t in fx_mod.TR_DUR else "cut")
+    pads = []
+    for i, t in enumerate(trs):
+        d = fx_mod.TR_DUR.get(t, 0.0) if t != "fade" else plan.get("transition_d", 0.45)
+        d = min(d, durs[i] * 0.4, durs[i + 1] * 0.4)
+        pads.append(round(d, 3) if d >= 0.12 else 0.0)
+    for i in range(len(trs)):
+        if pads[i] == 0.0:
+            trs[i] = "cut"
+    any_tr = any(t != "cut" for t in trs)
+    if any_tr:  # raka klipp i en kedja med övergångar: en bildruta lång toning
+        pads = [p if p > 0 else 0.04 for p in pads]
+    pads.append(0.0)
     title = None
-    if on["title"] and plan.get("title"):
-        font = fx_mod.title_font()
-        if font:
-            shutil.copyfile(font, tmp / "font.ttf")
-            (tmp / "title.txt").write_text(plan["title"], "utf-8")
-            title = plan["title"]
+    texts_needed = (on["title"] and plan.get("title")) or (on["labels"] and any(s.get("text") for s in shots))
+    font = fx_mod.title_font() if texts_needed else None
+    if font:
+        shutil.copyfile(font, tmp / "font.ttf")
+    if font and on["title"] and plan.get("title"):
+        (tmp / "title.txt").write_text(plan["title"], "utf-8")
+        title = plan["title"]
+        if plan.get("subtitle"):
+            (tmp / "subtitle.txt").write_text(plan["subtitle"], "utf-8")
+
+    def overlays(i, shot, fx, out_len):
+        out = []
+        if i == 0 and title and plan.get("subtitle"):
+            out += text_filters("subtitle", plan["subtitle"], "", ("subtitle.txt", ""), out_w, out_h, out_len)
+        tx = shot.get("text")
+        if font and on["labels"] and tx and tx.get("text"):
+            fa, fb = f"t{i}a.txt", f"t{i}b.txt"
+            (tmp / fa).write_text(tx["text"], "utf-8")
+            (tmp / fb).write_text(tx.get("sub") or "", "utf-8")
+            start = 0.5 if not (i == 0 and title) else max(0.5, min(3.8, shot["duration"] - 1.6))
+            out += text_filters(tx.get("kind", "label"), tx["text"], tx.get("sub"), (fa, fb), out_w, out_h,
+                                shot["duration"], float(fx.get("freeze") or 0.0), start)
+        return out
     vignette = bool(on["vignette"] and plan.get("vignette"))
     try:
         seg_paths = []
@@ -285,7 +391,8 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
             if not Path(src).exists():
                 raise RuntimeError(f"Filen saknas: {src}")
             dur = shot["duration"]
-            pad = T if i < len(shots) - 1 else 0.0
+            # lite extra i slutet så att övergången alltid har bilder att arbeta med (avrundning till bildrutor)
+            pad = pads[i] + 0.12 if any_tr and i < len(shots) - 1 else 0.0
             fx = {k: v for k, v in (shot.get("fx") or {}).items()
                   if (k == "speed" and v < 1 and on["slowmo"]) or (k == "speed" and v > 1 and on["fast"])
                   or (k == "zoom" and on["zoom"]) or (k == "punch" and on["punch"])
@@ -294,12 +401,12 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
             has_audio = clip.get("has_audio", False)
             out_len = dur + pad
 
-            def encode(fx, vignette, title):
+            def encode(fx, vignette, title, texts):
                 vf = _shot_filter(shot, sw, sh, out_w, out_h, style, wb=wb,
                                   fade_in=style["fade"] if i == 0 else 0.0,
                                   fade_out=style["fade"] if i == len(shots) - 1 else 0.0,
                                   fx=fx, pad=pad, vignette=vignette, title=title,
-                                  grade=shot.get("grade") or proposal.get("grade"))
+                                  grade=shot.get("grade") or proposal.get("grade"), texts=texts)
                 read = (out_len - pad - float(fx.get("freeze") or 0.0)) * fx.get("speed", 1.0) + 0.05
                 cmd = [ffmpeg(), "-hide_banner", "-loglevel", "error", "-y",
                        "-ss", f"{shot['src_start']:.3f}", "-t", f"{read:.3f}", "-i", str(src)]
@@ -313,25 +420,38 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
                 run(cmd, cwd=str(tmp))
 
             try:
-                encode(fx, vignette, title if i == 0 else None)
+                encode(fx, vignette, title if i == 0 else None, overlays(i, shot, fx, out_len))
             except MediaError:
-                if not (fx or vignette or (title and i == 0)):
+                if not (fx or vignette or (title and i == 0) or shot.get("text")):
                     raise
-                encode({}, False, None)  # effekten stöds inte av FFmpeg-versionen: rendera utan
+                encode({}, False, None, [])  # effekten stöds inte av FFmpeg-versionen: rendera utan
             seg_paths.append(seg)
             if progress:
                 progress((i + 1) / steps, f"Klipp {i + 1} av {len(shots)}")
 
         joined = tmp / "joined.mp4"
-        if T > 0:
+        if any_tr:
             if progress:
                 progress(len(shots) / steps, "Övergångar")
             try:
-                _join_xfade(seg_paths, durs, T, joined, out_w, out_h, quality)
+                _join_xfade(seg_paths, durs, pads[:-1], joined, out_w, out_h, quality, trs)
             except MediaError:
-                _join_copy(seg_paths, durs, tmp, joined, padded=True)
+                try:  # äldre FFmpeg utan alla övergångar: vanliga toningar
+                    _join_xfade(seg_paths, durs, pads[:-1], joined, out_w, out_h, quality,
+                                ["fade"] * len(trs))
+                except MediaError:
+                    _join_copy(seg_paths, durs, tmp, joined, padded=True)
         else:
             _join_copy(seg_paths, durs, tmp, joined, padded=False)
+
+        events = fx_mod.plan_sfx(shots, trs, proposal["style"]) if on["sfx"] else []
+        if events:
+            try:
+                with_sfx = tmp / "sfx.mp4"
+                _mix_sfx(joined, events, with_sfx, total)
+                joined = with_sfx
+            except MediaError as e:
+                print("Ljudeffekterna kunde inte läggas till:", e)
 
         if progress:
             progress(len(shots) / steps, "Mixar ljud")

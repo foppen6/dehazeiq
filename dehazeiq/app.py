@@ -454,6 +454,7 @@ class Handler(BaseHTTPRequestHandler):
                 "analysis_version": pipeline.target_version(),
                 "platforms": PLATFORMS, "film_types": FILM_TYPES,
                 "looks": {k: v["label"] for k, v in LOOKS.items()},
+                "transitions": effects.TRANSITIONS,
                 "styles": {k: {"label": v["label"], "avg_shot": v["avg_shot"]} for k, v in STYLES.items()},
                 "formats": list(FORMATS),
             })
