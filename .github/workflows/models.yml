@@ -34,7 +34,7 @@ jobs:
 
       - name: Installera PyTorch och OpenCLIP (för artmodellen)
         run: |
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
           pip install open_clip_torch onnx onnxscript
 
       - name: Bygg artmodell (BioCLIP)
