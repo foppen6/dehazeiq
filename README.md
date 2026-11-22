@@ -176,6 +176,13 @@ CLIP jämför orden med bilderna som analysen redan har sparat, så det går på
   blixtar) och med egen sångtext (en rad i taget i takt med låten). Musikens energi läses av: kortare
   klipp där den är intensiv, och filmens starkaste klipp börjar exakt på refrängen eller dropen.
 
+## Dykets början och slut
+
+Klipp som hör till dykets början (båt, i vattnet vid ytan, nedstigning) eller slut (boj/SMB,
+säkerhetsstopp, uppstigning, ovan ytan efter dyket) känns igen på bildinnehållet och på var i dyket
+de är tagna. I filmer om dyket hamnar de först respektive sist, och i filmer om ett djur, detaljer
+eller rörelse tas de inte med. I analysvyn kan man själv ange "Del av dyket" för ett klipp.
+
 ## 360-film (Insta360 X4 m.fl.)
 
 360-filmer importeras som allt annat: .insv direkt från kameran (beta – programmet syr ihop

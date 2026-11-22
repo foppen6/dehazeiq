@@ -769,6 +769,8 @@ class Handler(BaseHTTPRequestHandler):
             if cid not in p.data["clips"]:
                 raise ApiError("Okänt klipp", HTTPStatus.NOT_FOUND)
             fields = {k: bool(body[k]) for k in ("favorite", "excluded") if k in body}
+            if "phase" in body:  # del av dyket: auto, start, mid, end
+                fields["phase_manual"] = body["phase"] if body["phase"] in ("start", "mid", "end") else None
             p.update_clip(cid, **fields)
             return self._json(p.data["clips"][cid])
         if action == ["generate"]:

@@ -246,15 +246,20 @@ def plan(proposal, clips_by_id, style_key):
         for i, s in enumerate(shots):
             clip = clips_by_id.get(s["clip_id"]) or {}
             room = float(clip.get("duration") or 0) - s["src_start"]
-            if (i not in slow and not clip.get("is_photo") and s["motion"] < med and s["duration"] >= 1.5
-                    and room >= s["duration"] * 2 + 0.2):
+            # snabbspola bara "transportsträckor": rörelse i bilden men inget tydligt motiv att titta på
+            # (att spola ett djur som ligger stilla ser konstigt ut)
+            subj = float((clip.get("analysis") or {}).get("subject_conf") or 0.0)
+            if (i not in slow and not clip.get("is_photo") and s["motion"] >= med and subj < 0.02
+                    and s["duration"] >= 1.5 and room >= s["duration"] * 2 + 0.2 and not s.get("phase")):
                 fast.append(i)
         fast = fast[:1] if style_key in ("action", "vlog", "promo_energy", "promo_experience") else fast[:2]
         if style_key in ("mv_glitch", "promo_experience"):
             fast = []
-        punch = [i for i in range(1, len(shots), 2) if i not in fast]
+        # zoomryck sparsamt: var tredje klipp, högst tre per film (inte på dykets början/slut)
+        punch = [i for i in range(2, len(shots), 3) if i not in fast and shots[i]["duration"] >= 1.2
+                 and not shots[i].get("phase")][:3]
         if style_key in ("musicvideo", "mv_glitch"):
-            punch = [i for i in range(len(shots)) if i not in fast]
+            punch = [i for i in range(1, len(shots), 2) if i not in fast]
         if style_key == "vlog":
             punch = []
     if style_key == "playful" and len(shots) >= 3:

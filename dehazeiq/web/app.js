@@ -701,6 +701,8 @@ function viewAnalyze() {
           <button class="toggle fav" data-fav="${c.id}" aria-pressed="${!!c.favorite}">${icon("star", 14)}${c.favorite ? "Favorit" : (c.auto_excluded ? "Ta med ändå" : "Måste med")}</button>
           <button class="toggle ex" data-ex="${c.id}" aria-pressed="${!!c.excluded}">${icon("eyeoff", 14)}${c.excluded ? "Bortvald" : "Välj bort"}</button>
         </div>
+        <label class="row" style="gap:8px;font-size:12px;color:var(--muted)">Del av dyket
+          <select class="selfield" data-phase="${c.id}" style="width:auto;height:30px;font-size:12px;padding:0 8px">${[["", "AI avgör"], ["start", "Början (båt, nedstigning)"], ["mid", "Under dyket"], ["end", "Slutet (boj, uppstigning)"]].map(([v, l]) => `<option value="${v}" ${(c.phase_manual || "") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
       </div></article>`;
   }).join("");
 
@@ -1093,6 +1095,17 @@ document.addEventListener("click", async (ev) => {
     case "modal-close": $("#modal").hidden = true; return undefined;
     default: return undefined;
   }
+});
+
+document.addEventListener("change", async (ev) => {
+  const t = ev.target;
+  if (!t.dataset || t.dataset.phase === undefined) return;
+  try {
+    const r = await api("POST", `/api/p/${state.pid}/clip/${t.dataset.phase}`, { phase: t.value || null });
+    const c = clips().find((x) => x.id === t.dataset.phase);
+    if (c) c.phase_manual = r.phase_manual;
+    toast(t.value ? "Klippet hamnar nu på rätt plats i dykfilmerna." : "AI avgör var klippet hör hemma.", true);
+  } catch (e) { fail(e); }
 });
 
 document.addEventListener("keydown", (ev) => {

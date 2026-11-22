@@ -14,7 +14,7 @@ import uuid
 
 import numpy as np
 
-from . import analysis, effects, quality, story
+from . import divearc, analysis, effects, quality, story
 from .config import FORMATS, STYLES
 
 DT = 1.0 / analysis.SAMPLE_FPS
@@ -476,6 +476,10 @@ def _candidates_for(project, style, fmt, favorites):
     by_id = {c["id"]: c for c in project.clips()}
     story.annotate(cands, by_id)
     story.annotate(ctx, by_id)
+    try:  # dykets början och slut (båt, nedstigning / boj, säkerhetsstopp, uppstigning)
+        divearc.annotate(cands + ctx)
+    except Exception as exc:  # noqa: BLE001
+        print("Dykfaser:", exc)
     ctx = [c for c in ctx if c.get("context")]
     return cands, ctx, emb_kind
 
@@ -547,6 +551,7 @@ def generate(project, style_key="cinematic", fmt="9:16", length=30.0, seed=None,
     seq = story.build(th, cands, ctx, n, select)
     if not seq:
         seq = _order(_select(cands, n, style, rng, emb_kind, favs), style_key, emb_kind)
+    seq = divearc.arrange(seq, (th or {}).get("kind"), style_key)
     beats = music.get("beats") if music else None
     is_mv = bool(style.get("music_video")) or style_key == "musicvideo"
     energy = (music.get("energy") or None) if (music and is_mv) else None
@@ -576,6 +581,7 @@ def generate(project, style_key="cinematic", fmt="9:16", length=30.0, seed=None,
             "desc": c.get("desc") or "",
             "photo": bool(clip.get("is_photo")),
             "view360": clip.get("view360"), "parent360": clip.get("parent360"),
+            "phase": c.get("phase"),
         })
         pos += float(dur)
 
