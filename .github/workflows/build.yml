@@ -57,7 +57,7 @@ jobs:
         shell: bash
         run: |
           # modellpaketet kan byggas om samtidigt: försök igen tills alla filer finns
-          need="clip_vision.onnx text_embeds.npz prompts.json bioclip_vision.onnx bio_text.npz bio_species.json"
+          need="clip_vision.onnx text_embeds.npz prompts.json bioclip_vision.onnx bio_text.npz bio_species.json clip_text.onnx clip_tokenizer.json"
           for i in $(seq 1 40); do
             gh release download models-v1 --dir packaging/models --repo "${{ github.repository }}" --clobber || true
             ok=1; for f in $need; do [ -s "packaging/models/$f" ] || ok=0; done
@@ -126,7 +126,7 @@ jobs:
         shell: bash
         run: |
           # modellpaketet kan byggas om samtidigt: försök igen tills alla filer finns
-          need="clip_vision.onnx text_embeds.npz prompts.json bioclip_vision.onnx bio_text.npz bio_species.json"
+          need="clip_vision.onnx text_embeds.npz prompts.json bioclip_vision.onnx bio_text.npz bio_species.json clip_text.onnx clip_tokenizer.json"
           for i in $(seq 1 40); do
             gh release download models-v1 --dir packaging/models --repo "${{ github.repository }}" --clobber || true
             ok=1; for f in $need; do [ -s "packaging/models/$f" ] || ok=0; done

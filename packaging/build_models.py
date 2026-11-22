@@ -56,6 +56,10 @@ def main():
     first_available(["onnx/vision_model_quantized.onnx", "onnx/vision_model.onnx"], OUT / "clip_vision.onnx")
     first_available(["onnx/text_model_quantized.onnx", "onnx/text_model.onnx"], tmp / "text.onnx")
     fetch("tokenizer.json", tmp / "tokenizer.json")
+    # textdelen följer också med appen: sökning i materialet med egna ord ("båtdäck", "solnedgång" …)
+    import shutil
+    shutil.copyfile(tmp / "text.onnx", OUT / "clip_text.onnx")
+    shutil.copyfile(tmp / "tokenizer.json", OUT / "clip_tokenizer.json")
 
     prompts = json.loads((HERE / "ai_prompts.json").read_text("utf-8"))
     tok = Tokenizer.from_file(str(tmp / "tokenizer.json"))
