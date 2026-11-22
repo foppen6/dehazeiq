@@ -622,6 +622,9 @@ class Handler(BaseHTTPRequestHandler):
                     musiclib.set_license(body.get("id"), body.get("kind"))
                 except ValueError as e:
                     raise ApiError(str(e))
+            elif verb == "starter":
+                JOBS.start("_music", "music-starter", lambda progress: musiclib.starter_pack(progress),
+                           label="Hämtar gratis musik", project_name="Musik")
             elif verb == "scan":
                 JOBS.start("_music", "music-scan", lambda progress: musiclib.scan(progress),
                            label="Läser in musikbiblioteket", project_name="Musik")
@@ -885,6 +888,12 @@ def start_server(port: int, lan: bool = False):
     if lan:
         st = start_lan(port + 1)
         print("Mobil via wifi:", ", ".join(st["urls"]) or f"port {st['port']}", "· kod:", st["key"])
+    try:  # första starten: hämta gratis musik i bakgrunden så att AI:n har något att välja
+        if musiclib.needs_starter():
+            JOBS.start("_music", "music-starter", lambda progress: musiclib.starter_pack(progress),
+                       label="Hämtar gratis musik", project_name="Musik")
+    except Exception:  # noqa: BLE001
+        pass
     return server, url
 
 

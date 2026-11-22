@@ -122,6 +122,7 @@ def public(lib=None):
                       | {"id": tid, "character": character(t)})
     tracks.sort(key=lambda t: (t.get("title") or t["name"]).lower())
     return {"dirs": lib["dirs"], "auto": lib.get("auto", True), "tracks": tracks,
+            "starter": lib.get("starter") or {},
             "license_kinds": LICENSE_KINDS, "sources": [s["name"] for s in custom_sources()]}
 
 
@@ -426,3 +427,55 @@ def download(item):
             lib["dirs"].append(str(DOWNLOAD_DIR))
         _save(lib)
     return dst
+
+
+# ---------- startpaket: gratis musik direkt från början ----------
+
+STARTER = [  # (sökord, karaktär) – några låtar av varje sort så att AI:n har något att välja mellan
+    ("calm ambient", "lugn"), ("underwater ambient", "lugn"), ("acoustic guitar", "mellan"),
+    ("cinematic", "mellan"), ("upbeat", "energisk"), ("electronic dance", "energisk"),
+]
+
+
+def starter_pack(progress=None, per_query=2):
+    """Hämtar en liten uppsättning gratis musik (CC0 och CC BY, får användas även i reklam)
+    från Openverse till biblioteket och läser in den. Körs automatiskt när biblioteket är tomt."""
+    got, errors, seen = [], [], set()
+    for k, (q, _) in enumerate(STARTER):
+        if progress:
+            progress(k / len(STARTER) * 0.6, f"Hämtar gratis musik: {q}")
+        try:
+            res = openverse_search(q, commercial=True, length="medium")["results"]
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"{q}: {e.__class__.__name__}")
+            continue
+        n = 0
+        for r in res:
+            if n >= per_query or r["id"] in seen or not r["url"].startswith("https://"):
+                continue
+            if r["duration"] and not (40 <= r["duration"] <= 420):
+                continue
+            try:
+                got.append(download(dict(r, source="Gratis startpaket")))
+                seen.add(r["id"])
+                n += 1
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"{r['title']}: {e.__class__.__name__}")
+    with _lock:
+        lib = _load()
+        lib["starter"] = {"done": bool(got), "count": len(got), "errors": errors[:5], "time": time.time()}
+        if str(DOWNLOAD_DIR) not in lib["dirs"]:
+            lib["dirs"].append(str(DOWNLOAD_DIR))
+        _save(lib)
+    if got:
+        scan(lambda f, m: progress(0.6 + 0.4 * f, m) if progress else None)
+    if not got:
+        raise RuntimeError("Kunde inte hämta gratis musik. Kontrollera internetanslutningen och försök igen under Musik.")
+    return {"downloaded": len(got)}
+
+
+def needs_starter():
+    lib = library()
+    real = [t for t in lib["tracks"].values() if Path(t["path"]).exists()]
+    st = lib.get("starter") or {}
+    return not real and not st.get("done") and time.time() - st.get("time", 0) > 3600

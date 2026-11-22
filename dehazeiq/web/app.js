@@ -564,8 +564,13 @@ function viewImport() {
   const fmtCards = FORMAT_INFO.map((f) => `<button class="card-btn" data-format="${f.id}" aria-pressed="${s.format === f.id}">
       <span class="shape" style="width:${f.shape[0]}px;height:${f.shape[1]}px"></span><b>${f.name}</b><small>${f.sub}</small></button>`).join("");
   const lens = LENGTHS.map((l) => `<button data-length="${l}" aria-pressed="${Number(s.length) === l}">${l < 60 ? `${l} s` : `${l / 60} min`}</button>`).join("");
-  const styles = Object.entries(STYLE_INFO).filter(([, v]) => (v.group || "story") === "story").map(([k, v]) => `<button class="style-btn" data-style="${k}" aria-pressed="${s.style === k}">
-      <span class="sw" style="background:${v.sw}">${k === "auto" ? icon("spark") : ""}</span><span class="t"><b>${v.label}</b><small>${v.desc}</small></span></button>`).join("");
+  const styleBtn = ([k, v]) => `<button class="style-btn" data-style="${k}" aria-pressed="${s.style === k}">
+      <span class="sw" style="background:${v.sw || v.color}">${k === "auto" ? icon("spark") : ""}</span><span class="t"><b>${v.label}</b><small>${v.desc}</small></span></button>`;
+  const styles = STYLE_GROUPS.map(([g, gl]) => {
+    const items = Object.entries(STYLE_INFO).filter(([, v]) => (v.group || "story") === g);
+    return g === "story" ? items.map(styleBtn).join("")
+      : `<span class="flabel" style="margin-top:6px">${gl}</span>${items.map(styleBtn).join("")}`;
+  }).join("");
   const m = P() && P().music;
   const musicBox = remote()
     ? `<div class="music"><span class="sw">${icon("music")}</span><span class="t"><b>${m ? esc(m.name) : "Ingen musik vald"}</b><small>${m ? `${dec(m.bpm, 0)} BPM · ${fmtDur(m.duration)}` : "Välj musik på datorn"}</small></span></div>`
@@ -919,8 +924,8 @@ function viewProposals() {
     ${promptBar()}
     ${planTabs() || `<div class="chips"><button class="chip" data-act="setup-project">+ Välj filmtyper: dykfilm, reklam, musikvideo, trailer …</button></div>`}
     <div class="props">${shown.map(propCard).join("") || '<div class="empty">Beskriv filmen ovan, välj filmtyper eller klicka på "Generera nya förslag".</div>'}</div>
-    <details class="more" ${state.moreOpen ? "open" : ""} data-more>
-      <summary>Berättelse, stil och effekter för "Generera nya förslag"</summary>
+    <details class="more" ${state.moreOpen !== false ? "open" : ""} data-more>
+      <summary>Stilar, berättelse och effekter för "Generera nya förslag"</summary>
       <div class="stack" style="gap:18px;padding-top:14px">
         <div class="stack" style="gap:8px"><b>Berättelse</b><div class="chips">${themeSel}</div></div>
         <div class="stack" style="gap:10px"><b>Stil</b>${styleSel}</div>

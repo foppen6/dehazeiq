@@ -194,6 +194,8 @@ ett 360-svep och en barrel roll (slås av under Effekter › 360-effekter).
 AI:n väljer en låt ur **musikbiblioteket** som passar varje film (tempo, intensitet och längd) när
 projektet inte har en vald låt. Biblioteket är en eller flera mappar på datorn – egen musik eller
 nedladdat från valfri tjänst (Epidemic Sound, Artlist, Pixabay, YouTube Audio Library …).
+Första gången programmet startar hämtas ett **gratis startpaket** (ett tiotal låtar, lugna till
+energiska, CC0 och CC BY – får användas även i reklam) så att AI:n har musik att välja direkt.
 Under **Musik** går det också att söka och hämta gratis musik med öppen licens via Openverse
 (Jamendo, Freesound, Wikimedia Commons m.fl.), med filter för musik som får användas i reklam.
 

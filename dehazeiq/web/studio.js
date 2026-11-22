@@ -795,7 +795,11 @@ function viewMusic() {
     <section class="stack" style="gap:12px"><div class="spread"><h2>Ditt bibliotek <span class="muted" style="font-weight:400">· ${m.tracks.length} låtar</span></h2>
       <div class="row">${remote() ? "" : '<button class="btn small" data-act="music-adddir">+ Lägg till mapp</button>'}<button class="btn small" data-act="music-scan" ${busy ? "disabled" : ""}>${busy ? "Läser in …" : "Läs in igen"}</button></div></div>
       <div class="chips">${m.dirs.map((d, k) => `<span class="tag" title="${esc(d)}">${esc(d.split(/[\\\\/]/).filter(Boolean).pop() || d)}${remote() ? "" : ` <button class="linkbtn" data-mdirdel="${k}" aria-label="Ta bort mappen">✕</button>`}</span>`).join("") || '<span class="muted" style="font-size:13px">Inga mappar än. Lägg till mappen där du har din musik – även nedladdat från Epidemic, Artlist, Pixabay eller YouTube Audio Library.</span>'}</div>
-      <div class="mlist">${tracks || '<div class="empty" style="padding:20px">Inga låtar inlästa ännu.</div>'}</div></section>
+      <div class="mlist">${tracks || `<div class="empty" style="padding:22px;display:flex;flex-direction:column;gap:12px;align-items:center">
+        <b>Inga låtar i biblioteket än</b>
+        <span class="muted" style="font-size:13px">Hämta ett gratis startpaket med lugn, mellan och energisk musik (CC0 och CC BY – får användas även i reklam), eller lägg till en egen mapp.</span>
+        ${m.starter && m.starter.errors && m.starter.errors.length && !m.starter.done ? `<span style="color:var(--warn);font-size:13px">Förra försöket misslyckades: ${esc(m.starter.errors[0])}. Kontrollera internetanslutningen.</span>` : ""}
+        <button class="btn primary" data-act="music-starter" ${busy ? "disabled" : ""}>${busy ? "Hämtar …" : "Hämta gratis musik"}</button></div>`}</div></section>
     <section class="stack" style="gap:12px"><h2>Hämta gratis musik</h2>
       <div class="searchbar"><span class="sico">${icon("search", 17)}</span><input class="field" id="mq" type="search" value="${esc(sr ? sr.q : "")}" placeholder="T.ex. calm ocean, ambient piano, upbeat travel, cinematic" aria-label="Sök musik">
         <select class="selfield" id="msrc" style="width:auto">${["openverse", ...(m.sources || [])].map((x) => `<option value="${esc(x)}" ${sr && sr.src === x ? "selected" : ""}>${x === "openverse" ? "Openverse (gratis)" : esc(x)}</option>`).join("")}</select>
@@ -855,6 +859,7 @@ document.addEventListener("click", async (ev) => {
       return undefined;
     }
     case "music-search": return musicSearch();
+    case "music-starter": await musicPost("starter"); state.expectJob = true; loadQueue(); toast("Hämtar gratis musik i bakgrunden – det tar någon minut.", true); setTimeout(loadMusic, 15000); setTimeout(loadMusic, 45000); return undefined;
     default: return undefined;
   }
 });
