@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 
 from .config import COLOR_PROFILES, FORMATS, GRADE_KEYS, LOOKS, OUTPUT_FPS, RESOLUTIONS, STYLES
-from . import divelog, i18n
+from . import divelog, i18n, pano
 from . import effects as fx_mod
 from .media import MediaError, ffmpeg, run, video_encoder_args
 
@@ -222,6 +222,12 @@ def text_filters(kind, text, sub, files, out_w, out_h, dur, freeze=0.0, start=0.
             out.append(f"drawtext=fontfile=font.ttf:textfile={fa}:fontsize={fs}:fontcolor=white:x={int(out_w * 0.06)}"
                        f":y=h*0.72:box=1:boxcolor={col}@0.9:boxborderw={max(8, fs // 3)}:alpha='{a}'")
         return out
+    if kind == "credit":  # musiktack längst ner på slutet
+        fs = _fit(text, out_w, m * 0.032)
+        a = _alpha(start, dur + 5, 0.4)
+        out.append(f"drawtext=fontfile=font.ttf:textfile={fa}:fontsize={fs}:fontcolor=0xE6EEF3:x=(w-text_w)/2"
+                   f":y=h-text_h-{int(out_h * 0.045)}:shadowcolor=black@0.7:shadowx=1:shadowy=1:alpha='{a}'")
+        return out
     if kind == "lyric":  # sångtext, en rad i taget
         fs = _fit(_longest(text), out_w, m * 0.072)
         a = _alpha(start, end if end is not None else dur, 0.12)
@@ -393,7 +399,7 @@ def kb_photo(fx):
 
 def _shot_filter(shot, src_w, src_h, out_w, out_h, style, wb=True, fade_in=0.0, fade_out=0.0,
                  fx=None, pad=0.0, vignette=False, title=None, grade=None, texts=None,
-                 enh=None, levels=None, look_fx=None, flash=False):
+                 enh=None, levels=None, look_fx=None, flash=False, pre=None):
     """fx: {"speed": 0.5} slowmotion, {"zoom": 0.05} långsam inzoomning. pad: extra sekunder i slutet
     (för mjuka övergångar). title: text som visas i början (font.ttf/title.txt i arbetsmappen)."""
     fx = fx or {}
@@ -406,8 +412,8 @@ def _shot_filter(shot, src_w, src_h, out_w, out_h, style, wb=True, fade_in=0.0, 
     else:
         crop = f"crop={cw}:{ch}:{x}:{y}"
     dur = shot["duration"]
-    parts = []
-    if (enh or {}).get("stabilize") and not kb_photo(fx):
+    parts = list(pre or [])  # t.ex. 360-vy ur källan (då är bilden redan out_w×out_h)
+    if (enh or {}).get("stabilize") and not kb_photo(fx) and not pre:
         parts.append("deshake=rx=32:ry=32:edge=mirror")
     parts.append(crop)  # banan följer källans tid, därför före ev. slowmotion
     speed = fx.get("speed")
@@ -438,6 +444,12 @@ def _shot_filter(shot, src_w, src_h, out_w, out_h, style, wb=True, fade_in=0.0, 
                   f"crop={out_w}:{out_h}", f"scale={out_w}:{out_h}"]  # ny bildbuffert: vissa filter kraschar annars
     else:
         parts.append(f"scale={out_w}:{out_h}:flags=lanczos")
+    if fx.get("roll"):  # barrel roll: ett varv runt mitt i klippet (förstorat så att hörnen täcks)
+        t0 = max(0.2, dur * 0.5 - 0.45)
+        t1 = t0 + 0.9
+        parts += [f"scale={int(out_w * 1.42) // 2 * 2}:{int(out_h * 1.42) // 2 * 2}",
+                  f"rotate=a='2*PI*if(lt(t,{t0:.2f}),0,if(gt(t,{t1:.2f}),1,(1-cos(PI*(t-{t0:.2f})/0.9))/2))'"
+                  f":ow={out_w}:oh={out_h}:fillcolor=black"]
     parts += [f"fps={OUTPUT_FPS}", "setsar=1"]
     if wb:
         r, g, b = shot.get("wb_gains", [1, 1, 1])
@@ -602,8 +614,9 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
     variant = style.get("promo")
     has_promo = bool(variant and (promo.get("hook") or promo.get("points") or promo.get("cta") or promo.get("url")))
     lyric_cues = _lyric_cues(loc.get("lyrics") or [], proposal) if style.get("music_video") == "lyrics" else []
+    credit = (proposal.get("music_credit") or "") if on.get("credits", True) and not style.get("no_music") else ""
     texts_needed = ((on["title"] and loc["title"]) or (on["labels"] and any(loc["shots"])) or dive_on
-                    or has_promo or bool(lyric_cues))
+                    or has_promo or bool(lyric_cues) or bool(credit))
     font = fx_mod.title_font() if texts_needed else None
     if font:
         shutil.copyfile(font, tmp / "font.ttf")
@@ -633,6 +646,10 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
 
     def overlays(i, shot, fx, out_len):
         out = []
+        if font and credit and i == len(shots) - 1:
+            (tmp / "credit.txt").write_text(credit, "utf-8")
+            out += text_filters("credit", credit, "", ("credit.txt", ""), out_w, out_h, out_len,
+                                start=max(0.2, shot["duration"] - 3.5))
         if font and variant:
             if i == 0 and promo.get("hook"):
                 (tmp / "hook.txt").write_text(promo["hook"], "utf-8")
@@ -685,6 +702,21 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
             else:
                 src = Path(clip["path"])
                 sw, sh = clip["width"], clip["height"]
+            pano_pre, pano_two, fshot = None, False, shot
+            cam = shot.get("cam360") or {}
+            if cam and not cam.get("manual") and not on.get("cam360", True):
+                cam = {}  # AI:ns 360-effekter avslagna
+            if shot.get("parent360") and pano.custom(cam):
+                meta = pano.load_meta(project.dir, shot["parent360"])
+                parent = clips.get(shot["parent360"]) or {}
+                if meta:
+                    if use_proxies or not Path(parent.get("path", "")).exists():
+                        src, lay = Path(meta["proxy"]), "equirect"
+                    else:
+                        src, lay = Path(parent["path"]), meta.get("layout", "equirect")
+                    pano_pre, pano_two = pano.shot_filters(meta, cam, lay, out_w, out_h, shot, tmp, i)
+                    sw, sh = out_w, out_h
+                    fshot = dict(shot, cx=0.5, cy=0.5, path=[])
             if not Path(src).exists():
                 raise RuntimeError(f"Filen saknas: {src}")
             dur = shot["duration"]
@@ -693,7 +725,7 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
             fx = {k: v for k, v in (shot.get("fx") or {}).items()
                   if (k == "speed" and v < 1 and on["slowmo"]) or (k == "speed" and v > 1 and on["fast"])
                   or (k == "zoom" and on["zoom"]) or (k == "punch" and on["punch"])
-                  or (k == "freeze" and on["freeze"]) or k == "kenburns"}
+                  or (k == "freeze" and on["freeze"]) or k == "kenburns" or (k == "roll" and on.get("cam360", True))}
             seg = tmp / f"seg_{i:03d}.mp4"
             has_audio = clip.get("has_audio", False)
             out_len = dur + pad
@@ -722,20 +754,23 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
             flash = bool(on.get("flash") and style.get("beat_flash") and i % int(style["beat_flash"]) == 0 and i > 0)
 
             def encode(fx, vignette, title, texts):
-                vf = _shot_filter(shot, sw, sh, out_w, out_h, style, wb=wb,
+                vf = _shot_filter(fshot, sw, sh, out_w, out_h, style, wb=wb,
                                   fade_in=style["fade"] if i == 0 else 0.0,
                                   fade_out=style["fade"] if i == len(shots) - 1 and not endcard else 0.0,
                                   fx=fx, pad=pad, vignette=vignette, title=title,
                                   grade=shot.get("grade") or proposal.get("grade"), texts=texts,
                                   enh=enh if texts is not None else {}, levels=levels,
-                                  look_fx=lfx if texts is not None else {}, flash=flash and texts is not None)
+                                  look_fx=lfx if texts is not None else {}, flash=flash and texts is not None,
+                                  pre=pano_pre)
                 read = (out_len - pad - float(fx.get("freeze") or 0.0)) * fx.get("speed", 1.0) + 0.05
                 cmd = [ffmpeg(), "-hide_banner", "-loglevel", "error", "-y",
                        "-ss", f"{shot['src_start']:.3f}", "-t", f"{read:.3f}", "-i", str(src)]
                 if not has_audio:
                     cmd += ["-f", "lavfi", "-t", f"{out_len:.3f}", "-i", "anullsrc=r=48000:cl=stereo"]
-                cmd += ["-map", "0:v:0", "-map", "0:a:0" if has_audio else "1:a:0",
-                        "-vf", vf, "-af", _audio_filter(fx if has_audio else {}, out_len),
+                vmap = (["-filter_complex", f"[0:v:0][0:v:1]hstack=inputs=2,{vf}[v]", "-map", "[v]"] if pano_two
+                        else ["-map", "0:v:0", "-vf", vf])
+                cmd += [*vmap, "-map", "0:a:0" if has_audio else "1:a:0",
+                        "-af", _audio_filter(fx if has_audio else {}, out_len),
                         *video_encoder_args(out_w, out_h, quality),
                         "-r", str(OUTPUT_FPS), "-c:a", "aac", "-b:a", "160k",
                         "-t", f"{out_len:.3f}", str(seg)]

@@ -24,6 +24,8 @@ EFFECTS = {
     "letterbox": "Svarta kanter",
     "flash": "Blixt på takt",
     "divedata": "Dykdata",
+    "cam360": "360-effekter",
+    "credits": "Musiktack",
 }
 DEFAULT_EFFECTS = {k: True for k in EFFECTS}
 
@@ -126,6 +128,30 @@ def plan_transitions(shots, style_key):
         since = 0 if t not in ("cut", "fade", "dissolve") else since + 1
         out.append(t)
     return out
+
+
+LIVELY = ("playful", "action", "vlog", "musicvideo", "mv_glitch", "promo_energy", "promo_experience")
+
+
+def plan_360(shots, style_key):
+    """360-effekter där materialet kommer från en 360-kamera: liten planet som intro,
+    ett 360-svep och en barrel roll i livliga stilar."""
+    for s in shots:
+        s.pop("cam360", None)
+        (s.get("fx") or {}).pop("roll", None)
+    ai = [i for i, s in enumerate(shots) if s.get("view360") == "ai"]
+    if not ai:
+        return
+    if 0 in ai and style_key in LIVELY + ("trailer", "cinematic") and shots[0]["duration"] >= 1.5:
+        shots[0]["cam360"] = {"mode": "planet"}
+    if style_key in ("action", "playful", "musicvideo", "mv_glitch", "promo_energy"):
+        mid = [i for i in ai if i > 0 and shots[i]["duration"] >= 1.6 and not (shots[i].get("fx") or {}).get("freeze")]
+        if mid:
+            w = mid[len(mid) // 2]
+            shots[w]["cam360"] = {"mode": "whip"}
+            rest = [i for i in mid if i != w]
+            if rest:
+                shots[rest[-1]].setdefault("fx", {})["roll"] = 1
 
 
 def plan_texts(shots, style_key, proposal):
@@ -264,7 +290,10 @@ def plan(proposal, clips_by_id, style_key):
         if i in zoom:
             fx["zoom"] = 0.07 if style_key == "calm" else 0.05
         s["fx"] = fx
+    plan_360(shots, style_key)
     trans = plan_transitions(shots, style_key)
+    if shots and (shots[0].get("cam360") or {}).get("mode") == "planet" and len(trans) and trans[0] in ("cut", "fade"):
+        trans[0] = "zoomin"  # från liten planet in i vanlig bild
     for i, s in enumerate(shots):
         s["tr"] = trans[i] if i < len(trans) else None
     plan_texts(shots, style_key, proposal)

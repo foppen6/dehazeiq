@@ -22,8 +22,8 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import cv2
 
-from . import (TAGLINE, __version__, ai, cliptext, divelog, editor, effects, generator, i18n, media, pipeline, prompt,
-               render, search, tagging, vlm)
+from . import (TAGLINE, __version__, ai, cliptext, divelog, editor, effects, generator, i18n, media, musiclib,
+               pipeline, prompt, render, search, tagging, vlm)
 from .config import FILM_TYPES, FORMATS, HOME, LOOKS, PLATFORMS, PROJECTS_DIR, STYLES
 from .project import JOBS, Project, auto_name, save_default_settings
 
@@ -495,6 +495,27 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(JOBS.queue())
         if api == ["vlm"]:
             return self._json(vlm.status())
+        if api == ["music"]:
+            return self._json(musiclib.public())
+        if api == ["music", "file"]:
+            t = musiclib.library()["tracks"].get((q.get("id") or [""])[0])
+            if not t:
+                raise ApiError("Okänd låt", HTTPStatus.NOT_FOUND)
+            return self._file(Path(t["path"]))
+        if api == ["music", "search"]:
+            text = (q.get("q") or [""])[0].strip()
+            if not text:
+                raise ApiError("Skriv vad du letar efter")
+            src = (q.get("source") or ["openverse"])[0]
+            try:
+                if src == "openverse":
+                    return self._json(musiclib.openverse_search(text, (q.get("commercial") or ["0"])[0] == "1",
+                                                                (q.get("length") or [None])[0]))
+                return self._json(musiclib.custom_search(src, text))
+            except ValueError as e:
+                raise ApiError(str(e))
+            except Exception as e:  # noqa: BLE001
+                raise ApiError(f"Musiktjänsten svarade inte ({e.__class__.__name__}). Kontrollera internetanslutningen.")
         if len(api) >= 2 and api[0] == "p":
             p = _project(api[1])
             if len(api) == 2:
@@ -588,6 +609,36 @@ class Handler(BaseHTTPRequestHandler):
             if body.get("enable"):
                 return self._json(start_lan(self.server.server_address[1] + 1))
             return self._json(stop_lan())
+        if api[:1] == ["music"] and len(api) == 2:
+            verb = api[1]
+            if verb == "dirs":
+                if self.is_remote:
+                    raise ApiError("Det här görs på datorn.", HTTPStatus.FORBIDDEN)
+                musiclib.set_dirs(body.get("dirs") or [])
+            elif verb == "auto":
+                musiclib.set_auto(bool(body.get("on")))
+            elif verb == "license":
+                try:
+                    musiclib.set_license(body.get("id"), body.get("kind"))
+                except ValueError as e:
+                    raise ApiError(str(e))
+            elif verb == "scan":
+                JOBS.start("_music", "music-scan", lambda progress: musiclib.scan(progress),
+                           label="Läser in musikbiblioteket", project_name="Musik")
+            elif verb == "download":
+                item = body.get("item") or {}
+                try:
+                    dst = musiclib.download(item)
+                except ValueError as e:
+                    raise ApiError(str(e))
+                except Exception as e:  # noqa: BLE001
+                    raise ApiError(f"Kunde inte hämta låten ({e.__class__.__name__})")
+                JOBS.start("_music", "music-scan", lambda progress: musiclib.scan(progress),
+                           label=f"Lyssnar på {dst.name}", project_name="Musik")
+                return self._json({"file": dst.name})
+            else:
+                raise ApiError("Hittades inte", HTTPStatus.NOT_FOUND)
+            return self._json(musiclib.public())
         if api == ["prompt"]:
             try:
                 return self._json(prompt.parse(body.get("text", ""), use_llm=True))
@@ -687,7 +738,7 @@ class Handler(BaseHTTPRequestHandler):
             p.save()
             return self._json({"ok": True})
         if action == ["music"]:
-            info = pipeline.set_music(p.id, body.get("path"))
+            info = pipeline.set_music(p.id, body.get("path"), body.get("track"))
             return self._json({"music": info})
         if action == ["settings"]:
             p.reload()

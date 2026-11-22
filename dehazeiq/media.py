@@ -296,6 +296,8 @@ def probe(path) -> dict:
         w, h = int(v.get("width") or 0), int(v.get("height") or 0)
         rotation = 0
         for sd in v.get("side_data_list") or []:
+            if "spherical" in str(sd.get("side_data_type", "")).lower():
+                info["spherical"] = str(sd.get("projection", "equirectangular"))
             if "rotation" in sd:
                 try:
                     rotation = int(float(sd["rotation"]))

@@ -223,6 +223,34 @@ def apply(project, prop, op, args):
             "endcard": bool(args.get("endcard", True)),
         }
         prop["promo"] = promo  # "alla förslag" och "senast använda" sköts av pipeline.edit_proposal
+    elif op == "cam360":
+        # 360-klipp: vy ur källan (AI-vy, liten planet, kristallkula, 360-svep), riktning, bildvinkel, roll
+        i, s = shot_at()
+        if not s.get("parent360"):
+            raise EditError("Klippet kommer inte från en 360-kamera")
+        mode = args.get("mode", (s.get("cam360") or {}).get("mode", "ai"))
+        if mode not in ("ai", "view", "planet", "ball", "whip"):
+            raise EditError("Okänd vy")
+        cam = {"mode": mode, "manual": True}
+        if args.get("yaw") is not None:
+            cam["yaw"] = max(-180.0, min(180.0, float(args["yaw"])))
+        elif (s.get("cam360") or {}).get("yaw"):
+            cam["yaw"] = s["cam360"]["yaw"]
+        if args.get("fov") is not None:
+            f = float(args["fov"])
+            if abs(f - 104) > 1:
+                cam["fov"] = max(60.0, min(150.0, f))
+        elif (s.get("cam360") or {}).get("fov"):
+            cam["fov"] = s["cam360"]["fov"]
+        if mode == "ai" and (cam.get("yaw") or cam.get("fov")):
+            cam["mode"] = "view"
+        s["cam360"] = cam
+        fx = s.setdefault("fx", {})
+        if args.get("roll") is not None:
+            if args["roll"]:
+                fx["roll"] = 1
+            else:
+                fx.pop("roll", None)
     elif op == "lyrics":
         lines = args.get("lines") or []
         if isinstance(lines, str):
@@ -336,6 +364,9 @@ def retarget(project, prop, platform, length=None, keep_id=True):
     pf = PLATFORMS[platform]
     length = float(length or pf["length"])
     music = project.data.get("music")
+    if music is None and prop.get("music_track"):
+        from . import musiclib
+        music = musiclib.track_music(prop["music_track"])  # samma låt som förslaget hade
     new = generator.generate(project, prop["style"], pf["format"], length, prop.get("seed"), music,
                              prop.get("favorites") or (), prop.get("theme"))
     if "promo" in prop or prop.get("prompt"):

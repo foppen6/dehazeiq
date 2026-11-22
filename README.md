@@ -176,6 +176,32 @@ CLIP jämför orden med bilderna som analysen redan har sparat, så det går på
   blixtar) och med egen sångtext (en rad i taget i takt med låten). Musikens energi läses av: kortare
   klipp där den är intensiv, och filmens starkaste klipp börjar exakt på refrängen eller dropen.
 
+## 360-film (Insta360 X4 m.fl.)
+
+360-filmer importeras som allt annat: .insv direkt från kameran (beta – programmet syr ihop
+linserna själv) eller en ihopsydd 360-MP4 från Insta360 Studio (bäst: stabiliserad och med
+osynlig selfiepinne). AI:n tittar åt 24 håll varje sekund, hittar motivet och gör en mjuk
+kamerabana. Av varje 360-film blir det två vanliga klipp: en **AI-vy** som följer motivet och en
+**delad bild** (motivet överst, andra hållet nedtill – ofta dykaren) som används i stående format.
+
+I redigeringen (Klipp › 360-kamera) kan varje 360-klipp bli **liten planet**, **kristallkula**,
+**360-svep** (kameran vrider sig ett halvt varv) eller få egen riktning och bildvinkel, och alla
+klipp kan få en **barrel roll**. I livliga stilar lägger AI:n själv in en liten planet som intro,
+ett 360-svep och en barrel roll (slås av under Effekter › 360-effekter).
+
+## Musik
+
+AI:n väljer en låt ur **musikbiblioteket** som passar varje film (tempo, intensitet och längd) när
+projektet inte har en vald låt. Biblioteket är en eller flera mappar på datorn – egen musik eller
+nedladdat från valfri tjänst (Epidemic Sound, Artlist, Pixabay, YouTube Audio Library …).
+Under **Musik** går det också att söka och hämta gratis musik med öppen licens via Openverse
+(Jamendo, Freesound, Wikimedia Commons m.fl.), med filter för musik som får användas i reklam.
+
+Varje låt har en licens (egen/köpt, fri även för reklam, Creative Commons, bara privat).
+När licensen kräver det namnges upphovspersonen i slutet av filmen och i en textfil vid export,
+och reklamfilmer väljer aldrig musik som bara får användas privat. Andra tjänster med eget API kan
+läggas till med en JSON-fil i `music_sources/` i datamappen (se exempelfilen där).
+
 ## Texter på flera språk
 
 Svenska, engelska, tyska, spanska, franska, italienska, nederländska, norska, danska och finska.
@@ -303,6 +329,8 @@ dehazeiq/
   cliptext.py   CLIP:s textdel och tokeniserare (sökning med egna ord)
   search.py     sökning i materialet
   prompt.py     beskrivning med egna ord → filmplan
+  pano.py       360-film: AI-kamerabana, vyer, liten planet, kristallkula, 360-svep
+  musiclib.py   musikbibliotek, Openverse, egna tjänster och licenser
   web/          gränssnittet (HTML/CSS/JS, logga)
 ```
 

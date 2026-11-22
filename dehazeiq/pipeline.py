@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import ai, analysis, generator, media, music, photo, quality, render, timeline
+from . import ai, analysis, generator, media, music, pano, photo, quality, render, timeline
 from .config import AUDIO_EXT, FORMATS
 from .project import Project, clip_id_for, collect_video_files, save_default_settings
 
@@ -49,13 +49,20 @@ def import_media(progress, pid, paths):
             continue
         info.update(id=cid, status="probed")
         if info["is360"]:
-            info["note"] = "360-material: exportera platt video från Insta360 Studio först"
+            info["layout360"] = pano.detect(f, info) or "equirect"
+            info["note"] = "360-film: AI väljer vyer"
         proj.reload()
         proj.data["clips"][cid] = info
         proj.data["order"].append(cid)
         proj.save()
         added.append(cid)
 
+    # 360-film: AI väljer vart kameran tittar, och vyerna blir vanliga klipp
+    for cid in [c for c in added if proj.data["clips"][c].get("is360")]:
+        try:
+            added += make_360_views(progress, proj, cid)
+        except Exception as exc:  # noqa: BLE001
+            proj.update_clip(cid, status="error", error=f"360: {str(exc)[:280]}")
     todo = [c for c in added if not proj.data["clips"][c].get("is360")]
     for i, cid in enumerate(todo):
         clip = proj.data["clips"][cid]
@@ -68,6 +75,46 @@ def import_media(progress, pid, paths):
         except Exception as exc:  # noqa: BLE001
             proj.update_clip(cid, status="error", error=str(exc)[:300])
     return {"added": len(added), "skipped": skipped, "failed": failed}
+
+
+def make_360_views(progress, proj, cid):
+    """360-klipp → AI-vy (följer motivet) och delad vy (motivet + andra hållet). Returnerar nya klipp-id."""
+    clip = proj.data["clips"][cid]
+    layout = clip.get("layout360") or "equirect"
+    name = clip["name"]
+    progress(0.3, f"360: förbereder {name}")
+    eq = proj.dir / "pano" / f"{cid}_equi.mp4"
+    pano.make_proxy(clip["path"], eq, layout)
+    model = ai.get()
+    progress(0.32, f"360: AI letar efter motivet i {name}")
+    if model:
+        found = pano.find_path(eq, model)
+    else:
+        found = {"path": [[0.0, 0.0, 0.0], [float(clip.get("duration") or 1), 0.0, 0.0]], "conf": 0.0}
+    pano.save_meta(proj.dir, cid, {"layout": layout, "path": found["path"], "conf": found["conf"], "proxy": str(eq)})
+    # så skarp som källan räcker till: equirect-bredden × bildvinkel / 360
+    ew = int(clip.get("width") or 3840) * (2 if layout == "dual" else 1)
+    size = int(min(pano.VIEW_SIZE, max(720, ew * pano.VIEW_FOV / 360.0))) // 2 * 2
+    new = []
+    for mode, label in (("ai", "AI-vy"), ("split", "delad bild")):
+        vid = f"{cid}_{mode}"
+        dst = proj.dir / "views" / f"{vid}.mp4"
+        progress(0.34, f"360: renderar {label} av {name}")
+        pano.render_view(clip["path"], layout, found["path"], dst, mode=mode, size=size)
+        info = media.probe(dst)
+        info.update(id=vid, status="probed", name=f"{name} · {label}", parent360=cid, view360=mode,
+                    created=clip.get("created"), source="Insta360", is360=False,
+                    has_audio=info.get("has_audio", False))
+        if mode == "split":
+            info["portrait_only"] = True
+        proj.reload()
+        proj.data["clips"][vid] = info
+        if vid not in proj.data["order"]:
+            proj.data["order"].append(vid)
+        proj.save()
+        new.append(vid)
+    proj.update_clip(cid, note="360-film: AI-vy och delad bild skapade", status="proxy")
+    return new
 
 
 def photo_source(meta, f):
@@ -126,8 +173,18 @@ def assess(pid):
     return n
 
 
-def set_music(pid, path):
+def set_music(pid, path, track=None):
     proj = Project(pid)
+    if track:
+        from . import musiclib
+        info = musiclib.track_music(track)
+        if not info:
+            raise RuntimeError("Låten finns inte i biblioteket längre")
+        info["auto"] = False
+        proj.reload()
+        proj.data["music"] = info
+        proj.save()
+        return info
     if not path:
         proj.reload()
         proj.data["music"] = None
@@ -284,6 +341,14 @@ def render_proposal(progress, pid, prop_id, resolution="preview", lang="sv"):
         srt = out.with_suffix(".srt")
         if render.write_srt(proj, prop, srt, lang, free):
             result["srt"] = srt.name
+        lic = prop.get("music_license") or {}
+        if prop.get("music_credit") or lic.get("url"):
+            # musikens licens och tack, att klistra in i inläggets text
+            txt = out.with_suffix(".musik.txt")
+            txt.write_text("\n".join(x for x in (prop.get("music_credit") or f"Musik: {prop.get('music_name')}",
+                                                  f"Licens: {lic.get('code', '').upper()} {lic.get('url', '')}".strip(),
+                                                  lic.get("source", "")) if x and x != "Licens:") + "\n", "utf-8")
+            result["credits"] = txt.name
     proj.update_proposal(prop_id, renders=renders)
     return result
 

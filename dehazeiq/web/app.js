@@ -357,7 +357,8 @@ async function saveSettings(patch) {
 
 const EFFECT_INFO = { transitions: "Mjuka övergångar", slowmo: "Slowmotion", zoom: "Långsam zoom", title: "Titel",
   vignette: "Vinjett", fast: "Snabbspolning", freeze: "Frysbild", punch: "Zoomryck", labels: "Textskyltar", sfx: "Ljudeffekter",
-  enhance: "Bildförbättring", stabilize: "Stabilisering", grain: "Filmkorn", letterbox: "Svarta kanter", flash: "Blixt på takt", divedata: "Dykdata" };
+  enhance: "Bildförbättring", stabilize: "Stabilisering", grain: "Filmkorn", letterbox: "Svarta kanter", flash: "Blixt på takt", divedata: "Dykdata",
+  cam360: "360-effekter", credits: "Musiktack" };
 const effectsOn = () => Object.assign(Object.fromEntries(Object.keys(EFFECT_INFO).map((k) => [k, true])), settings().effects || {});
 
 async function toggleEffect(key) {
@@ -494,8 +495,8 @@ function renderTop() {
   const info = state.info || {};
   const chip = `<span class="chip-status" title="Videokodning och motivigenkänning"><i style="background:${info.hw_encoder ? "var(--good)" : "var(--warn)"}"></i>${esc(info.encoder || "")} · ${info.clip_ai ? "AI på" : "AI saknas"}</span>`;
   $("#topActions").innerHTML = remote()
-    ? `${queueButton()}<span class="chip-status"><i></i>Ansluten via wifi</span>`
-    : `${chip}${queueButton()}<button class="btn small" data-act="lan" title="Styr DeHazeIQ från mobil eller surfplatta">${icon("phone", 15)}Mobil</button>`;
+    ? `${queueButton()}<button class="btn small" data-act="music-view">${icon("music", 15)}Musik</button><span class="chip-status"><i></i>Ansluten via wifi</span>`
+    : `${chip}${queueButton()}<button class="btn small" data-act="music-view">${icon("music", 15)}Musik</button><button class="btn small" data-act="lan" title="Styr DeHazeIQ från mobil eller surfplatta">${icon("phone", 15)}Mobil</button>`;
 }
 
 /* ---------- vy: importera ---------- */
@@ -563,7 +564,7 @@ function viewImport() {
   const fmtCards = FORMAT_INFO.map((f) => `<button class="card-btn" data-format="${f.id}" aria-pressed="${s.format === f.id}">
       <span class="shape" style="width:${f.shape[0]}px;height:${f.shape[1]}px"></span><b>${f.name}</b><small>${f.sub}</small></button>`).join("");
   const lens = LENGTHS.map((l) => `<button data-length="${l}" aria-pressed="${Number(s.length) === l}">${l < 60 ? `${l} s` : `${l / 60} min`}</button>`).join("");
-  const styles = Object.entries(STYLE_INFO).map(([k, v]) => `<button class="style-btn" data-style="${k}" aria-pressed="${s.style === k}">
+  const styles = Object.entries(STYLE_INFO).filter(([, v]) => (v.group || "story") === "story").map(([k, v]) => `<button class="style-btn" data-style="${k}" aria-pressed="${s.style === k}">
       <span class="sw" style="background:${v.sw}">${k === "auto" ? icon("spark") : ""}</span><span class="t"><b>${v.label}</b><small>${v.desc}</small></span></button>`).join("");
   const m = P() && P().music;
   const musicBox = remote()
@@ -571,7 +572,8 @@ function viewImport() {
     : m
     ? `<div class="music"><span class="sw">${icon("music")}</span><span class="t"><b>${esc(m.name)}</b><small>${dec(m.bpm, 0)} BPM · ${fmtDur(m.duration)}</small></span>
         <button class="btn small" data-act="music">Byt</button><button class="btn small" data-act="music-remove" aria-label="Ta bort musik">✕</button></div>`
-    : `<button class="music" data-act="music" style="text-align:left;cursor:pointer"><span class="sw">${icon("music")}</span><span class="t"><b>Välj musik</b><small>Egen fil – takten analyseras automatiskt</small></span></button>`;
+    : `<div class="music"><span class="sw">${icon("music")}</span><span class="t"><b>AI väljer musik</b><small>Ur ditt musikbibliotek, efter stilen</small></span>
+        <button class="btn small" data-act="music-view">Bibliotek</button><button class="btn small" data-act="music">Egen fil</button></div>`;
 
   let primary;
   if (busy) primary = `<button class="btn primary big push" disabled>Arbetar …</button>`;
@@ -852,7 +854,7 @@ function propCard(p, idx) {
           <div><dt>Klipp</dt><dd class="num">${p.n_shots}</dd></div>
           <div><dt>Snittlängd</dt><dd class="num">${dec(p.avg_shot)} s</dd></div>
           <div><dt>Längd</dt><dd class="num">${fmtDur(p.length)}</dd></div>
-          <div><dt>Musik</dt><dd>${p.music_name ? `${esc(p.music_name)} · ${dec(p.bpm, 0)} BPM` : "Originalljud"}</dd></div>
+          <div><dt>Musik</dt><dd>${p.music_name ? `${esc(p.music_name)} · ${dec(p.bpm, 0)} BPM${p.music_auto ? " · vald av AI" : ""}` : "Originalljud"}${p.music_license && p.music_license.kind === "private" && isPromo(p) ? '<br><span style="color:var(--warn)">Licensen gäller bara privat bruk</span>' : ""}</dd></div>
           <div style="grid-column:1/-1"><dt>Effekter</dt><dd>${esc(effectList(p).join(" · ") || (p.effects ? "Raka klipp" : "–"))}</dd></div>
         </dl>
       </div>
@@ -1007,7 +1009,7 @@ function render() {
     return;
   }
   const views = { import: viewImport, analyze: viewAnalyze, proposals: viewProposals, export: viewExport,
-    queue: viewQueue, setup: viewSetup, edit: viewEdit };
+    queue: viewQueue, setup: viewSetup, edit: viewEdit, music: viewMusic };
   v.innerHTML = (views[state.view] || viewImport)();
 }
 

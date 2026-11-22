@@ -93,6 +93,8 @@ def context_clips(project):
 def build_candidates(project, style, fmt="16:9", favorites=(), use_interest=True, clips=None,
                      highlights=True):
     clips = project.usable_clips() if clips is None else clips
+    if fmt not in ("9:16", "4:5"):  # delad 360-bild (två vyer över varandra) bara i stående format
+        clips = [c for c in clips if not c.get("portrait_only")]
     if not clips:
         raise GenerateError("Inget analyserat material ännu. Kör analysen först.")
     loaded = []
@@ -525,6 +527,14 @@ def generate(project, style_key="cinematic", fmt="9:16", length=30.0, seed=None,
     cands, ctx, emb_kind = _candidates_for(project, style, fmt, favorites)
     th = _resolve_theme(theme, cands, project)
     length = float(length)
+    if music is None and not style.get("no_music"):
+        # ingen låt vald i projektet: AI väljer ur musikbiblioteket (tempo, energi, längd, licens)
+        try:
+            from . import musiclib
+            recent = [p.get("music_track") for p in (project.data.get("proposals") or [])[:4] if p.get("music_track")]
+            music = musiclib.pick(style_key, length, commercial=bool(style.get("promo")), avoid=recent, seed=seed)
+        except Exception:  # noqa: BLE001
+            music = None
     n = max(3, int(round(length / style["avg_shot"])))
     # Filmen blir hellre kortare än utfylld: aldrig fler klipp än det finns höjdpunkter (+ sammanhang)
     n = min(n, max(1, len({(c["clip"]["id"], c["i0"]) for c in cands})) + 2)
@@ -565,6 +575,7 @@ def generate(project, style_key="cinematic", fmt="9:16", length=30.0, seed=None,
             "species": (c.get("species") or [None])[0] if c.get("species_p", 0) >= 0.35 else None,
             "desc": c.get("desc") or "",
             "photo": bool(clip.get("is_photo")),
+            "view360": clip.get("view360"), "parent360": clip.get("parent360"),
         })
         pos += float(dur)
 
@@ -588,6 +599,10 @@ def generate(project, style_key="cinematic", fmt="9:16", length=30.0, seed=None,
         "music": music.get("path") if music else None,
         "music_name": music.get("name") if music else None,
         "bpm": music.get("bpm") if music else None,
+        "music_track": music.get("track_id") if music else None,
+        "music_auto": bool(music and music.get("auto")),
+        "music_license": (music.get("license") if music else None),
+        "music_credit": (music.get("credit") if music else "") or "",
         "favorites": list(favorites),
         "similarity": emb_kind,
         "short": bool(pos < length * 0.85),

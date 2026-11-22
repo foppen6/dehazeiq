@@ -90,6 +90,25 @@ def main():
     p.add_proposals(made)
     r = pipeline.render_proposal(prog, p.id, made[0]["id"], "preview")
     print("Trailer med slutbild:", r["file"])
+    # v0.14: 360-film (ihopsydd 2:1 från Insta360 Studio) och musikbiblioteket
+    from dehazeiq import musiclib
+    import subprocess
+    from dehazeiq.media import ffmpeg as _ff
+    pdir = WORK / "pano"
+    pdir.mkdir(exist_ok=True)
+    src = next(iter(sorted(media.glob("*.mp4"))))
+    subprocess.run([_ff(), "-v", "error", "-y", "-i", str(src), "-t", "4", "-vf",
+                    "v360=input=flat:output=e:ih_fov=100:iv_fov=56:yaw=60:w=1920:h=960",
+                    str(pdir / "VID_20260101_120000_00_001.mp4")], check=True)
+    r = pipeline.import_media(prog, p.id, [str(pdir)])
+    p.reload()
+    views = [c for c in p.clips() if c.get("parent360")]
+    print("360:", r, [c["name"] for c in views])
+    assert len(views) == 2, "360-filmen borde ge AI-vy och delad bild"
+    musiclib.set_dirs([str(media)])
+    print("Musikbibliotek:", musiclib.scan())
+    m = musiclib.pick("action", 15)
+    assert m and m["bpm"] > 0, "AI:n borde välja en låt ur biblioteket"
     print(f"OK på {time.time() - t:.1f} s. Testdata i {WORK}")
 
 

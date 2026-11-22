@@ -100,7 +100,9 @@ def analyze(path) -> dict:
         rms = np.sqrt((y[: n * sec].reshape(n, sec) ** 2).mean(axis=1))
         mx = rms.max() or 1.0
         energy = [round(float(v / mx), 3) for v in rms]
+    activity = float(np.mean(env > 0.25)) if len(env) else 0.0  # hur tätt det händer saker i musiken
     return {
+        "activity": round(activity, 4),
         "drops": drops(energy),
         "path": str(path),
         "duration": round(duration, 3),

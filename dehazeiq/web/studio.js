@@ -79,7 +79,7 @@ function viewQueue() {
     const when = t.finished ? new Date(t.finished * 1000).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" }) : "";
     return `<div class="drow"><span style="color:${ok ? "var(--good)" : t.state === "cancelled" ? "var(--muted)" : "var(--bad)"}">${svgi(ok ? ICO.check : ICO.x, 16)}</span>
       <span class="grow"><b style="font-weight:600">${esc(t.label)}</b><span class="muted"> · ${esc(t.project)}</span>${!ok ? `<br><small class="muted">${esc(t.message || "")}</small>` : ""}</span>
-      <span class="muted num" style="font-size:13px">${when}</span><button class="btn small" data-qopen="${esc(t.pid)}">Öppna</button></div>`;
+      <span class="muted num" style="font-size:13px">${when}</span>${t.pid.startsWith("_") ? `<button class="btn small" data-act="music-view">Musik</button>` : `<button class="btn small" data-qopen="${esc(t.pid)}">Öppna</button>`}</div>`;
   }).join("");
   return `<main class="main wide" style="max-width:1000px">
     <div class="spread"><div class="head"><h1>Jobbkö</h1><p class="lead">Ett jobb i taget i bakgrunden – du kan stänga fönstret eller jobba med annat. Ordningen går att ändra.</p></div>
@@ -282,7 +282,7 @@ function edTimeline(p) {
   const total = p.shots.reduce((a, s) => a + s.duration, 0) || 1;
   const blocks = p.shots.map((s, i) => {
     const fx = s.fx || {};
-    const tags = [fx.speed > 1 ? "2×" : "", fx.speed && fx.speed < 1 ? "0,5×" : "", fx.freeze ? "Frys" : "", fx.zoom ? "Zoom" : "", fx.punch ? "Ryck" : "", fx.kenburns ? (fx.kenburns > 0 ? "Foto ↗" : "Foto ↙") : s.photo ? "Foto" : "", s.grade ? "Färg" : "", s.manual_center ? "Flyttad" : ""].filter(Boolean);
+    const tags = [fx.speed > 1 ? "2×" : "", fx.speed && fx.speed < 1 ? "0,5×" : "", fx.freeze ? "Frys" : "", fx.zoom ? "Zoom" : "", fx.punch ? "Ryck" : "", fx.kenburns ? (fx.kenburns > 0 ? "Foto ↗" : "Foto ↙") : s.photo ? "Foto" : "", s.parent360 ? ({ planet: "Planet", ball: "Kula", whip: "360-svep", view: "360" }[(s.cam360 || {}).mode] || "360") : "", fx.roll ? "Roll" : "", s.grade ? "Färg" : "", s.manual_center ? "Flyttad" : ""].filter(Boolean);
     return `<button class="tlblock ${i === state.ed.i ? "sel" : ""}" data-edshot="${i}" style="flex:${s.duration} 1 0" aria-label="Klipp ${i + 1}, ${dec(s.duration)} sekunder">
       <img alt="" loading="lazy" src="${frameUrl(s.clip_id, s.src_start + Math.min(s.duration, 1.5), 160)}"><span class="tlnum num">${i + 1}</span><span class="tldur num">${dec(s.duration)} s</span>${tags.length ? `<span class="tltags">${tags.join(" · ")}</span>` : ""}</button>`;
   }).join("");
@@ -296,6 +296,23 @@ function edTimeline(p) {
     <div class="tltrack"><span class="tllab">Byte</span><div class="tlrow">${trRow}</div></div>
     <div class="tltrack"><span class="tllab">Ljud</span><div class="tlrow"><span class="tlaudio">${p.music_name ? `${esc(p.music_name)} · ${dec(p.bpm, 0)} BPM` : "Originalljud"}</span></div></div>
     <div class="muted num" style="font-size:12px;text-align:right">${p.shots.length} klipp · ${fmtDur(total)}</div></section>`;
+}
+
+function cam360Section(s) {
+  const cam = s.cam360 || {};
+  const mode = cam.mode === "view" ? "ai" : (cam.mode || "ai");
+  const yaw = Number(cam.yaw || 0), fov = Number(cam.fov || 104);
+  const modes = [["ai", "AI-vy"], ["planet", "Liten planet"], ["ball", "Kristallkula"], ["whip", "360-svep"]];
+  return `<div class="stack" style="gap:8px;padding:12px;border-radius:12px;background:var(--accent-bg);border:1px solid var(--accent-bg-2)">
+      <span class="flabel">360-kamera${s.view360 === "split" ? " · delad bild" : ""}</span>
+      ${s.view360 === "split" ? '<span class="muted" style="font-size:12px">Motivet överst och andra hållet nedtill. Välj AI-vy-klippet för fler 360-effekter.</span>' : `
+      <div class="chips">${modes.map(([k, l]) => chipBtn("data-cammode", k, l, mode === k)).join("")}</div>
+      <label class="stack" style="gap:4px;font-size:13px">Vrid vyn <span class="muted num" data-camval="yaw">${Math.round(yaw)}°</span>
+        <input type="range" min="-180" max="180" step="5" value="${yaw}" data-cam="yaw" style="accent-color:var(--accent)"></label>
+      <label class="stack" style="gap:4px;font-size:13px">Bildvinkel <span class="muted num" data-camval="fov">${Math.round(fov)}°</span>
+        <input type="range" min="60" max="150" step="2" value="${fov}" data-cam="fov" style="accent-color:var(--accent)"></label>`}
+      <label class="row" style="gap:10px;font-size:14px"><input type="checkbox" data-camroll ${(s.fx || {}).roll ? "checked" : ""} style="width:18px;height:18px;accent-color:var(--accent)">Barrel roll (ett varv runt)</label>
+      <span class="muted" style="font-size:12px">Syns när filmen förhandsvisas.</span></div>`;
 }
 
 function chipBtn(attr, val, label, on) {
@@ -316,6 +333,7 @@ function edInspectorClip(p, s) {
       <input type="range" min="0.5" max="10" step="0.1" value="${s.duration}" data-edlen aria-label="Längd i sekunder" style="flex:1 1 auto;accent-color:var(--accent)">
       <button class="btn icon small" data-edtrim="${beat}" aria-label="Längre">+</button><span class="num" style="width:48px;text-align:right" data-edlenval>${dec(s.duration)} s</span></div>
       ${p.bpm ? '<span class="muted" style="font-size:12px">Fäster på musikens takt</span>' : ""}</div>
+    ${s.parent360 ? cam360Section(s) : ""}
     ${s.photo ? `<div class="stack" style="gap:8px"><span class="flabel">Rörelse i fotot</span><div class="chips">
       ${chipBtn("data-edfx", "kb_in", "Zooma in mot motivet", fx.kenburns > 0)}${chipBtn("data-edfx", "kb_out", "Zooma ut", fx.kenburns < 0)}${chipBtn("data-edfx", "none", "Stilla", !fx.kenburns && effect === "none")}</div></div>` : `
     <div class="stack" style="gap:8px"><span class="flabel">Hastighet</span><div class="chips">
@@ -551,6 +569,7 @@ document.addEventListener("click", async (ev) => {
   if (d.edtrim) { const s = edProp().shots[state.ed.i]; return edit("trim", { i: state.ed.i, duration: s.duration + Number(d.edtrim) }); }
   if (d.edspeed) return edit("speed", { i: state.ed.i, mode: d.edspeed });
   if (d.edfx) return edit("fx", { i: state.ed.i, effect: d.edfx });
+  if (d.cammode) return edit("cam360", { i: state.ed.i, mode: d.cammode, ...(d.cammode === "ai" ? { yaw: 0, fov: 104 } : {}) });
   if (d.edmove) { const j = state.ed.i + Number(d.edmove); await edit("move", { i: state.ed.i, dir: Number(d.edmove) }); state.ed.i = Math.max(0, Math.min(j, edProp().shots.length - 1)); return render(); }
   if (d.edscope) { state.ed.scope = d.edscope; return render(); }
   if (d.edlook) { const g = curGrade(edProp()); g.look = d.edlook; stageGrade(g); return render(); }
@@ -611,6 +630,7 @@ document.addEventListener("input", (ev) => {
   if (t.dataset.promo && state.ed.promo) { state.ed.promo[t.dataset.promo] = t.type === "checkbox" ? t.checked : t.value; return undefined; }
   if (t.dataset.edgrade) return onGradeInput(t.dataset.edgrade, t.value);
   if (t.dataset.edlen !== undefined) { const v = document.querySelector("[data-edlenval]"); if (v) v.textContent = `${dec(Number(t.value))} s`; }
+  if (t.dataset.cam) { const v = document.querySelector(`[data-camval="${t.dataset.cam}"]`); if (v) v.textContent = `${t.value}°`; }
   return undefined;
 });
 
@@ -619,6 +639,8 @@ document.addEventListener("change", (ev) => {
   const d = t.dataset;
   if (d.edlen !== undefined) return edit("trim", { i: state.ed.i, duration: Number(t.value) });
   if (d.edtr !== undefined) return edit("transition", { i: state.ed.i, type: t.value });
+  if (d.cam) return edit("cam360", { i: state.ed.i, [d.cam]: Number(t.value) });
+  if (d.camroll !== undefined) return edit("cam360", { i: state.ed.i, roll: t.checked });
   if (d.promo && state.ed.promo && t.type === "checkbox") { state.ed.promo[d.promo] = t.checked; return undefined; }
   if (d.edstab !== undefined) { const g = curGrade(edProp()); g.stabilize = t.checked; stageGrade(g); return render(); }
   if (d.edlang !== undefined) { state.ed.lang = t.value; state.ed.texts = null; return render(); }
@@ -717,3 +739,131 @@ async function diveOffset(delta) {
     render();
   } catch (e) { fail(e); }
 }
+
+/* ================= musik: bibliotek och källor ================= */
+state.music = null;
+state.msearch = null;
+let musicAudio = null;
+const LIC_SHORT = { own: "Egen/köpt", commercial: "Fri, även reklam", cc: "Creative Commons", private: "Bara privat", unknown: "Okänd" };
+
+async function loadMusic() {
+  try { state.music = await api("GET", "/api/music"); } catch (e) { fail(e); }
+  if (state.view === "music") render();
+}
+
+function playMusic(url, btn) {
+  if (musicAudio && musicAudio.dataset.url === url && !musicAudio.paused) { musicAudio.pause(); render(); return; }
+  if (musicAudio) musicAudio.pause();
+  musicAudio = new Audio(url);
+  musicAudio.dataset.url = url;
+  musicAudio.play().catch(() => toast("Kunde inte spela upp låten"));
+  musicAudio.onended = () => render();
+  render();
+}
+const playing = (url) => musicAudio && musicAudio.dataset.url === url && !musicAudio.paused;
+
+function licBadge(lic) {
+  lic = lic || {};
+  const code = lic.code ? ` · ${String(lic.code).toUpperCase()}` : "";
+  const col = lic.kind === "private" ? "var(--warn)" : lic.kind === "unknown" ? "var(--muted)" : "var(--good)";
+  return `<span class="tag" style="color:${col}">${esc(LIC_SHORT[lic.kind] || "Okänd")}${esc(code)}</span>`;
+}
+
+function viewMusic() {
+  if (!state.music) { loadMusic(); return '<main class="main"><div class="empty">Läser musikbiblioteket …</div></main>'; }
+  const m = state.music;
+  const pm = P() && P().music;
+  const kinds = m.license_kinds || {};
+  const busy = (state.queue.tasks || []).some((t) => t.pid === "_music");
+  const tracks = m.tracks.map((t) => `<div class="mrow">
+      <button class="btn icon small" data-mplay="/api/music/file?id=${t.id}" aria-label="Spela">${playing(`/api/music/file?id=${t.id}`) ? svgi(ICO.pause, 14) : icon("play", 13)}</button>
+      <div class="stack" style="gap:2px;min-width:0;flex:1 1 220px"><b class="ell">${esc(t.title || t.name)}</b><span class="muted ell" style="font-size:12px">${esc(t.artist || "")}${t.artist ? " · " : ""}${fmtDur(t.duration)} · ${dec(t.bpm, 0)} BPM · ${esc(t.character || "")}</span></div>
+      <select class="selfield" data-mlic="${t.id}" aria-label="Licens" style="width:auto;max-width:210px">${Object.entries(kinds).map(([k, l]) => `<option value="${k}" ${((t.license || {}).kind || "own") === k ? "selected" : ""} title="${esc(l)}">${esc(LIC_SHORT[k])}</option>`).join("")}</select>
+      ${P() ? `<button class="btn small" data-muse="${t.id}">${pm && pm.track_id === t.id ? "Används" : "Använd i projektet"}</button>` : ""}</div>`).join("");
+  const sr = state.msearch;
+  const results = sr && sr.results ? sr.results.map((r, k) => `<div class="mrow">
+      <button class="btn icon small" data-mplay="${esc(r.url)}" aria-label="Spela">${playing(r.url) ? svgi(ICO.pause, 14) : icon("play", 13)}</button>
+      <div class="stack" style="gap:2px;min-width:0;flex:1 1 220px"><b class="ell">${esc(r.title)}</b><span class="muted ell" style="font-size:12px">${esc(r.artist)}${r.duration ? ` · ${fmtDur(r.duration)}` : ""} · ${esc((r.license || {}).source || r.source || "")}</span></div>
+      ${licBadge(r.license)}<button class="btn small primary" data-mget="${k}" ${r.got ? "disabled" : ""}>${r.got ? "Hämtad" : "Hämta"}</button></div>`).join("") : "";
+  return `<main class="main wide" style="max-width:1100px">
+    <div class="head"><h1>Musik</h1><p class="lead">AI:n väljer en låt som passar varje film (tempo, energi och längd) ur ditt bibliotek. Licensen följer med: namn på upphovspersonen läggs till när det krävs, och reklamfilmer använder bara musik som får användas kommersiellt.</p></div>
+    <section class="box" style="flex-direction:row;flex-wrap:wrap;align-items:center;gap:14px">
+      <label class="row" style="gap:10px;font-size:15px;flex:1 1 300px"><input type="checkbox" data-mauto ${m.auto ? "checked" : ""} style="width:20px;height:20px;accent-color:var(--accent)"><b>AI väljer musik automatiskt</b></label>
+      ${P() ? `<span class="muted" style="font-size:13px">${esc(P().name)}: ${pm ? `${esc(pm.name)}${pm.auto === false ? " (vald av dig)" : ""}` : "AI väljer"}</span>
+        ${pm ? '<button class="btn small" data-act="music-remove">Låt AI välja</button>' : ""}` : ""}
+    </section>
+    <section class="stack" style="gap:12px"><div class="spread"><h2>Ditt bibliotek <span class="muted" style="font-weight:400">· ${m.tracks.length} låtar</span></h2>
+      <div class="row">${remote() ? "" : '<button class="btn small" data-act="music-adddir">+ Lägg till mapp</button>'}<button class="btn small" data-act="music-scan" ${busy ? "disabled" : ""}>${busy ? "Läser in …" : "Läs in igen"}</button></div></div>
+      <div class="chips">${m.dirs.map((d, k) => `<span class="tag" title="${esc(d)}">${esc(d.split(/[\\\\/]/).filter(Boolean).pop() || d)}${remote() ? "" : ` <button class="linkbtn" data-mdirdel="${k}" aria-label="Ta bort mappen">✕</button>`}</span>`).join("") || '<span class="muted" style="font-size:13px">Inga mappar än. Lägg till mappen där du har din musik – även nedladdat från Epidemic, Artlist, Pixabay eller YouTube Audio Library.</span>'}</div>
+      <div class="mlist">${tracks || '<div class="empty" style="padding:20px">Inga låtar inlästa ännu.</div>'}</div></section>
+    <section class="stack" style="gap:12px"><h2>Hämta gratis musik</h2>
+      <div class="searchbar"><span class="sico">${icon("search", 17)}</span><input class="field" id="mq" type="search" value="${esc(sr ? sr.q : "")}" placeholder="T.ex. calm ocean, ambient piano, upbeat travel, cinematic" aria-label="Sök musik">
+        <select class="selfield" id="msrc" style="width:auto">${["openverse", ...(m.sources || [])].map((x) => `<option value="${esc(x)}" ${sr && sr.src === x ? "selected" : ""}>${x === "openverse" ? "Openverse (gratis)" : esc(x)}</option>`).join("")}</select>
+        <button class="btn" data-act="music-search">Sök</button></div>
+      <label class="row" style="gap:10px;font-size:14px"><input type="checkbox" id="mcom" ${sr && sr.commercial ? "checked" : ""} style="width:18px;height:18px;accent-color:var(--accent)">Bara musik som får användas i reklam</label>
+      ${sr && sr.loading ? '<span class="muted">Söker …</span>' : ""}
+      ${sr && sr.results && !sr.results.length ? '<span class="muted">Inga träffar. Sök gärna på engelska.</span>' : ""}
+      <div class="mlist">${results}</div>
+      <p class="muted" style="margin:0;font-size:12px">Openverse samlar musik med öppen licens från bland annat Jamendo, Freesound och Wikimedia Commons. Musik med CC BY kräver att upphovspersonen namnges – det gör programmet automatiskt i slutet av filmen och i en textfil vid export.</p></section>
+    <section class="box"><h2 style="font-size:14px">Andra musiktjänster</h2><p style="margin:0">Har du Epidemic Sound, Artlist eller någon annan tjänst: ladda ner låtarna till en av mapparna ovan så används de som allt annat. Tjänster med eget API kan läggas till med en liten beskrivningsfil (adress och nyckel) i mappen <code>music_sources</code> i DeHazeIQ:s datamapp – se exempelfilen där.</p></section>
+  </main>`;
+}
+
+async function musicPost(verb, body) {
+  try { state.music = await api("POST", `/api/music/${verb}`, body || {}); render(); } catch (e) { fail(e); }
+}
+
+async function musicSearch() {
+  const q = ($("#mq") || {}).value || "";
+  if (!q.trim()) return;
+  const src = ($("#msrc") || {}).value || "openverse";
+  const commercial = !!($("#mcom") || {}).checked;
+  state.msearch = { q, src, commercial, loading: true };
+  render();
+  try {
+    const r = await api("GET", `/api/music/search?q=${encodeURIComponent(q)}&source=${encodeURIComponent(src)}&commercial=${commercial ? 1 : 0}`);
+    state.msearch = { q, src, commercial, results: r.results };
+  } catch (e) { state.msearch = { q, src, commercial, results: [] }; fail(e); }
+  render();
+}
+
+document.addEventListener("click", async (ev) => {
+  const t = ev.target.closest("button");
+  if (!t) return undefined;
+  const d = t.dataset;
+  if (d.mplay) return playMusic(d.mplay, t);
+  if (d.mget !== undefined) {
+    const r = state.msearch.results[Number(d.mget)];
+    t.disabled = true; t.textContent = "Hämtar …";
+    try { await api("POST", "/api/music/download", { item: r }); r.got = true; toast(`${r.title} är hämtad och läses in i biblioteket.`, true); loadQueue(); setTimeout(loadMusic, 4000); } catch (e) { fail(e); }
+    return render();
+  }
+  if (d.muse) {
+    try { const r = await api("POST", `/api/p/${state.pid}/music`, { track: d.muse }); P().music = r.music; toast(`Musik: ${r.music.name}`, true); } catch (e) { fail(e); }
+    return render();
+  }
+  if (d.mdirdel !== undefined) { const dirs = state.music.dirs.filter((_, k) => k !== Number(d.mdirdel)); return musicPost("dirs", { dirs }); }
+  switch (d.act) {
+    case "music-view": state.view = "music"; loadMusic(); return render();
+    case "music-scan": await musicPost("scan"); state.expectJob = true; loadQueue(); toast("Läser in musiken i bakgrunden.", true); setTimeout(loadMusic, 5000); return undefined;
+    case "music-adddir": {
+      const paths = await choosePaths("folder");
+      if (!paths.length) return undefined;
+      await musicPost("dirs", { dirs: [...state.music.dirs, ...paths] });
+      await musicPost("scan"); loadQueue(); setTimeout(loadMusic, 5000);
+      toast("Mappen läggs till och musiken läses in i bakgrunden.", true);
+      return undefined;
+    }
+    case "music-search": return musicSearch();
+    default: return undefined;
+  }
+});
+document.addEventListener("change", (ev) => {
+  const t = ev.target;
+  if (t.dataset.mlic) return musicPost("license", { id: t.dataset.mlic, kind: t.value });
+  if (t.dataset.mauto !== undefined) return musicPost("auto", { on: t.checked });
+  return undefined;
+});
+document.addEventListener("keydown", (ev) => {
+  if (ev.key === "Enter" && ev.target.id === "mq") { ev.preventDefault(); musicSearch(); }
+});
