@@ -325,7 +325,7 @@ dl.stats dd { margin: 0; font-weight: 600; white-space: nowrap; overflow: hidden
 .grow { flex: 1 1 auto; min-width: 0; }
 
 /* ---------- filmtyper ---------- */
-.ftgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 14px; }
+.ftgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
 .ftcard { position: relative; text-align: left; display: flex; flex-direction: column; gap: 10px; padding: 20px; border-radius: 14px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font: inherit; min-height: 170px; cursor: pointer; }
 .ftcard:hover { background: var(--panel-2); }
 .ftcard[aria-pressed="true"] { border: 2px solid var(--accent); padding: 19px; }
@@ -377,3 +377,25 @@ dl.stats dd { margin: 0; font-weight: 600; white-space: nowrap; overflow: hidden
 .tltitle { display: block; height: 26px; line-height: 26px; padding: 0 8px; border-radius: 6px; background: #2A2340; border: 1px solid #4B3F73; color: #D7CCFF; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 90px; }
 .tlaudio { flex: 1 1 auto; height: 28px; line-height: 28px; padding: 0 10px; border-radius: 6px; background: #13232A; border: 1px solid #22404A; color: #9FD8E2; font-size: 11px; }
 .selfield { height: 38px; padding: 0 10px; border-radius: 9px; border: 1px solid var(--line-2); background: #0B1016; color: var(--text); font: inherit; font-size: 14px; }
+
+/* v0.13: beskriv filmen, sök i materialet, städade inställningar */
+.promptbar { display: flex; flex-direction: column; gap: 10px; padding: 16px 18px; border-radius: 14px;
+  border: 1px solid var(--accent-bg-2); background: linear-gradient(180deg, var(--accent-bg), var(--panel)); }
+.promptbar .flabel { display: inline-flex; align-items: center; gap: 8px; color: var(--accent); }
+.promptbar .field { flex: 1 1 auto; height: 44px; font-size: 15px; }
+.promptres { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 14px; color: var(--text-2);
+  padding: 10px 12px; border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.searchbar { display: flex; align-items: center; gap: 10px; position: relative; }
+.searchbar .field { flex: 1 1 auto; height: 44px; padding-left: 40px; font-size: 15px; }
+.searchbar .sico { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); color: var(--muted); display: flex; pointer-events: none; }
+details.more { border: 1px solid var(--line); border-radius: 14px; background: var(--panel); padding: 14px 18px; }
+details.more > summary { cursor: pointer; font-weight: 600; color: var(--text-2); list-style: none; display: flex; align-items: center; gap: 8px; }
+details.more > summary::before { content: "›"; display: inline-block; transition: transform .15s; font-size: 18px; color: var(--muted); }
+details.more[open] > summary::before { transform: rotate(90deg); }
+details.more > summary::-webkit-details-marker { display: none; }
+.stylegroup { display: grid; grid-template-columns: 110px 1fr; gap: 10px; align-items: start; }
+.stylegroup > .muted { font-size: 13px; padding-top: 7px; }
+@media (max-width: 700px) { .stylegroup { grid-template-columns: 1fr; } }
+.pdesc.hint { color: var(--text-2); background: var(--accent-bg); border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+textarea.field { color: var(--text); height: auto; padding: 10px 12px; line-height: 1.45; resize: vertical; font: inherit; }
+.promptres > span:first-child { flex: 1 1 380px; }

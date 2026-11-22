@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import ai, analysis, generator, media, music, quality, render, timeline
+from . import ai, analysis, generator, media, music, photo, quality, render, timeline
 from .config import AUDIO_EXT, FORMATS
 from .project import Project, clip_id_for, collect_video_files, save_default_settings
 
@@ -14,7 +14,7 @@ def import_media(progress, pid, paths):
     proj = Project(pid)
     files = collect_video_files(paths)
     if not files:
-        raise RuntimeError("Hittade inga videofiler (MP4, MOV, M4V …) på den platsen.")
+        raise RuntimeError("Hittade inga video- eller bildfiler (MP4, MOV, JPG, HEIC, NEF …) på den platsen.")
     added, skipped, failed = [], 0, []
     for i, f in enumerate(files):
         progress(0.3 * i / len(files), f"Läser {f.name}")
@@ -26,11 +26,24 @@ def import_media(progress, pid, paths):
         if cid in proj.data["clips"]:
             skipped += 1
             continue
+        meta = None
+        if photo.is_photo_file(f):
+            # fotot blir ett stillbildsklipp i projektet; originalet rörs inte
+            progress(0.3 * i / len(files), f"Läser bild {f.name}")
+            try:
+                meta = photo.to_clip(f, proj.photo_clip_path(cid))
+            except Exception:  # noqa: BLE001
+                failed.append(f.name)
+                continue
         try:
-            info = media.probe(f)
+            info = media.probe(proj.photo_clip_path(cid) if meta else f)
         except media.MediaError:
             failed.append(f.name)
             continue
+        if meta:
+            info.update(meta, name=f.name, is360=False, has_audio=False,
+                        created=meta.get("photo_time") or f.stat().st_mtime,
+                        source=photo_source(meta, f))
         if not info.get("width") or info.get("duration", 0) < 0.5:
             failed.append(f.name)
             continue
@@ -55,6 +68,15 @@ def import_media(progress, pid, paths):
         except Exception as exc:  # noqa: BLE001
             proj.update_clip(cid, status="error", error=str(exc)[:300])
     return {"added": len(added), "skipped": skipped, "failed": failed}
+
+
+def photo_source(meta, f):
+    make = (meta.get("photo_make") or "").lower()
+    if "nikon" in make:
+        return "Nikon"
+    if make in ("apple", "google", "samsung") or f.name.upper().startswith(("IMG_", "PXL_")):
+        return "Mobil"
+    return "Foto"
 
 
 def target_version():
@@ -167,6 +189,16 @@ def edit_proposal(pid, prop_id, op, args):
         raise RuntimeError("Förslaget finns inte")
     prop = editor.apply(proj, prop, op, args or {})
     proj.replace_proposal(prop)
+    if op == "promo":
+        proj.reload()
+        proj.data["promo_last"] = prop["promo"]
+        if (args or {}).get("all"):
+            for other in proj.data.get("proposals") or []:
+                same_kind = (other.get("style") == "trailer") == (prop.get("style") == "trailer")
+                if other["id"] != prop["id"] and "promo" in other and same_kind:
+                    other["promo"] = dict(prop["promo"])
+                    other["renders"] = {}
+        proj.save()
     return prop
 
 

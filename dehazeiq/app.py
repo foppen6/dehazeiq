@@ -8,10 +8,12 @@ import mimetypes
 import os
 import re
 import secrets
+import shutil
 import socket
 import subprocess
 import sys
 import threading
+import time
 import webbrowser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -20,7 +22,8 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import cv2
 
-from . import TAGLINE, __version__, ai, divelog, editor, effects, generator, i18n, media, pipeline, render, tagging, vlm
+from . import (TAGLINE, __version__, ai, cliptext, divelog, editor, effects, generator, i18n, media, pipeline, prompt,
+               render, search, tagging, vlm)
 from .config import FILM_TYPES, FORMATS, HOME, LOOKS, PLATFORMS, PROJECTS_DIR, STYLES
 from .project import JOBS, Project, auto_name, save_default_settings
 
@@ -64,9 +67,11 @@ _PS_HEAD = ("$ErrorActionPreference='Stop';[Console]::OutputEncoding=[Text.Encod
             "Add-Type -AssemblyName System.Windows.Forms;"
             "$owner=New-Object System.Windows.Forms.Form -Property @{TopMost=$true};")
 _PS_FILTERS = {
-    "files": "Video|*.mp4;*.mov;*.m4v;*.mts;*.m2ts;*.avi;*.mkv;*.insv|Alla filer|*.*",
+    "files": ("Video och bilder|*.mp4;*.mov;*.m4v;*.mts;*.m2ts;*.avi;*.mkv;*.insv;*.jpg;*.jpeg;*.png;*.heic;"
+              "*.heif;*.tif;*.tiff;*.webp;*.nef;*.arw;*.cr2;*.cr3;*.dng;*.raf;*.orf;*.rw2|Alla filer|*.*"),
     "music": "Ljud|*.mp3;*.m4a;*.aac;*.wav;*.aif;*.aiff;*.flac;*.ogg|Alla filer|*.*",
     "divelog": "Dykloggar|*.ssrf;*.xml;*.uddf;*.udcf;*.sml;*.csv|Alla filer|*.*",
+    "image": "Logga|*.png;*.jpg;*.jpeg|Alla filer|*.*",
 }
 
 
@@ -77,7 +82,8 @@ def _powershell(kind: str):
                 "if($d.ShowDialog($owner) -eq 'OK'){$d.SelectedPath}")
     else:
         multi = "$true" if kind == "files" else "$false"
-        title = {"files": "Välj filmklipp", "music": "Välj musik", "divelog": "Välj dyklogg"}[kind]
+        title = {"files": "Välj filmklipp och bilder", "music": "Välj musik", "divelog": "Välj dyklogg",
+                 "image": "Välj logga"}[kind]
         body = ("$d=New-Object System.Windows.Forms.OpenFileDialog;"
                 f"$d.Multiselect={multi};$d.Title='{title}';$d.Filter='{_PS_FILTERS[kind]}';"
                 "if($d.ShowDialog($owner) -eq 'OK'){$d.FileNames -join \"`n\"}")
@@ -101,7 +107,7 @@ def _zenity(kind: str):
 
 
 def choose(kind: str):
-    if kind not in ("folder", "files", "music", "divelog"):
+    if kind not in ("folder", "files", "music", "divelog", "image"):
         raise ApiError("Okänd dialog")
     if sys.platform == "darwin":
         if kind == "folder":
@@ -114,6 +120,9 @@ def choose(kind: str):
                 'return out')
         if kind == "divelog":
             return _osascript('POSIX path of (choose file with prompt "Välj dyklogg (Subsurface, UDDF, Suunto, CSV)")')
+        if kind == "image":
+            return _osascript('POSIX path of (choose file with prompt "Välj logga (PNG med genomskinlig bakgrund är bäst)" '
+                              'of type {"public.png", "public.jpeg"})')
         return _osascript('POSIX path of (choose file with prompt "Välj musik" '
                           'of type {"public.audio"})')
     if sys.platform.startswith("win"):
@@ -271,7 +280,13 @@ def _clean_plans(plans):
             length = float(pl.get("length") or PLATFORMS[plat]["length"])
         except (TypeError, ValueError):
             continue
-        out.append({"type": pl["type"], "platform": plat, "count": count, "length": max(5.0, min(length, 900.0))})
+        item = {"type": pl["type"], "platform": plat, "count": count, "length": max(5.0, min(length, 900.0))}
+        for k in ("query", "title", "prompt"):
+            if isinstance(pl.get(k), str) and pl[k].strip():
+                item[k] = pl[k].strip()[:200]
+        if isinstance(pl.get("styles"), list):
+            item["styles"] = [x for x in pl["styles"] if x in STYLES][:6]
+        out.append(item)
     return out
 
 
@@ -470,6 +485,8 @@ class Handler(BaseHTTPRequestHandler):
                 "transitions": effects.TRANSITIONS,
                 "languages": i18n.LANGS,
                 "styles": {k: {"label": v["label"], "avg_shot": v["avg_shot"]} for k, v in STYLES.items()},
+                "search": cliptext.available(),
+                "llm": vlm.ready(),
                 "formats": list(FORMATS),
             })
         if api == ["projects"]:
@@ -486,6 +503,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(JOBS.status(p.id))
             if api[2:] == ["themes"]:
                 return self._json(pipeline.themes(p.id))
+            if api[2:] == ["search"]:
+                text = (q.get("q") or [""])[0].strip()
+                try:
+                    return self._json(search.search(p, text, int((q.get("n") or ["24"])[0])))
+                except search.SearchError as e:
+                    raise ApiError(str(e))
             if api[2:] == ["divelog"]:
                 return self._json(divelog.summary(p))
             if len(api) == 5 and api[2] == "proposal" and api[4] == "still":
@@ -565,6 +588,11 @@ class Handler(BaseHTTPRequestHandler):
             if body.get("enable"):
                 return self._json(start_lan(self.server.server_address[1] + 1))
             return self._json(stop_lan())
+        if api == ["prompt"]:
+            try:
+                return self._json(prompt.parse(body.get("text", ""), use_llm=True))
+            except ValueError as e:
+                raise ApiError(str(e))
         if api == ["vlm", "download"]:
             if self.is_remote:
                 raise ApiError("Det här görs på datorn.", HTTPStatus.FORBIDDEN)
@@ -603,6 +631,15 @@ class Handler(BaseHTTPRequestHandler):
                            label="Förslag: " + ", ".join(FILM_TYPES[x["type"]]["label"].lower() for x in plans),
                            project_name=p.data["name"])
             return self._json({"plans": plans})
+        if action == ["logo"]:
+            src = Path(str(body.get("path") or "")).expanduser()
+            if not src.is_file() or src.suffix.lower() not in (".png", ".jpg", ".jpeg"):
+                raise ApiError("Välj en PNG- eller JPG-bild")
+            dst_dir = p.dir / "assets"
+            dst_dir.mkdir(parents=True, exist_ok=True)
+            dst = dst_dir / f"logo_{int(time.time())}{src.suffix.lower()}"
+            shutil.copyfile(src, dst)
+            return self._json({"logo": str(dst), "name": src.name})
         if action == ["diagnostics"]:
             out = pipeline.diagnostics(p.id)
             if not self.is_remote:

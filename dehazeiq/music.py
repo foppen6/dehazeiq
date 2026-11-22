@@ -101,9 +101,41 @@ def analyze(path) -> dict:
         mx = rms.max() or 1.0
         energy = [round(float(v / mx), 3) for v in rms]
     return {
+        "drops": drops(energy),
         "path": str(path),
         "duration": round(duration, 3),
         "bpm": round(float(bpm), 1),
         "beats": [round(float(b), 3) for b in beats],
         "energy": energy,
     }
+
+
+def energy_at(energy, t):
+    """Musikens energi (0..1) vid tiden t (energi per sekund)."""
+    if not energy:
+        return 0.5
+    i = int(min(len(energy) - 1, max(0, t)))
+    return float(energy[i])
+
+
+def drops(energy, min_gap=8.0):
+    """Där musiken lyfter: refräng, drop eller nytt stycke (sekunder, starkast först).
+    Jämför energin de närmaste 4 sekunderna med de 4 före."""
+    e = np.asarray(energy or [], float)
+    if len(e) < 10:
+        return []
+    k = 4
+    cs = np.concatenate([[0.0], np.cumsum(e)])
+    out = []
+    for t in range(k, len(e) - k):
+        before = (cs[t] - cs[t - k]) / k
+        after = (cs[t + k] - cs[t]) / k
+        rise = after - before
+        if rise > 0.12 and after > 0.55:
+            out.append((rise + 0.3 * after, t))
+    out.sort(reverse=True)
+    picked = []
+    for score, t in out:
+        if all(abs(t - p) >= min_gap for _, p in picked):
+            picked.append((round(float(score), 3), float(t)))
+    return [{"t": t, "strength": sc} for sc, t in picked[:6]]

@@ -106,7 +106,8 @@ användes de senaste gångerna, så att du får variation.
 
 ## Filmtyper, plattformar och kö
 
-- **Välj filmtyp från start:** dykfilm, resefilm, reels och shorts, djurporträtt eller "Låt AI välja",
+- **Välj filmtyp från start:** dykfilm, resefilm, reels och shorts, djurporträtt, reklamfilm,
+  musikvideo, trailer eller "Låt AI välja",
   en eller flera, med plattform, längd och antal förslag för varje.
 - **Plattform per förslag:** Instagram Reels, TikTok, YouTube Shorts, YouTube, Instagram-flöde,
   Facebook eller kvadrat. Format, längd och beskärning anpassas automatiskt. En film kan exporteras
@@ -121,7 +122,7 @@ frysbild, långsam zoom, zoomryck, flytta utsnittet genom att klicka i originalb
 liknande sekvens som AI:n föreslår, flytta och ta bort. Fliken **Färg** har utseenden (bland annat
 svartvitt, sepia, film, varm, kall och livlig) med styrka, samt exponering, kontrast, mättnad,
 temperatur, nyans, skärpa och vinjett – för hela filmen eller ett klipp, med före/efter. Fliken
-**Text** ändrar titeln. Allt kan ångras.
+**Text** ändrar titeln, reklamtexter, logga och sångtext. Allt kan ångras.
 
 ## Stilar och övergångar
 
@@ -140,6 +141,40 @@ temperatur, nyans, skärpa och vinjett – för hela filmen eller ett klipp, med
 Filmisk bredbild (svarta kanter, dämpade färger), Vintage Super 8 (varmt, filmkorn, glöd, fladder),
 Musikvideo (klipp på takten, zoomryck, blixt), Ambient (långa tagningar, bara naturljud, ingen
 text), Vlogg (tidsordning med "Dag 1"-skyltar) och Minimal (inga effekter).
+
+## Bilder i filmerna
+
+Foton importeras tillsammans med filmerna (JPG, PNG, TIFF, WebP, HEIC och RAW som NEF, ARW, CR2,
+CR3, DNG, RAF, ORF och RW2 – från RAW används kamerans inbäddade förhandsbild). Bilden vänds rätt
+efter EXIF och får tiden när den togs. Varje foto blir ett kort stillbildsklipp som analyseras som
+video och får en långsam rörelse mot motivet (Ken Burns, in eller ut – kan ändras i redigeringen).
+Finns samma bild som JPG och RAW används JPG:en.
+
+## Beskriv filmen med egna ord
+
+Skriv till exempel *"jag har bakom kulisserna-klipp, gör en snygg video om det"* eller
+*"reklamfilm för TikTok, 15 sek, tre varianter, premium"*. Texten blir en filmplan (filmtyp,
+plattform, längd, antal varianter, stil och vad filmen ska handla om) som visas innan den körs.
+På Mac tolkar Qwen texten när djupanalysen är nedladdad, annars används inbyggda regler.
+
+## Sök i materialet
+
+I analysvyn går det att söka med egna ord (*bläckfisk*, *dykare med lampa*, *solnedgång*) –
+CLIP jämför orden med bilderna som analysen redan har sparat, så det går på någon sekund.
+"Gör film av träffarna" gör tre förslag av det som matchar.
+
+## Reklamfilm, trailer och musikvideo
+
+- **Reklamfilm:** fyra varianter – energi, premium, information och upplevelse. Krok i början,
+  säljpunkter som textskyltar och en slutbild med logga, uppmaning och webbadress. Texterna och
+  loggan läggs in i efterhand under Redigera › Text (alla är valfria), kan användas i alla
+  reklamförslag på en gång och fyllas i från senast använda – samma film kan alltså användas för
+  olika erbjudanden. Tänk på att musiken behöver vara licensierad för kommersiellt bruk.
+- **Trailer:** lugn start med toningar via svart, valfria textskyltar, allt kortare klipp mot ett
+  klimax och titeln (eller egen text) som slutbild.
+- **Musikvideo:** fyra varianter – i takt, ballad (byten på halvtakt, glöd), glitch (färgglitch,
+  blixtar) och med egen sångtext (en rad i taget i takt med låten). Musikens energi läses av: kortare
+  klipp där den är intensiv, och filmens starkaste klipp börjar exakt på refrängen eller dropen.
 
 ## Texter på flera språk
 
@@ -264,6 +299,10 @@ dehazeiq/
   generator.py  urval, ordning och klipplängder
   render.py     rendering med FFmpeg
   timeline.py   export till OpenTimelineIO
+  photo.py      foton (JPG, HEIC, RAW) som stillbildsklipp
+  cliptext.py   CLIP:s textdel och tokeniserare (sökning med egna ord)
+  search.py     sökning i materialet
+  prompt.py     beskrivning med egna ord → filmplan
   web/          gränssnittet (HTML/CSS/JS, logga)
 ```
 

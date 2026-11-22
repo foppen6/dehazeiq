@@ -9,7 +9,7 @@ import uuid
 import numpy as np
 
 from . import generator, story
-from .config import FILM_TYPES, GRADE_KEYS, LOOKS, PLATFORMS, STYLES
+from .config import FILM_TYPES, GRADE_KEYS, LOOKS, MV_STYLES, PLATFORMS, PROMO_STYLES, STYLES
 
 
 class EditError(Exception):
@@ -134,8 +134,13 @@ def apply(project, prop, op, args):
         fx = s.setdefault("fx", {})
         fx.pop("zoom", None)
         fx.pop("punch", None)
+        fx.pop("kenburns", None)
         eff = args.get("effect", "none")
-        if eff == "zoom":
+        if eff == "kb_in":
+            fx["kenburns"] = 0.10
+        elif eff == "kb_out":
+            fx["kenburns"] = -0.10
+        elif eff == "zoom":
             fx["zoom"] = 0.06
         elif eff == "punch":
             fx["punch"] = 0.09
@@ -204,6 +209,27 @@ def apply(project, prop, op, args):
         for k, v in (args.get("shots") or {}).items():
             over.setdefault("shots", {})[str(k)] = {"text": str(v.get("text", "")).strip()[:60],
                                                    "sub": str(v.get("sub", "")).strip()[:60]}
+    elif op == "promo":
+        # reklamens egna texter: läggs in i efterhand, kan återanvändas i alla reklamförslag
+        pts = args.get("points") or []
+        if isinstance(pts, str):
+            pts = pts.splitlines()
+        promo = {
+            "hook": str(args.get("hook") or "").strip()[:120],
+            "points": [str(x).strip()[:80] for x in pts if str(x).strip()][:6],
+            "cta": str(args.get("cta") or "").strip()[:80],
+            "url": str(args.get("url") or "").strip()[:80],
+            "logo": str(args.get("logo") or "").strip(),
+            "endcard": bool(args.get("endcard", True)),
+        }
+        prop["promo"] = promo  # "alla förslag" och "senast använda" sköts av pipeline.edit_proposal
+    elif op == "lyrics":
+        lines = args.get("lines") or []
+        if isinstance(lines, str):
+            lines = lines.splitlines()
+        prop["lyrics"] = {"lines": [str(x).rstrip()[:90] for x in lines][:80],
+                          "start": max(0.0, float(args.get("start") or 0.0)),
+                          "beats_per_line": max(1, min(32, int(args.get("beats_per_line") or 8)))}
     elif op == "title":
         text = str(args.get("text", "")).strip()[:80]
         prop.setdefault("effects", {})["title"] = text
@@ -312,7 +338,9 @@ def retarget(project, prop, platform, length=None, keep_id=True):
     music = project.data.get("music")
     new = generator.generate(project, prop["style"], pf["format"], length, prop.get("seed"), music,
                              prop.get("favorites") or (), prop.get("theme"))
-    for k in ("grade", "plan", "plan_label"):
+    if "promo" in prop or prop.get("prompt"):
+        new["title"] = prop.get("title") or new.get("title")
+    for k in ("grade", "plan", "plan_label", "promo", "lyrics", "prompt", "i18n"):
         if prop.get(k) is not None:
             new[k] = copy.deepcopy(prop[k])
     title = (prop.get("effects") or {}).get("title")
@@ -350,7 +378,29 @@ def plan_proposals(project, plan, music=None, favorites=(), avoid=()):
         p = generator.generate(project, style, fmt, length, None, music, favorites, theme)
         out.append(p)
 
-    if kind == "auto":
+    query = (plan.get("query") or "").strip()
+    q_theme = generator.search_theme(query, plan.get("title")) if query else None
+    styles = [x for x in (plan.get("styles") or []) if x in STYLES]
+    if kind == "promo":
+        for k in range(count):
+            st = (styles or PROMO_STYLES)[k % len(styles or PROMO_STYLES)]
+            add(q_theme, st)
+            out[-1]["promo"] = {}
+            if not q_theme:
+                out[-1]["title"] = "Reklamfilm"
+    elif kind == "trailer":
+        for k in range(count):
+            add(q_theme, (styles or ["trailer"])[k % len(styles or ["trailer"])])
+            out[-1]["promo"] = {}
+    elif kind == "musicvideo":
+        for k in range(count):
+            add(q_theme, (styles or MV_STYLES)[k % len(styles or MV_STYLES)])
+    elif kind == "prompt" or (q_theme and kind not in ("trailer",)):
+        sts = styles or {"reels": ["playful", "action", "cinematic"], "animal": ["documentary", "playful", "cinematic"],
+                         "dive": ["documentary", "cinematic", "calm"]}.get(kind, ["cinematic", "documentary", "playful"])
+        for k in range(count):
+            add(q_theme, sts[k % len(sts)])
+    elif kind == "auto":
         out += generator.generate_set(project, "auto", fmt, length, music, favorites, None, avoid)
     elif kind in ("dive", "trip"):
         th, by = _themes_by_kind(project, fmt)
@@ -386,6 +436,12 @@ def plan_proposals(project, plan, music=None, favorites=(), avoid=()):
     for p in out:
         p["plan"] = kind
         p["plan_label"] = ft["label"]
+        if plan.get("prompt"):
+            p["prompt"] = plan["prompt"]
+        if q_theme and plan.get("title"):
+            p["title"] = plan["title"]
+            if (p.get("effects") or {}).get("title"):
+                p["effects"]["title"] = plan["title"]
         p["platform"] = platform
         p["id"] = p.get("id") or uuid.uuid4().hex[:10]
     return out

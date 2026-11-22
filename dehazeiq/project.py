@@ -121,6 +121,9 @@ class Project:
             self.save()
 
     # ---------- sökvägar ----------
+    def photo_clip_path(self, cid) -> Path:
+        return self.dir / "photos" / f"{cid}.mp4"
+
     def proxy_path(self, cid) -> Path:
         return self.dir / "proxies" / f"{cid}.mp4"
 
@@ -227,18 +230,23 @@ def auto_name(paths) -> str:
     return f"Import {d.day} {months[d.month - 1]} {d.year}"
 
 
-def collect_video_files(paths):
-    """Expandera mappar till videofiler. Hoppar över dolda filer och Insta360-LRV."""
+def collect_video_files(paths, photos=True):
+    """Expandera mappar till video- och bildfiler. Hoppar över dolda filer och Insta360-LRV.
+    Ett foto med samma namn som en RAW-fil (DSC_0001.JPG + DSC_0001.NEF) tas bara med en gång."""
+    from .photo import PHOTO_EXT, RAW_EXT
+    ok = VIDEO_EXT | (PHOTO_EXT if photos else set())
     files = []
     for raw in paths:
         p = Path(raw).expanduser()
         if p.is_dir():
             for f in sorted(p.rglob("*")):
-                if f.is_file() and not f.name.startswith(".") and f.suffix.lower() in VIDEO_EXT:
+                if f.is_file() and not f.name.startswith(".") and f.suffix.lower() in ok:
                     files.append(f)
-        elif p.is_file() and p.suffix.lower() in VIDEO_EXT:
+        elif p.is_file() and p.suffix.lower() in ok:
             files.append(p)
-    return files
+    # JPEG + RAW av samma bild: behåll JPEG:en (kamerans färger, snabbare)
+    stems = {(f.parent, f.stem.lower()) for f in files if f.suffix.lower() in PHOTO_EXT - RAW_EXT}
+    return [f for f in files if not (f.suffix.lower() in RAW_EXT and (f.parent, f.stem.lower()) in stems)]
 
 
 class JobCancelled(BaseException):  # BaseException: fångas inte av "except Exception" i jobben

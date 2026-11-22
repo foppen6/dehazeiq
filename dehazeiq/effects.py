@@ -30,7 +30,12 @@ DEFAULT_EFFECTS = {k: True for k in EFFECTS}
 TRANSITION = {"cinematic": ("fade", 0.45), "calm": ("fade", 0.7), "action": ("cut", 0.0),
               "playful": ("cut", 0.0), "documentary": ("cut", 0.0), "widescreen": ("fade", 0.8),
               "vintage": ("fade", 0.4), "musicvideo": ("cut", 0.0), "ambient": ("fade", 1.5),
-              "vlog": ("cut", 0.0), "minimal": ("cut", 0.0)}
+              "vlog": ("cut", 0.0), "minimal": ("cut", 0.0),
+              "promo_energy": ("cut", 0.0), "promo_premium": ("fade", 0.6), "promo_info": ("cut", 0.0),
+              "promo_experience": ("fade", 0.45), "mv_ballad": ("fade", 0.8), "mv_glitch": ("cut", 0.0),
+              "mv_lyrics": ("fade", 0.45), "trailer": ("fadeblack", 0.8)}
+
+PUNCHY = ("playful", "action", "musicvideo", "vlog", "promo_energy", "mv_glitch", "promo_experience")
 
 # Övergångar (FFmpeg xfade) som går att välja i redigeringen, i grupper
 TRANSITIONS = {
@@ -97,6 +102,24 @@ def plan_transitions(shots, style_key):
             t = ("slideleft" if new_day or new_dive else "cut")
         elif style_key == "minimal":
             t = "fade" if new_dive else "cut"
+        elif style_key == "promo_energy":
+            if not match and since >= 2:
+                t = "zoomin" if i % 4 == 1 else ("smoothright" if dx >= 0 else "smoothleft")
+        elif style_key in ("promo_premium", "mv_ballad"):
+            t = "cut" if match else ("dissolve" if i % 2 else "fade")
+        elif style_key == "promo_info":
+            t = "slideleft" if since >= 3 else "cut"
+        elif style_key in ("promo_experience", "mv_lyrics"):
+            t = "fadeblack" if new_dive and style_key == "mv_lyrics" else ("cut" if match or i % 3 else "fade")
+        elif style_key == "trailer":
+            if i < (n - 1) // 3:
+                t = "fadeblack"  # inledningen: bild – svart – bild
+            elif i == n - 2:
+                t = "fadeblack"  # andas före sista bilden
+            else:
+                t = "cut" if since < 4 else "fadewhite"
+        elif style_key == "mv_glitch":
+            t = ("pixelize" if i % 6 == 2 else "hblur") if since >= 3 else "cut"
         elif style_key == "playful":
             if not match and since >= 2:
                 t = fun_cycle[i % len(fun_cycle)] if dx == 0 else ("slideright" if dx > 0 else "slideleft")
@@ -147,7 +170,7 @@ def plan_texts(shots, style_key, proposal):
 
 def plan_sfx(shots, trans, style_key):
     """Ljudeffekter: svisch vid effektövergångar, pling vid frysbild (bara lekfullt och action)."""
-    if style_key not in ("playful", "action", "musicvideo", "vlog"):
+    if style_key not in ("playful", "action", "musicvideo", "vlog", "promo_energy"):
         return []
     ev, pos = [], 0.0
     for i, s in enumerate(shots):
@@ -170,8 +193,11 @@ def plan(proposal, clips_by_id, style_key):
     """Bestämmer effekter för ett nyss genererat förslag (ändrar shots på plats)."""
     shots = proposal["shots"]
     kind, d = TRANSITION.get(style_key, ("fade", 0.45))
-    calm = style_key in ("calm", "cinematic", "widescreen", "ambient")
+    calm = style_key in ("calm", "cinematic", "widescreen", "ambient", "promo_premium", "mv_ballad", "mv_lyrics", "trailer")
 
+    def is_photo(i):
+        return bool((clips_by_id.get(shots[i]["clip_id"]) or {}).get("is_photo"))
+    photos = [i for i in range(len(shots)) if is_photo(i)]
     # Slowmotion: bara där källan har hög bildfrekvens (≥ 48 bps) och klippet är långt nog
     hfr = [i for i, s in enumerate(shots)
            if (clips_by_id.get(s["clip_id"]) or {}).get("fps", 30) >= 48 and s["duration"] >= 1.6]
@@ -190,26 +216,38 @@ def plan(proposal, clips_by_id, style_key):
     # Lekfullt och action: snabbspola en lugn, lång tagning (t.ex. en krabba som går),
     # frys det roligaste ögonblicket och ge klippen ett zoomryck på takten
     fast, freeze, punch = [], [], []
-    if style_key in ("playful", "action", "musicvideo", "vlog"):
+    if style_key in PUNCHY:
         for i, s in enumerate(shots):
             clip = clips_by_id.get(s["clip_id"]) or {}
             room = float(clip.get("duration") or 0) - s["src_start"]
-            if i not in slow and s["motion"] < med and s["duration"] >= 1.5 and room >= s["duration"] * 2 + 0.2:
+            if (i not in slow and not clip.get("is_photo") and s["motion"] < med and s["duration"] >= 1.5
+                    and room >= s["duration"] * 2 + 0.2):
                 fast.append(i)
-        fast = fast[:1] if style_key in ("action", "vlog") else fast[:2]
+        fast = fast[:1] if style_key in ("action", "vlog", "promo_energy", "promo_experience") else fast[:2]
+        if style_key in ("mv_glitch", "promo_experience"):
+            fast = []
         punch = [i for i in range(1, len(shots), 2) if i not in fast]
-        if style_key == "musicvideo":
+        if style_key in ("musicvideo", "mv_glitch"):
             punch = [i for i in range(len(shots)) if i not in fast]
         if style_key == "vlog":
             punch = []
     if style_key == "playful" and len(shots) >= 3:
-        cand = [i for i, s in enumerate(shots) if s["duration"] >= 2.0 and i not in fast and i not in slow]
+        cand = [i for i, s in enumerate(shots) if s["duration"] >= 2.0 and i not in fast and i not in slow
+                and i not in photos]
         if cand:
             freeze = [max(cand, key=lambda i: shots[i]["quality"] + shots[i]["motion"])]
     if style_key == "minimal":
         slow, zoom, fast, freeze, punch = [], [], [], [], []
+    zoom = [i for i in zoom if i not in photos]
     for i, s in enumerate(shots):
         fx = {}
+        if i in photos:
+            # foto: långsam rörelse mot motivet (Ken Burns), varannan bild in, varannan ut
+            n = photos.index(i)
+            amount = {"action": 0.16, "musicvideo": 0.16, "playful": 0.14, "minimal": 0.05}.get(style_key, 0.10)
+            fx["kenburns"] = amount if n % 2 == 0 else -amount
+            s["fx"] = fx
+            continue
         if i in fast:
             fx["speed"] = 2.0
             s["src_end"] = round(s["src_start"] + s["duration"] * 2.0, 3)
@@ -217,7 +255,7 @@ def plan(proposal, clips_by_id, style_key):
             fx["freeze"] = round(min(0.9, s["duration"] * 0.4), 2)
             s["src_end"] = round(s["src_start"] + s["duration"] - fx["freeze"], 3)
         if i in punch:
-            fx["punch"] = 0.1 if style_key == "action" else 0.07
+            fx["punch"] = 0.1 if style_key in ("action", "promo_energy", "mv_glitch") else 0.07
         if i in slow:
             fps = (clips_by_id.get(s["clip_id"]) or {}).get("fps", 60)
             fx["speed"] = 0.4 if fps >= 100 else 0.5
@@ -230,9 +268,10 @@ def plan(proposal, clips_by_id, style_key):
     for i, s in enumerate(shots):
         s["tr"] = trans[i] if i < len(trans) else None
     plan_texts(shots, style_key, proposal)
+    from .config import STYLES
     proposal["effects"] = {
         "transition": kind, "transition_d": d,
-        "title": proposal.get("title") or "",
+        "title": "" if STYLES.get(style_key, {}).get("no_auto_text") else (proposal.get("title") or ""),
         "vignette": style_key == "cinematic",
         "subtitle": (proposal.get("effects") or {}).get("subtitle", ""),
         "sfx": plan_sfx(shots, trans, style_key),

@@ -281,7 +281,7 @@ def _order(chosen, style_key, emb_kind):
     return seq
 
 
-def _durations(seq, total, style, rng, beats):
+def _durations(seq, total, style, rng, beats, energy=None):
     mins = np.array([style["min_shot"]] * len(seq))
     maxs = np.array([min(style["max_shot"], c["end"] - c["start"]) for c in seq])
     mins = np.minimum(mins, maxs)
@@ -295,6 +295,22 @@ def _durations(seq, total, style, rng, beats):
         if abs(s - total) < 0.05:
             break
         d = np.clip(d * (total / s), mins, maxs)
+    if style.get("ramp") and len(d) > 3:
+        # trailer: långa lugna klipp först, allt kortare mot klimax (sista klippet får andas)
+        r = np.linspace(1.7, 0.55, len(d))
+        r[-1] = 1.4
+        d = np.clip(d * r, mins, maxs)
+        d = np.clip(d * (total / d.sum()), mins, maxs)
+    if energy and len(d) > 2:
+        # musikens energi: kortare klipp där musiken är intensiv, längre där den är lugn
+        from .music import energy_at
+        for _ in range(3):
+            mid = np.cumsum(d) - d / 2
+            f = np.array([1.35 - 0.7 * energy_at(energy, m) for m in mid])
+            d = np.clip(d * f, mins, maxs)
+            d = np.clip(d * (total / d.sum()), mins, maxs)
+    if beats is not None and len(beats) and style.get("bar_sync"):
+        beats = list(beats)[::2]  # lugnare: byten på varannan taktslag (halvtakt)
     # Lägg klippen på taktslag ibland – inte alltid, berättelsen går också före
     if beats is not None and len(beats) and len(d) > 1:
         beats = np.asarray(beats)
@@ -312,6 +328,36 @@ def _durations(seq, total, style, rng, beats):
         if (nd <= maxs + 1e-6).all() and (nd > 0.5).all():
             d = nd
     return d
+
+
+def _hit_drop(seq, durs, music):
+    """Musikvideo: ett klipp börjar exakt på musikens starkaste lyft inom filmen (refräng/drop),
+    och det klippet är filmens bästa (mest rörelse och sevärdhet)."""
+    from .music import drops
+    total = float(np.sum(durs))
+    ds = music.get("drops") or drops(music.get("energy") or [])
+    ds = [x for x in ds if 0.25 * total <= x["t"] <= total - 1.5]
+    if not ds:
+        return seq, durs
+    td = max(ds, key=lambda x: x["strength"])["t"]
+    beats = np.asarray(music.get("beats") or [])
+    if len(beats):
+        td = float(beats[np.argmin(np.abs(beats - td))])  # exakt på taktslaget
+    edges = np.concatenate([[0.0], np.cumsum(durs)])
+    k = int(np.argmin(np.abs(edges[1:-1] - td))) + 1  # närmaste klippgräns
+    move = td - edges[k]
+    if abs(move) > 0.45 * min(durs[k - 1], durs[k]):
+        return seq, durs
+    durs = np.array(durs, float)
+    durs[k - 1] += move
+    durs[k] -= move
+    # bästa klippet hamnar på dropen (byter plats med det som låg där)
+    best = max(range(1, len(seq)), key=lambda i: seq[i]["motion"] + seq[i]["util_n"] + seq[i].get("fun", 0))
+    seq = list(seq)
+    if best != k and (seq[best]["end"] - seq[best]["start"]) >= durs[k] - 1e-3 \
+            and (seq[k]["end"] - seq[k]["start"]) >= durs[best] - 1e-3:
+        seq[best], seq[k] = seq[k], seq[best]
+    return seq, durs
 
 
 def _place(c, dur, fmt):
@@ -439,9 +485,17 @@ def themes(project, fmt="9:16"):
     return story.find_themes(cands, by_id)
 
 
+def search_theme(query, title=None, order="story"):
+    q = str(query).strip()
+    return {"id": f"search:{q}", "kind": "search", "query": q, "order": order,
+            "title": title or (q[:1].upper() + q[1:])}
+
+
 def _resolve_theme(theme, cands, project):
     if isinstance(theme, dict):
         return theme
+    if isinstance(theme, str) and theme.startswith("search:"):
+        return search_theme(theme.split(":", 1)[1])
     by_id = {c["id"]: c for c in project.clips()}
     found = story.find_themes(cands, by_id)
     if theme:
@@ -484,7 +538,11 @@ def generate(project, style_key="cinematic", fmt="9:16", length=30.0, seed=None,
     if not seq:
         seq = _order(_select(cands, n, style, rng, emb_kind, favs), style_key, emb_kind)
     beats = music.get("beats") if music else None
-    durs = _durations(seq, length, style, rng, beats)
+    is_mv = bool(style.get("music_video")) or style_key == "musicvideo"
+    energy = (music.get("energy") or None) if (music and is_mv) else None
+    durs = _durations(seq, length, style, rng, beats, energy)
+    if is_mv and music and len(seq) >= 4:
+        seq, durs = _hit_drop(seq, durs, music)
 
     shots, pos = [], 0.0
     for c, dur in zip(seq, durs):
@@ -506,6 +564,7 @@ def generate(project, style_key="cinematic", fmt="9:16", length=30.0, seed=None,
             "favorite": bool(c.get("favorite")),
             "species": (c.get("species") or [None])[0] if c.get("species_p", 0) >= 0.35 else None,
             "desc": c.get("desc") or "",
+            "photo": bool(clip.get("is_photo")),
         })
         pos += float(dur)
 
@@ -544,7 +603,7 @@ def generate_set(project, style="auto", fmt="9:16", length=30.0, music=None, fav
     Med valt tema: tre versioner av samma berättelse (tre stilar, eller tre varianter av en stil)."""
     if theme:
         if style == "auto":
-            kind = str(theme).split(":")[0]
+            kind = (theme.get("kind") if isinstance(theme, dict) else str(theme).split(":")[0])
             styles = ["documentary", "playful", "cinematic"] if kind in ("fun", "subject") else ["documentary", "cinematic", "action"]
             if kind == "fun":
                 styles = ["playful", "action", "cinematic"]

@@ -107,6 +107,65 @@ STYLES = {
         "temperature": 0.2, "color": "natural", "orig_audio": 0.2,
         "fade": 0.6, "look_fx": {}, "no_effects": True,
     },
+    # Reklamfilmer: egna texter (krok, säljpunkter, uppmaning, adress, logga) läggs in i efterhand
+    "promo_energy": {
+        "label": "Reklam · energi",
+        "avg_shot": 1.3, "min_shot": 0.7, "max_shot": 2.4,
+        "beat_sync": 1.0, "motion_pref": 0.6, "variety": 0.5,
+        "temperature": 0.25, "color": "punchy", "orig_audio": 0.0,
+        "fade": 0.2, "look_fx": {}, "promo": "energy", "no_auto_text": True,
+    },
+    "promo_premium": {
+        "label": "Reklam · premium",
+        "avg_shot": 3.2, "min_shot": 2.2, "max_shot": 5.0,
+        "beat_sync": 0.6, "motion_pref": -0.3, "variety": 0.6,
+        "temperature": 0.2, "color": "muted", "orig_audio": 0.0,
+        "fade": 0.9, "look_fx": {"letterbox": 1}, "promo": "premium", "no_auto_text": True,
+    },
+    "promo_info": {
+        "label": "Reklam · information",
+        "avg_shot": 2.8, "min_shot": 1.8, "max_shot": 4.2,
+        "beat_sync": 0.6, "motion_pref": 0.0, "variety": 0.6,
+        "temperature": 0.2, "color": "natural", "orig_audio": 0.0,
+        "fade": 0.5, "look_fx": {}, "promo": "info", "no_auto_text": True,
+    },
+    "promo_experience": {
+        "label": "Reklam · upplevelse",
+        "avg_shot": 2.4, "min_shot": 1.4, "max_shot": 4.0,
+        "beat_sync": 0.8, "motion_pref": 0.2, "variety": 0.55,
+        "temperature": 0.28, "color": "cinematic", "orig_audio": 0.0,
+        "fade": 0.6, "look_fx": {}, "promo": "experience", "no_auto_text": True,
+    },
+    # Trailer: lugn start, textskyltar, allt kortare klipp mot ett klimax och titeln på slutet
+    "trailer": {
+        "label": "Trailer",
+        "avg_shot": 2.0, "min_shot": 0.6, "max_shot": 4.8,
+        "beat_sync": 0.8, "motion_pref": 0.3, "variety": 0.55,
+        "temperature": 0.25, "color": "cinematic", "orig_audio": 0.0,
+        "fade": 0.6, "look_fx": {"letterbox": 1}, "promo": "trailer", "ramp": True, "no_auto_text": True,
+    },
+    # Musikvideor: klippen följer musikens takt och energi, starkaste klippen på refrängen/dropen
+    "mv_ballad": {
+        "label": "Musikvideo · ballad",
+        "avg_shot": 3.6, "min_shot": 2.0, "max_shot": 6.5,
+        "beat_sync": 1.0, "motion_pref": -0.4, "variety": 0.6,
+        "temperature": 0.22, "color": "cinematic", "orig_audio": 0.0,
+        "fade": 1.2, "look_fx": {"glow": 1}, "music_video": "ballad", "bar_sync": True, "no_auto_text": True,
+    },
+    "mv_glitch": {
+        "label": "Musikvideo · glitch",
+        "avg_shot": 0.9, "min_shot": 0.4, "max_shot": 1.8,
+        "beat_sync": 1.0, "motion_pref": 0.8, "variety": 0.4,
+        "temperature": 0.35, "color": "punchy", "orig_audio": 0.0,
+        "fade": 0.1, "look_fx": {"rgbshift": 1}, "beat_flash": 2, "music_video": "glitch", "no_auto_text": True,
+    },
+    "mv_lyrics": {
+        "label": "Musikvideo · med sångtext",
+        "avg_shot": 2.0, "min_shot": 1.0, "max_shot": 3.5,
+        "beat_sync": 1.0, "motion_pref": 0.3, "variety": 0.5,
+        "temperature": 0.28, "color": "cinematic", "orig_audio": 0.0,
+        "fade": 0.6, "look_fx": {}, "music_video": "lyrics", "bar_sync": True, "no_auto_text": True,
+    },
     "playful": {
         "label": "Lekfull",
         "avg_shot": 2.2, "min_shot": 1.0, "max_shot": 3.6,
@@ -146,7 +205,14 @@ FILM_TYPES = {
     "trip": {"label": "Resefilm", "platform": "youtube", "count": 3},
     "reels": {"label": "Reels och shorts", "platform": "reels", "count": 6},
     "animal": {"label": "Djurporträtt", "platform": "feed", "count": 3},
+    "promo": {"label": "Reklamfilm", "platform": "reels", "count": 4, "length": 30},
+    "musicvideo": {"label": "Musikvideo", "platform": "reels", "count": 4},
+    "trailer": {"label": "Trailer", "platform": "youtube", "count": 3, "length": 45},
+    "prompt": {"label": "Egen beskrivning", "platform": "reels", "count": 3},
 }
+
+PROMO_STYLES = ["promo_energy", "promo_premium", "promo_info", "promo_experience"]
+MV_STYLES = ["musicvideo", "mv_ballad", "mv_glitch", "mv_lyrics"]
 
 # Färgutseenden för redigeringen. Värden: exponering, kontrast, mättnad, temperatur, nyans (−1..1),
 # samt svartvitt och sepia (0..1). Styrkan skalar dem.

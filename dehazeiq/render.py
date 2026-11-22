@@ -94,11 +94,140 @@ def _fit(text, out_w, base):
     return max(12, int(min(base, out_w * 0.86 / max(1, 0.56 * len(text)))))
 
 
-def text_filters(kind, text, sub, files, out_w, out_h, dur, freeze=0.0, start=0.5, big=False):
+def _longest(text):
+    return max((str(text) or " ").split("\n"), key=len)
+
+
+ENDCARD_SECONDS = 3.2
+
+
+def _append_endcard(joined, out, tmp, promo, variant, out_w, out_h, quality, total):
+    """Reklamens slutbild: sista bilden fryses, mörkas och blir suddig; logga, uppmaning och adress
+    tonas in. Returnerar filmens nya längd."""
+    D, X = ENDCARD_SECONDS, 0.5
+    last = tmp / "last.png"
+    run([ffmpeg(), "-hide_banner", "-loglevel", "error", "-y", "-sseof", "-0.15", "-i", str(joined),
+         "-frames:v", "1", "-update", "1", str(last)])
+    m = min(out_w, out_h)
+    inputs = ["-loop", "1", "-framerate", str(OUTPUT_FPS), "-t", f"{D:.2f}", "-i", str(last)]
+    logo = promo.get("logo")
+    has_logo = bool(logo and Path(logo).exists())
+    if has_logo:
+        shutil.copyfile(logo, tmp / ("logo" + Path(logo).suffix.lower()))
+        inputs += ["-loop", "1", "-framerate", str(OUTPUT_FPS), "-t", f"{D:.2f}", "-i", "logo" + Path(logo).suffix.lower()]
+    inputs += ["-f", "lavfi", "-t", f"{D:.2f}", "-i", "anullsrc=r=48000:cl=stereo"]
+    dark = {"premium": -0.32, "energy": -0.18, "trailer": -0.42}.get(variant, -0.24)
+    fc = [f"[0:v]scale={out_w}:{out_h},setsar=1,gblur=sigma={max(6, m // 40)},eq=brightness={dark}:saturation=0.75[bg]"]
+    cur = "bg"
+    if has_logo:
+        lw, lh = int(out_w * (0.42 if out_h > out_w else 0.24)), int(out_h * 0.2)
+        fc.append(f"[1:v]scale=w={lw}:h={lh}:force_original_aspect_ratio=decrease,format=rgba,"
+                  f"fade=t=in:st=0.15:d=0.45:alpha=1[lg]")
+        ly = "H*0.18" if (promo.get("cta") or promo.get("url")) else "(H-h)/2"
+        fc.append(f"[{cur}][lg]overlay=x=(W-w)/2:y={ly}:format=auto[v1]")
+        cur = "v1"
+    draws = []
+    cta, url = promo.get("cta") or "", promo.get("url") or ""
+    y_cta = "h*0.50" if has_logo else "h*0.42"
+    if cta:
+        (tmp / "cta.txt").write_text(cta, "utf-8")
+        fs = _fit(_longest(cta), out_w, m * 0.085)
+        box = (f":box=1:boxcolor=0xE8452C@0.95:boxborderw={max(10, fs // 3)}" if variant == "energy" else
+               f":box=1:boxcolor=white@0.95:boxborderw={max(10, fs // 3)}:fontcolor=0x111111" if variant == "info" else "")
+        col = "" if variant == "info" else ":fontcolor=white"
+        draws.append(f"drawtext=fontfile=font.ttf:textfile=cta.txt:fontsize={fs}{col}:x=(w-text_w)/2:y={y_cta}"
+                     f":line_spacing={fs // 4}{box}:shadowcolor=black@0.5:shadowx=2:shadowy=2:alpha='{_alpha(0.45, D + 1, 0.35)}'")
+    if url:
+        (tmp / "url.txt").write_text(url, "utf-8")
+        fs2 = _fit(url, out_w, m * 0.05)
+        draws.append(f"drawtext=fontfile=font.ttf:textfile=url.txt:fontsize={fs2}:fontcolor=0xE6EEF3:x=(w-text_w)/2"
+                     f":y={'h*0.66' if cta else y_cta}:shadowcolor=black@0.5:shadowx=1:shadowy=1"
+                     f":alpha='{_alpha(0.8, D + 1, 0.35)}'")
+    fc.append(f"[{cur}]" + ",".join(draws + ["format=yuv420p"]) + "[v]")
+    card = tmp / "endcard.mp4"
+    a_in = 2 if has_logo else 1
+    run([ffmpeg(), "-hide_banner", "-loglevel", "error", "-y", *inputs, "-filter_complex", ";".join(fc),
+         "-map", "[v]", "-map", f"{a_in}:a", *video_encoder_args(out_w, out_h, quality), "-r", str(OUTPUT_FPS),
+         "-c:a", "aac", "-b:a", "160k", "-t", f"{D:.2f}", str(card)], cwd=str(tmp))
+    off = max(0.0, total - X)
+    fc2 = (f"[0:v][1:v]xfade=transition=fade:duration={X}:offset={off:.3f},format=yuv420p[v];"
+           f"[0:a][1:a]acrossfade=d={X}[a]")
+    run([ffmpeg(), "-hide_banner", "-loglevel", "error", "-y", "-i", str(joined), "-i", str(card),
+         "-filter_complex", fc2, "-map", "[v]", "-map", "[a]", *video_encoder_args(out_w, out_h, quality),
+         "-r", str(OUTPUT_FPS), "-c:a", "aac", "-b:a", "160k", str(out)], cwd=str(tmp))
+    return total - X + D
+
+
+def _lyric_cues(lines, proposal):
+    """Sångtexten i takt: varje rad visas i ett antal taktslag (standard 8 = två takter)."""
+    ly = proposal.get("lyrics") or {}
+    bpm = float(proposal.get("bpm") or 0) or 100.0
+    beat = 60.0 / bpm
+    per = max(1, int(ly.get("beats_per_line") or 8)) * beat
+    t = float(ly.get("start") or 0.0)
+    total = sum(s["duration"] for s in proposal.get("shots", []))
+    cues = []
+    for line in lines:
+        line = str(line).strip()
+        if line and t < total:
+            cues.append((t, min(total, t + per - 0.05), line))
+        t += per
+    return cues
+
+
+def text_filters(kind, text, sub, files, out_w, out_h, dur, freeze=0.0, start=0.5, big=False,
+                 variant=None, end=None):
     """drawtext för textskyltar. files: (fil för rad 1, fil för rad 2) i arbetsmappen."""
     m = min(out_w, out_h)
     fa, fb = files
     out = []
+    if kind == "hook":  # reklamens krok: stor text de första sekunderna
+        fs = _fit(_longest(text), out_w, m * (0.11 if variant == "energy" else 0.085))
+        a = _alpha(0.1, min(dur - 0.05, 2.6), 0.18)
+        ls = int(fs * 0.25)
+        if variant == "energy":
+            look = f":fontcolor=white:box=1:boxcolor=0xE8452C@0.92:boxborderw={max(10, fs // 3)}"
+            y = "h*0.30-text_h/2"
+        elif variant == "premium":
+            look = ":fontcolor=white:shadowcolor=black@0.6:shadowx=2:shadowy=2"
+            y = "h*0.62"
+        elif variant == "info":
+            look = f":fontcolor=white:box=1:boxcolor=0x14232E@0.85:boxborderw={max(10, fs // 3)}"
+            y = "h*0.12"
+        elif variant == "trailer":
+            look = ":fontcolor=white:shadowcolor=black@0.7:shadowx=2:shadowy=2"
+            y = "(h-text_h)/2"
+        else:
+            look = ":fontcolor=white:shadowcolor=black@0.55:shadowx=2:shadowy=2"
+            y = "(h-text_h)/2"
+        out.append(f"drawtext=fontfile=font.ttf:textfile={fa}:fontsize={fs}:line_spacing={ls}:x=(w-text_w)/2:y={y}"
+                   f"{look}:alpha='{a}'")
+        return out
+    if kind == "point":  # säljpunkt som textskylt
+        fs = _fit(_longest(text), out_w, m * (0.07 if variant in ("energy", "info") else 0.058))
+        a = _alpha(start, end if end is not None else min(dur - 0.1, start + 3.2), 0.2)
+        if variant == "trailer":  # stor textskylt mitt i bild, bilden mörkas under texten
+            fs = _fit(_longest(text), out_w, m * 0.09)
+            out.append(f"drawtext=fontfile=font.ttf:textfile={fa}:fontsize={fs}:fontcolor=white:x=(w-text_w)/2"
+                       f":y=(h-text_h)/2:box=1:boxcolor=black@0.55:boxborderw={max(14, fs // 2)}"
+                       f":line_spacing={fs // 4}:alpha='{a}'")
+        elif variant == "premium":
+            out.append(f"drawtext=fontfile=font.ttf:textfile={fa}:fontsize={fs}:fontcolor=white:x=(w-text_w)/2"
+                       f":y=h*0.80:shadowcolor=black@0.6:shadowx=2:shadowy=2:alpha='{a}'")
+        elif variant == "experience":
+            out.append(f"drawtext=fontfile=font.ttf:textfile={fa}:fontsize={fs}:fontcolor=white:x=(w-text_w)/2"
+                       f":y=h*0.76:box=1:boxcolor=black@0.35:boxborderw={max(8, fs // 3)}:alpha='{a}'")
+        else:
+            col = "0xE8452C" if variant == "energy" else "0x14232E"
+            out.append(f"drawtext=fontfile=font.ttf:textfile={fa}:fontsize={fs}:fontcolor=white:x={int(out_w * 0.06)}"
+                       f":y=h*0.72:box=1:boxcolor={col}@0.9:boxborderw={max(8, fs // 3)}:alpha='{a}'")
+        return out
+    if kind == "lyric":  # sångtext, en rad i taget
+        fs = _fit(_longest(text), out_w, m * 0.072)
+        a = _alpha(start, end if end is not None else dur, 0.12)
+        out.append(f"drawtext=fontfile=font.ttf:textfile={fa}:fontsize={fs}:fontcolor=white:x=(w-text_w)/2"
+                   f":y=h*0.78:shadowcolor=black@0.7:shadowx=2:shadowy=2:borderw=1:bordercolor=black@0.4:alpha='{a}'")
+        return out
     if kind == "label":  # artnamn nere till vänster, som i en naturdokumentär
         fs = _fit(text, out_w, m * 0.058)
         fs2 = max(11, int(fs * 0.62))
@@ -197,6 +326,9 @@ def style_filters(look_fx, out_w, out_h, beat_flash=False):
         out += [f"crop=iw-8:ih-8:4+3*sin(t*11):4+3*cos(t*13)", f"scale={out_w}:{out_h}"]
     if look_fx.get("glow"):
         out.append("split[g0][g1];[g1]gblur=sigma=18[g2];[g0][g2]blend=all_mode=screen:all_opacity=0.28")
+    if look_fx.get("rgbshift"):  # glitch: färgkanalerna glider isär en kort stund i början av klippet
+        px = max(2, int(out_w * 0.008))
+        out.append(f"rgbashift=rh={px}:bh=-{px}:enable='lt(t,0.22)'")
     if beat_flash:
         out.append("eq=brightness='0.35*max(0,1-t/0.14)':eval=frame")
     if look_fx.get("grain"):
@@ -255,6 +387,10 @@ def grade_filter(g):
     return out
 
 
+def kb_photo(fx):
+    return bool((fx or {}).get("kenburns"))
+
+
 def _shot_filter(shot, src_w, src_h, out_w, out_h, style, wb=True, fade_in=0.0, fade_out=0.0,
                  fx=None, pad=0.0, vignette=False, title=None, grade=None, texts=None,
                  enh=None, levels=None, look_fx=None, flash=False):
@@ -271,7 +407,7 @@ def _shot_filter(shot, src_w, src_h, out_w, out_h, style, wb=True, fade_in=0.0, 
         crop = f"crop={cw}:{ch}:{x}:{y}"
     dur = shot["duration"]
     parts = []
-    if (enh or {}).get("stabilize"):
+    if (enh or {}).get("stabilize") and not kb_photo(fx):
         parts.append("deshake=rx=32:ry=32:edge=mirror")
     parts.append(crop)  # banan följer källans tid, därför före ev. slowmotion
     speed = fx.get("speed")
@@ -286,6 +422,11 @@ def _shot_filter(shot, src_w, src_h, out_w, out_h, style, wb=True, fade_in=0.0, 
     span = dur + pad
     if fx.get("zoom"):
         terms.append(f"{float(fx['zoom']):.3f}*t/{span:.3f}")
+    kb = float(fx.get("kenburns") or 0.0)
+    if kb > 0:   # foto: zooma mjukt in mot motivet (beskärningen är redan centrerad på det)
+        terms.append(f"{kb:.3f}*(0.5-0.5*cos(PI*min(1,t/{span:.3f})))")
+    elif kb < 0:  # eller börja nära och dra sig långsamt ut
+        terms.append(f"{-kb:.3f}*(0.5+0.5*cos(PI*min(1,t/{span:.3f})))")
     if fx.get("punch"):
         terms.append(f"{float(fx['punch']):.3f}*pow(max(0,1-t/0.35),2)")
     if freeze > 0:
@@ -457,7 +598,12 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
         on = dict(on, title=False, labels=False)
     title = None
     dive_on = bool(on.get("divedata") and (project.data.get("divelog") or {}).get("dives"))
-    texts_needed = (on["title"] and loc["title"]) or (on["labels"] and any(loc["shots"])) or dive_on
+    promo = loc.get("promo") or {}
+    variant = style.get("promo")
+    has_promo = bool(variant and (promo.get("hook") or promo.get("points") or promo.get("cta") or promo.get("url")))
+    lyric_cues = _lyric_cues(loc.get("lyrics") or [], proposal) if style.get("music_video") == "lyrics" else []
+    texts_needed = ((on["title"] and loc["title"]) or (on["labels"] and any(loc["shots"])) or dive_on
+                    or has_promo or bool(lyric_cues))
     font = fx_mod.title_font() if texts_needed else None
     if font:
         shutil.copyfile(font, tmp / "font.ttf")
@@ -468,8 +614,46 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
             (tmp / "subtitle.txt").write_text(loc["subtitle"], "utf-8")
     units = (project.data.get("settings") or {}).get("units", "metric")
 
+    if variant == "trailer" and not (promo.get("cta") or promo.get("url") or promo.get("logo")):
+        promo = dict(promo, cta=loc["title"] or (proposal.get("title") or ""))  # titeln som slutbild
+    endcard = bool(variant and promo.get("endcard", True)
+                   and (promo.get("cta") or promo.get("url") or promo.get("logo")))
+    if variant or style.get("music_video"):
+        dive_on = False  # reklam och musikvideo: inga dykdata i bild
+    point_cues = []
+    if variant and promo.get("points"):
+        # säljpunkterna fördelas jämnt efter kroken, var och en läsbar i minst 2 sekunder
+        pts = promo["points"][:6]
+        t0 = 2.9 if promo.get("hook") else 0.6
+        span = max(2.0 * len(pts), total - t0 - 0.6)
+        per = span / len(pts)
+        for k, ptxt in enumerate(pts):
+            a = t0 + k * per
+            point_cues.append((a, a + min(per, 3.4) - 0.15, ptxt))
+
     def overlays(i, shot, fx, out_len):
         out = []
+        if font and variant:
+            if i == 0 and promo.get("hook"):
+                (tmp / "hook.txt").write_text(promo["hook"], "utf-8")
+                out += text_filters("hook", promo["hook"], "", ("hook.txt", ""), out_w, out_h, out_len,
+                                    variant=variant)
+            for k, (a0, a1, ptxt) in enumerate(point_cues):
+                s0, s1 = a0 - shot["at"], a1 - shot["at"]
+                if s1 <= 0 or s0 >= out_len:
+                    continue
+                fp = f"p{i}_{k}.txt"
+                (tmp / fp).write_text(ptxt, "utf-8")
+                out += text_filters("point", ptxt, "", (fp, ""), out_w, out_h, out_len,
+                                    start=s0, variant=variant, end=s1)
+        if font and lyric_cues:
+            for k, (a0, a1, line) in enumerate(lyric_cues):
+                s0, s1 = a0 - shot["at"], a1 - shot["at"]
+                if s1 <= 0 or s0 >= out_len:
+                    continue
+                fl = f"l{i}_{k}.txt"
+                (tmp / fl).write_text(line, "utf-8")
+                out += text_filters("lyric", line, "", (fl, ""), out_w, out_h, out_len, start=s0, end=s1)
         if i == 0 and title and loc["subtitle"]:
             out += text_filters("subtitle", loc["subtitle"], "", ("subtitle.txt", ""), out_w, out_h, out_len)
         tx = loc["shots"][i] if i < len(loc["shots"]) else None
@@ -509,7 +693,7 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
             fx = {k: v for k, v in (shot.get("fx") or {}).items()
                   if (k == "speed" and v < 1 and on["slowmo"]) or (k == "speed" and v > 1 and on["fast"])
                   or (k == "zoom" and on["zoom"]) or (k == "punch" and on["punch"])
-                  or (k == "freeze" and on["freeze"])}
+                  or (k == "freeze" and on["freeze"]) or k == "kenburns"}
             seg = tmp / f"seg_{i:03d}.mp4"
             has_audio = clip.get("has_audio", False)
             out_len = dur + pad
@@ -540,7 +724,7 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
             def encode(fx, vignette, title, texts):
                 vf = _shot_filter(shot, sw, sh, out_w, out_h, style, wb=wb,
                                   fade_in=style["fade"] if i == 0 else 0.0,
-                                  fade_out=style["fade"] if i == len(shots) - 1 else 0.0,
+                                  fade_out=style["fade"] if i == len(shots) - 1 and not endcard else 0.0,
                                   fx=fx, pad=pad, vignette=vignette, title=title,
                                   grade=shot.get("grade") or proposal.get("grade"), texts=texts,
                                   enh=enh if texts is not None else {}, levels=levels,
@@ -593,6 +777,16 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
                 joined = with_sfx
             except MediaError as e:
                 print("Ljudeffekterna kunde inte läggas till:", e)
+
+        if endcard:
+            try:
+                if not font:
+                    shutil.copyfile(fx_mod.title_font(), tmp / "font.ttf")
+                with_end = tmp / "endcard_joined.mp4"
+                total = _append_endcard(joined, with_end, tmp, promo, variant, out_w, out_h, quality, total)
+                joined = with_end
+            except (MediaError, OSError, TypeError) as e:
+                print("Slutbilden kunde inte läggas till:", e)
 
         if progress:
             progress(len(shots) / steps, "Mixar ljud")

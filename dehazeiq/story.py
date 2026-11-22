@@ -462,6 +462,25 @@ def build(theme, cands, ctx_pool, n, select):
                 seq.append(wide_end)
         return _dedupe(seq)
 
+    if kind == "search":
+        # egna ord: sekvenserna som bäst matchar sökorden, i berättarordning
+        from . import search
+        qvs = search.query_vec(theme["query"])
+        pool_all = _dedupe(cands + [c for c in ctx_pool if not _has(cands, c)])
+        search.score_candidates(pool_all, qvs)
+        pool = search.pick(pool_all, n)
+        body = select(pool, n)
+        if theme.get("order") == "time":
+            return _dedupe(sorted(body, key=lambda c: c["time"]))
+        roles = {"intro": 0, "calm": 1, "detail": 1, "action": 2, "climax": 3}
+        order = {"wide": 0, "medium": 1, "close": 2}
+        body.sort(key=lambda c: (roles.get(c.get("role"), 1), order.get(c.get("shot"), 1), c["time"]))
+        if len(body) >= 3:  # bästa träffen som höjdpunkt mot slutet
+            peak = max(body, key=lambda c: c["q"] + 0.3 * c["util_n"])
+            body = [c for c in body if c is not peak]
+            body.insert(max(1, int(round(0.7 * len(body)))), peak)
+        return _dedupe(body)
+
     if kind == "session":
         sid = int(theme["id"].split(":")[1])
         pool = [c for c in cands if c["session"] == sid] or cands
@@ -543,6 +562,7 @@ def _dedupe(seq):
 
 
 THEME_TEXT = {
+    "search": "Ögonblicken som matchar det du beskrev, ordnade som en berättelse.",
     "subject": "Porträtt av ett motiv: från översikt till närbilder och ett avsked.",
     "session": "Ett dyk i tidsordning, från ytan till uppstigningen.",
     "trip": "De bästa ögonblicken, kapitel för kapitel i tidsordning.",

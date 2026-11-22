@@ -25,7 +25,26 @@ const STYLE_INFO = {
     long: "Översikt, djuret, detaljer och beteende. Långa tagningar, raka klipp, artnamn som textskylt och originalljud." },
   playful: { label: "Lekfull", desc: "Roliga ögonblick, fart och frysbilder", sw: "#3A2A12", color: "#F2C14E",
     long: "Snabba klipp i takt, snabbspolning, frysbilder och zoomryck med varma, glada färger." },
+  trailer: { group: "trailer", label: "Trailer", desc: "Lugn start, textskyltar, allt snabbare", color: "#D9A65B",
+    long: "Byggs upp som en filmtrailer: långsamma bilder och svarta toningar, sedan allt kortare klipp mot ett klimax och titeln som slutbild." },
+  promo_energy: { group: "promo", label: "Reklam · energi", desc: "Snabbt, stora texter", color: "#E8452C",
+    long: "Kort och intensivt: krok i början, säljpunkter i färgade skyltar och en tydlig uppmaning på slutet." },
+  promo_premium: { group: "promo", label: "Reklam · premium", desc: "Elegant, lugnt, bredbild", color: "#C9B48A",
+    long: "Långsamma toningar, dämpade färger och diskreta texter. För exklusiva upplevelser och varumärken." },
+  promo_info: { group: "promo", label: "Reklam · information", desc: "Tydliga punkter", color: "#8FB8D0",
+    long: "Lugnt tempo och tydliga textskyltar som förklarar erbjudandet steg för steg." },
+  promo_experience: { group: "promo", label: "Reklam · upplevelse", desc: "Känsla före fakta", color: "#E3B76A",
+    long: "Visar hur det känns att vara där: rörelse, ljus och folk, med texter som stöd." },
+  mv_ballad: { group: "mv", label: "Musikvideo · ballad", desc: "Långa klipp på varannan takt", color: "#B89AE8",
+    long: "Lugna klipp som byts på halvtakt, mjuk glöd och toningar. Starkaste bilden på refrängen." },
+  mv_glitch: { group: "mv", label: "Musikvideo · glitch", desc: "Snabbt, färgglitch, blixtar", color: "#6BE8D8",
+    long: "Mycket snabba klipp, färgkanaler som glider isär och blixtar på slagen. Kortare klipp där musiken är intensiv." },
+  mv_lyrics: { group: "mv", label: "Musikvideo · sångtext", desc: "Din sångtext i takt", color: "#E86BD8",
+    long: "Klipp i takt med din egen sångtext, en rad i taget. Skriv in texten under Redigera › Text." },
 };
+const STYLE_GROUPS = [["story", "Berättande"], ["promo", "Reklam"], ["mv", "Musikvideo"], ["trailer", "Trailer"]];
+STYLE_INFO.musicvideo.group = "mv";
+const isPromo = (p) => /^promo_/.test(p.style || "") || p.style === "trailer";
 const FORMAT_INFO = [
   { id: "9:16", name: "Reel / Shorts", sub: "9:16 · Instagram, TikTok", shape: [18, 30] },
   { id: "16:9", name: "YouTube", sub: "16:9 · liggande", shape: [34, 20] },
@@ -88,6 +107,7 @@ function icon(name, size = 18) {
     phone: '<rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18h2"/>',
     pen: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>',
     trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
+    search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
     wifi: '<path d="M2 8.8a15 15 0 0 1 20 0M5 12.6a10 10 0 0 1 14 0M8.5 16.3a5 5 0 0 1 7 0"/><circle cx="12" cy="19.5" r=".8" fill="currentColor"/>',
   }[name] || "";
   return `<svg aria-hidden="true" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
@@ -645,6 +665,7 @@ function viewAnalyze() {
   else if (state.filter === "fav") list = done.filter((c) => c.favorite);
   else if (state.filter.startsWith("tag:")) list = done.filter((c) => (c.analysis.tags || []).includes(state.filter.slice(4)));
   list = [...list].sort((a, b) => b.analysis.score - a.analysis.score);
+  const sr = state.search && state.search.pid === state.pid ? state.search : null;
 
   const chip = (id, label) => `<button class="chip" data-filter="${esc(id)}" aria-pressed="${state.filter === id}">${esc(label)}</button>`;
   const chips = [chip("used", `I filmerna ${used.length}`), chip("dropped", `Bortvalda ${dropped.length}`),
@@ -682,12 +703,13 @@ function viewAnalyze() {
 
   const main = `<main class="main">
     ${outdatedBanner()}
-    ${deepCard()}
-    ${diveCard()}
     <div class="spread"><div class="head"><h1>${busy ? "AI analyserar materialet" : "Analysresultat"}</h1>
       <p class="lead">Bara skarpa, stabila och välexponerade klipp används. Svaga klipp väljs bort automatiskt – du behöver inte gå igenom dem.</p></div>${prog}</div>
-    <div class="chips" role="group" aria-label="Filtrera">${chips}</div>
-    <div class="grid">${cards || '<div class="empty">Inga klipp i det här urvalet ännu.</div>'}</div>
+    ${searchBar(sr)}
+    ${sr ? searchResults(sr) : `<div class="chips" role="group" aria-label="Filtrera">${chips}</div>
+    <div class="grid">${cards || '<div class="empty">Inga klipp i det här urvalet ännu.</div>'}</div>`}
+    ${deepCard()}
+    ${diveCard()}
   </main>`;
 
   const found = tagList.slice(0, 8).map(([t, n]) => `<div class="found"><div class="spread" style="font-size:13px"><span>${esc(t)}</span><span class="muted num">${n} klipp</span></div><span class="meter"><i style="width:${(n / maxTag) * 100}%;background:var(--accent)"></i></span></div>`).join("");
@@ -706,6 +728,85 @@ function viewAnalyze() {
     </div>
   </aside>`;
   return main + panel;
+}
+
+/* ---------- sök i materialet och beskriv filmen med egna ord ---------- */
+function searchBar(sr) {
+  if (!(state.info && state.info.search)) return "";
+  return `<div class="searchbar" role="search"><span class="sico">${icon("search", 17)}</span>
+    <input class="field" id="searchQ" type="search" enterkeyhint="search" value="${esc(sr ? sr.query : "")}" placeholder="Sök i materialet med egna ord: bläckfisk, dykare med lampa, solnedgång, båtdäck …" aria-label="Sök i materialet">
+    <button class="btn" data-act="search">Sök</button>${sr ? '<button class="btn" data-act="search-clear">Visa alla klipp</button>' : ""}</div>`;
+}
+
+function searchResults(sr) {
+  if (sr.loading) return '<div class="empty">Söker …</div>';
+  const hits = sr.hits || [];
+  if (!hits.length) return '<div class="empty">Inga träffar. Prova andra ord, till exempel det du ser i bilden.</div>';
+  const strong = hits.filter((h) => h.strong).length;
+  const cards = hits.map((h) => `<article class="ccard ${h.strong ? "" : "off"}">
+      <div class="img"><img loading="lazy" alt="" src="${frameUrl(h.clip_id, h.t, 480)}">
+        ${h.photo ? '<span class="badge" style="left:10px;top:10px">Foto</span>' : ""}
+        <span class="score num ${h.strong ? "hi" : "lo"}" title="Hur väl bilden matchar sökningen">${Math.round(h.match * 100)}</span>
+        ${h.photo ? "" : `<span class="badge num" style="right:10px;bottom:10px;font-weight:500">${fmtDur(h.t)}</span>`}</div>
+      <div class="body"><span style="font-size:13px" title="${esc(h.name)}">${esc(h.name)}</span>
+        ${h.weak ? '<div class="tags"><span class="tag bad">Bortvald av kvalitetskontrollen</span></div>' : ""}
+        <div class="card-actions"><button class="toggle fav" data-fav="${h.clip_id}" aria-pressed="${!!(clips().find((c) => c.id === h.clip_id) || {}).favorite}">${icon("star", 14)}Måste med</button></div></div></article>`).join("");
+  return `<div class="spread"><p class="lead" style="margin:0">${strong} tydliga träffar för ”${esc(sr.query)}”</p>
+      <button class="btn primary" data-act="search-film" ${running() ? "disabled" : ""}>${icon("film", 16)}Gör film av träffarna</button></div>
+    <div class="grid">${cards}</div>`;
+}
+
+async function runSearch() {
+  const q = ($("#searchQ") || {}).value || "";
+  if (!q.trim()) return;
+  state.search = { pid: state.pid, query: q.trim(), loading: true };
+  render();
+  try {
+    const r = await api("GET", `/api/p/${state.pid}/search?q=${encodeURIComponent(q.trim())}`);
+    state.search = Object.assign(r, { pid: state.pid });
+  } catch (e) { state.search = null; fail(e); }
+  render();
+}
+
+function promptBar() {
+  const pr = state.prompt || {};
+  const ex = ["gör en snygg film om bakom kulisserna", "reklamfilm för TikTok, 15 s, tre varianter", "musikvideo med glitch", "trailer om bläckfisken för YouTube"];
+  return `<section class="promptbar" aria-label="Beskriv filmen">
+    <label class="flabel" for="promptText">${icon("spark", 15)} Beskriv filmen du vill ha</label>
+    <div class="row" style="flex-wrap:nowrap"><input class="field" id="promptText" enterkeyhint="go" value="${esc(pr.text || "")}" placeholder="T.ex. ${esc(ex[(state.pid || "").length % ex.length])}">
+      <button class="btn primary" data-act="prompt-parse" ${pr.busy ? "disabled" : ""}>${pr.busy ? "Tolkar …" : "Tolka"}</button></div>
+    ${pr.res ? `<div class="promptres"><span><b>Så här tolkade jag det:</b> ${esc(pr.res.explain)}</span>
+      <span class="grow"></span><button class="btn small" data-act="prompt-clear">Avbryt</button>
+      <button class="btn small primary" data-act="prompt-run">Skapa förslagen</button></div>` : ""}
+  </section>`;
+}
+
+async function parsePrompt() {
+  const text = ($("#promptText") || {}).value || "";
+  if (!text.trim()) return;
+  state.prompt = { text, busy: true };
+  render();
+  try {
+    const r = await api("POST", "/api/prompt", { text });
+    state.prompt = { text, res: r };
+  } catch (e) { state.prompt = { text }; fail(e); }
+  render();
+}
+
+async function runPlan(plan) {
+  try {
+    await api("POST", `/api/p/${state.pid}/plans`, { plans: [plan], run: true, previews: true });
+    state.expectJob = true;
+    state.planTab = plan.type;
+    state.prompt = null;
+    state.search = null;
+    state.setup = null;
+    state.view = "proposals";
+    toast("Lagt i kön. Förslagen dyker upp här.", true);
+    loadQueue();
+    render();
+    await pollJob();
+  } catch (e) { fail(e); }
 }
 
 /* ---------- vy: förslag ---------- */
@@ -742,7 +843,11 @@ function propCard(p, idx) {
       <div class="info">
         <div class="stack" style="gap:4px"><span class="plabel" style="color:${si.color || "var(--accent)"}">Förslag ${"ABCDEFGHIJ"[idx] || ""} · ${esc(p.style_label)}</span>
           <h2 class="pname">${esc(p.title || p.style_label)}</h2><p class="pdesc">${esc(p.story || si.long || "")}</p>
-          ${p.short ? `<p class="pdesc" style="color:var(--warn)">Kortare än önskat – det fanns bara ${fmtDur(p.length)} skarpt material.</p>` : ""}</div>
+          ${p.short ? `<p class="pdesc" style="color:var(--warn)">Kortare än önskat – det fanns bara ${fmtDur(p.length)} skarpt material.</p>` : ""}
+          ${isPromo(p) && !(p.promo && (p.promo.hook || p.promo.cta || (p.promo.points || []).length)) ? `<p class="pdesc hint">${p.style === "trailer" ? "Lägg gärna till textskyltar" : "Lägg till dina reklamtexter och logga"} under <a href="#" data-edtext="${p.id}">Redigera › Text</a>. Filmen fungerar även utan.</p>` : ""}
+          ${p.style === "mv_lyrics" && !((p.lyrics || {}).lines || []).length ? `<p class="pdesc hint">Skriv in sångtexten under <a href="#" data-edtext="${p.id}">Redigera › Text</a>.</p>` : ""}
+          ${/^mv_|^musicvideo/.test(p.style) && !p.music_name ? `<p class="pdesc" style="color:var(--warn)">Ingen musik vald – lägg till en låt så klipps filmen i takt.</p>` : ""}
+          ${p.prompt ? `<p class="pdesc muted">Din beskrivning: ”${esc(p.prompt)}”</p>` : ""}</div>
         <dl class="stats">
           <div><dt>Klipp</dt><dd class="num">${p.n_shots}</dd></div>
           <div><dt>Snittlängd</dt><dd class="num">${dec(p.avg_shot)} s</dd></div>
@@ -791,7 +896,10 @@ function viewProposals() {
   const older = planList ? [] : props.filter((p) => !state.shown.includes(p.id));
   const favs = clips().filter((c) => c.favorite).length;
   const fmt = FORMAT_INFO.find((f) => f.id === s.format);
-  const styleSel = Object.entries(STYLE_INFO).map(([k, v]) => `<button class="chip" data-style="${k}" aria-pressed="${s.style === k}">${v.label}</button>`).join("");
+  const styleSel = STYLE_GROUPS.map(([g, gl]) => {
+    const items = Object.entries(STYLE_INFO).filter(([, v]) => (v.group || "story") === g);
+    return `<div class="stylegroup"><span class="muted">${gl}</span><div class="chips">${items.map(([k, v]) => `<button class="chip" data-style="${k}" aria-pressed="${s.style === k}" title="${esc(v.desc || "")}">${v.label}</button>`).join("")}</div></div>`;
+  }).join("");
   const on = effectsOn();
   const fxSel = Object.entries(EFFECT_INFO).map(([k, l]) => `<button class="chip" data-effect="${k}" aria-pressed="${!!on[k]}">${l}</button>`).join("");
   const themeSel = [`<button class="chip" data-theme="" aria-pressed="${!state.theme}">AI väljer berättelser</button>`]
@@ -806,14 +914,18 @@ function viewProposals() {
         <button class="btn" data-act="generate" ${generating || running() ? "disabled" : ""}>${icon("redo", 16)}${generating ? "Skapar …" : "Generera nya förslag"}</button>
       </div>
     </div>
-    ${planTabs() || `<div class="chips"><button class="chip" data-act="setup-project">+ Välj filmtyper: dykfilm, resefilm, reels, djurporträtt</button></div>`}
-    <div class="props">${shown.map(propCard).join("") || '<div class="empty">Klicka på "Generera nya förslag".</div>'}</div>
-    <section class="box" style="flex-direction:row;flex-wrap:wrap;align-items:center;gap:14px">
-      <div class="stack" style="gap:8px;flex:1 1 100%"><b>Berättelse</b><div class="chips">${themeSel}</div></div>
-      <div class="stack" style="gap:8px;flex:1 1 auto"><b>Stil</b><div class="chips">${styleSel}</div></div>
-      <div class="stack" style="gap:8px;flex:1 1 100%"><b>Effekter <span class="muted" style="font-weight:400">· AI lägger till där det passar, slå av det du inte vill ha</span></b><div class="chips">${fxSel}</div></div>
-      <a href="#" data-step-link="import" style="font-size:13px">Ändra format, längd eller musik</a>
-    </section>
+    ${promptBar()}
+    ${planTabs() || `<div class="chips"><button class="chip" data-act="setup-project">+ Välj filmtyper: dykfilm, reklam, musikvideo, trailer …</button></div>`}
+    <div class="props">${shown.map(propCard).join("") || '<div class="empty">Beskriv filmen ovan, välj filmtyper eller klicka på "Generera nya förslag".</div>'}</div>
+    <details class="more" ${state.moreOpen ? "open" : ""} data-more>
+      <summary>Berättelse, stil och effekter för "Generera nya förslag"</summary>
+      <div class="stack" style="gap:18px;padding-top:14px">
+        <div class="stack" style="gap:8px"><b>Berättelse</b><div class="chips">${themeSel}</div></div>
+        <div class="stack" style="gap:10px"><b>Stil</b>${styleSel}</div>
+        <div class="stack" style="gap:8px"><b>Effekter <span class="muted" style="font-weight:400">· AI lägger till där det passar, slå av det du inte vill ha</span></b><div class="chips">${fxSel}</div></div>
+        <a href="#" data-step-link="import" style="font-size:13px">Ändra format, längd eller musik</a>
+      </div>
+    </details>
     ${older.length ? `<section class="older"><h2>Tidigare förslag</h2>${older.slice(0, 9).map((p) => `<div class="older-row"><b>${esc(p.title || p.style_label)}</b><span class="muted">${esc(p.style_label)}</span><span class="muted num">${p.n_shots} klipp · ${fmtDur(p.length)} · ${esc(p.format)}</span><span class="grow"></span><button class="btn small" data-show="${p.id}">Visa</button></div>`).join("")}</section>` : ""}
   </main>`;
 }
@@ -901,10 +1013,12 @@ function render() {
 
 /* ---------- händelser ---------- */
 document.addEventListener("click", async (ev) => {
-  const t = ev.target.closest("button, a[data-step-link]");
+  const t = ev.target.closest("button, a[data-step-link], a[data-edtext], summary");
   if (!t) return;
   const d = t.dataset;
+  if (t.tagName === "SUMMARY") { state.moreOpen = !t.parentElement.open; return undefined; }
   if (d.stepLink) { ev.preventDefault(); state.view = d.stepLink; return render(); }
+  if (d.edtext) { ev.preventDefault(); openEditor(d.edtext); state.ed.tab = "text"; return render(); }
   if (d.step) { state.view = d.step; return render(); }
   if (d.proj) {
     await loadProject(d.proj);
@@ -946,6 +1060,16 @@ document.addEventListener("click", async (ev) => {
       state.expectJob = true;
       return pollJob();
     case "generate": return generate();
+    case "search": return runSearch();
+    case "search-clear": state.search = null; return render();
+    case "search-film": {
+      const q = state.search.query;
+      return runPlan({ type: "prompt", query: q, title: q.charAt(0).toUpperCase() + q.slice(1), prompt: q,
+        platform: "reels", count: 3 });
+    }
+    case "prompt-parse": return parsePrompt();
+    case "prompt-clear": state.prompt = null; return render();
+    case "prompt-run": return runPlan(state.prompt.res.plan);
     case "music": return chooseMusic();
     case "music-remove": return removeMusic();
     case "export": return renderProp(state.exportProp, state.exportRes);
@@ -962,6 +1086,12 @@ document.addEventListener("click", async (ev) => {
     case "modal-close": $("#modal").hidden = true; return undefined;
     default: return undefined;
   }
+});
+
+document.addEventListener("keydown", (ev) => {
+  if (ev.key !== "Enter" || ev.isComposing) return;
+  if (ev.target.id === "searchQ") { ev.preventDefault(); runSearch(); }
+  if (ev.target.id === "promptText") { ev.preventDefault(); parsePrompt(); }
 });
 
 document.addEventListener("submit", async (ev) => {

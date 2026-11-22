@@ -66,6 +66,30 @@ def main():
     print("Förhandsvisning:", r["file"])
     r = pipeline.render_proposal(prog, p.id, props[1]["id"], "720p")
     print("Export:", r["file"], "+", r["otio"])
+    # v0.13: foton, beskrivning med egna ord, reklam, musikvideo och trailer
+    from dehazeiq import editor, photo, prompt
+    if photo.PIL_OK:
+        from PIL import Image
+        img = WORK / "foto"
+        img.mkdir(exist_ok=True)
+        Image.new("RGB", (1600, 1200), (30, 90, 140)).save(img / "IMG_0001.jpg")
+        r = pipeline.import_media(prog, p.id, [str(img)])
+        print("Foton:", r)
+        assert r["added"] == 1, "Fotot borde importeras"
+        p.reload()
+        assert any(c.get("is_photo") for c in p.clips())
+    plan = prompt.parse("gör en reklamfilm för tiktok, 15 sek, två varianter", use_llm=False)
+    print("Beskrivning:", plan["explain"])
+    assert plan["plan"]["type"] == "promo" and plan["plan"]["platform"] == "tiktok"
+    p.reload()
+    for kind in ("promo", "musicvideo", "trailer"):
+        made = editor.plan_proposals(p, {"type": kind, "platform": "reels", "count": 2, "length": 15}, p.data.get("music"))
+        print(kind, [x["style"] for x in made])
+        assert made
+    made[0]["promo"] = {"hook": "Test", "points": ["Ett", "Två"], "cta": "Boka nu", "url": "exempel.se"}
+    p.add_proposals(made)
+    r = pipeline.render_proposal(prog, p.id, made[0]["id"], "preview")
+    print("Trailer med slutbild:", r["file"])
     print(f"OK på {time.time() - t:.1f} s. Testdata i {WORK}")
 
 

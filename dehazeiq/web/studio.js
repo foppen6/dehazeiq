@@ -7,6 +7,9 @@ const FT_ICON = {
   trip: '<path d="M2 16l20-7-20-7 4 7-4 7z"/>',
   reels: '<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>',
   animal: '<path d="M3 12c3-5 10-6 14-2l4-3v10l-4-3c-4 4-11 3-14-2z"/><path d="M8 11h.01"/>',
+  promo: '<path d="M3 11v2a1 1 0 0 0 1 1h3l5 4V6L7 10H4a1 1 0 0 0-1 1z"/><path d="M16 8a5 5 0 0 1 0 8M19 5a9 9 0 0 1 0 14"/>',
+  musicvideo: '<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>',
+  trailer: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="m10 9 5 3-5 3z"/>',
 };
 const FT_DESC = {
   auto: "AI läser materialet och föreslår den mix av berättelser som passar bäst.",
@@ -14,6 +17,9 @@ const FT_DESC = {
   trip: "Hela resan i kapitel per dag eller dyk, i tidsordning.",
   reels: "Korta, snabba filmer i takt till musik – flera olika varianter.",
   animal: "En film per djur: bläckfisken, krabban, sköldpaddan …",
+  promo: "Fyra reklamvarianter. Krok, säljpunkter, logga och uppmaning läggs in efteråt – samma film kan användas för olika saker.",
+  musicvideo: "Fyra varianter till din låt: i takt, ballad, glitch och med din sångtext. Bästa klippet hamnar på refrängen.",
+  trailer: "Byggs upp som en filmtrailer: lugn start, textskyltar, allt snabbare klipp och titeln på slutet.",
 };
 const svgi = (p, s = 18) => `<svg aria-hidden="true" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
 const ICO = {
@@ -86,11 +92,12 @@ function viewQueue() {
 
 /* ================= ny film: välj filmtyper ================= */
 function defaultPlans() {
-  return { auto: { on: true }, dive: { on: false }, trip: { on: false }, reels: { on: false }, animal: { on: false } };
+  return { auto: { on: true }, dive: { on: false }, trip: { on: false }, reels: { on: false }, animal: { on: false },
+    promo: { on: false }, musicvideo: { on: false }, trailer: { on: false } };
 }
 function viewSetup() {
   const su = state.setup || (state.setup = { mode: "project", plans: defaultPlans() });
-  const fts = filmTypes();
+  const fts = Object.fromEntries(Object.entries(filmTypes()).filter(([k]) => k !== "prompt"));
   const pfs = platforms();
   const cards = Object.entries(fts).map(([k, ft]) => {
     const pl = su.plans[k] || (su.plans[k] = { on: false });
@@ -115,6 +122,7 @@ function viewSetup() {
   return `<main class="main wide" style="max-width:1200px">
     <div class="head"><h1>Vad vill du göra av materialet?</h1>
       <p class="lead">Välj en eller flera. AI:n ${isNew ? "analyserar först och " : ""}gör förslag av varje sort. Allt läggs i kön och körs i bakgrunden.</p></div>
+    ${isNew ? "" : promptBar()}
     <div class="ftgrid">${cards}</div>
     ${opts ? `<section class="box stack" style="gap:14px">${opts}</section>` : ""}
     <section class="box" style="flex-direction:row;flex-wrap:wrap;align-items:center;gap:16px">
@@ -130,7 +138,7 @@ function viewSetup() {
 
 function setupPlans() {
   const su = state.setup;
-  return Object.entries(su.plans).filter(([, p]) => p.on).map(([k, p]) => ({
+  return Object.entries(su.plans).filter(([k, p]) => p.on && k !== "prompt").map(([k, p]) => ({
     type: k, platform: p.platform || filmTypes()[k].platform, length: p.length || null, count: p.count || null,
   }));
 }
@@ -274,7 +282,7 @@ function edTimeline(p) {
   const total = p.shots.reduce((a, s) => a + s.duration, 0) || 1;
   const blocks = p.shots.map((s, i) => {
     const fx = s.fx || {};
-    const tags = [fx.speed > 1 ? "2×" : "", fx.speed && fx.speed < 1 ? "0,5×" : "", fx.freeze ? "Frys" : "", fx.zoom ? "Zoom" : "", fx.punch ? "Ryck" : "", s.grade ? "Färg" : "", s.manual_center ? "Flyttad" : ""].filter(Boolean);
+    const tags = [fx.speed > 1 ? "2×" : "", fx.speed && fx.speed < 1 ? "0,5×" : "", fx.freeze ? "Frys" : "", fx.zoom ? "Zoom" : "", fx.punch ? "Ryck" : "", fx.kenburns ? (fx.kenburns > 0 ? "Foto ↗" : "Foto ↙") : s.photo ? "Foto" : "", s.grade ? "Färg" : "", s.manual_center ? "Flyttad" : ""].filter(Boolean);
     return `<button class="tlblock ${i === state.ed.i ? "sel" : ""}" data-edshot="${i}" style="flex:${s.duration} 1 0" aria-label="Klipp ${i + 1}, ${dec(s.duration)} sekunder">
       <img alt="" loading="lazy" src="${frameUrl(s.clip_id, s.src_start + Math.min(s.duration, 1.5), 160)}"><span class="tlnum num">${i + 1}</span><span class="tldur num">${dec(s.duration)} s</span>${tags.length ? `<span class="tltags">${tags.join(" · ")}</span>` : ""}</button>`;
   }).join("");
@@ -308,11 +316,13 @@ function edInspectorClip(p, s) {
       <input type="range" min="0.5" max="10" step="0.1" value="${s.duration}" data-edlen aria-label="Längd i sekunder" style="flex:1 1 auto;accent-color:var(--accent)">
       <button class="btn icon small" data-edtrim="${beat}" aria-label="Längre">+</button><span class="num" style="width:48px;text-align:right" data-edlenval>${dec(s.duration)} s</span></div>
       ${p.bpm ? '<span class="muted" style="font-size:12px">Fäster på musikens takt</span>' : ""}</div>
+    ${s.photo ? `<div class="stack" style="gap:8px"><span class="flabel">Rörelse i fotot</span><div class="chips">
+      ${chipBtn("data-edfx", "kb_in", "Zooma in mot motivet", fx.kenburns > 0)}${chipBtn("data-edfx", "kb_out", "Zooma ut", fx.kenburns < 0)}${chipBtn("data-edfx", "none", "Stilla", !fx.kenburns && effect === "none")}</div></div>` : `
     <div class="stack" style="gap:8px"><span class="flabel">Hastighet</span><div class="chips">
       ${chipBtn("data-edspeed", "slow", "Slowmotion 0,5×", speedMode === "slow")}${chipBtn("data-edspeed", "normal", "Normal", speedMode === "normal")}
       ${chipBtn("data-edspeed", "fast", "Snabbspola 2×", speedMode === "fast")}${chipBtn("data-edspeed", "freeze", "Frys slutet", speedMode === "freeze")}</div></div>
     <div class="stack" style="gap:8px"><span class="flabel">Effekt</span><div class="chips">
-      ${chipBtn("data-edfx", "none", "Ingen", effect === "none")}${chipBtn("data-edfx", "zoom", "Långsam zoom", effect === "zoom")}${chipBtn("data-edfx", "punch", "Zoomryck", effect === "punch")}</div></div>
+      ${chipBtn("data-edfx", "none", "Ingen", effect === "none")}${chipBtn("data-edfx", "zoom", "Långsam zoom", effect === "zoom")}${chipBtn("data-edfx", "punch", "Zoomryck", effect === "punch")}</div></div>`}
     <div class="stack" style="gap:8px"><span class="flabel">Motivet i bilden</span>
       <span class="muted" style="font-size:12px">Klicka i originalbilden till vänster för att flytta utsnittet.</span>
       ${s.manual_center ? `<button class="btn small" data-act="ed-autocenter">${svgi(ICO.target, 14)}Låt AI följa motivet igen</button>` : ""}</div>
@@ -382,10 +392,59 @@ function edInspectorText(p) {
       <div class="row"><button class="btn small primary" data-act="ed-i18n-save">Spara ${esc(langs[lang])}</button></div>`;
   }
   const title = (p.effects || {}).title || "";
-  return `${sel}<label class="stack" style="gap:6px"><span class="flabel">Titel i början av filmen</span>
+  if (isPromo(p)) return sel + promoForm(p);
+  const lyr = p.style === "mv_lyrics" ? lyricsForm(p) : "";
+  return `${sel}${lyr}<label class="stack" style="gap:6px"><span class="flabel">Titel i början av filmen</span>
       <input class="field" id="edTitle" value="${esc(title)}" maxlength="80" placeholder="Ingen titel"></label>
     <div class="row"><button class="btn small primary" data-act="ed-title">Spara titel</button><button class="btn small" data-act="ed-title-clear">Ta bort titel</button></div>
     <p class="muted" style="margin:0;font-size:12px">Titeln tonas in över första klippet. Slå av eller på den under Effekter i förslagsvyn.</p>`;
+}
+
+function promoDraft(p) {
+  if (!state.ed.promo || state.ed.promo.prop !== p.id) {
+    const pr = p.promo || {};
+    state.ed.promo = { prop: p.id, hook: pr.hook || "", points: (pr.points || []).join("\n"), cta: pr.cta || "",
+      url: pr.url || "", logo: pr.logo || "", endcard: pr.endcard !== false, all: false };
+  }
+  return state.ed.promo;
+}
+
+function promoForm(p) {
+  const d = promoDraft(p);
+  const trailer = p.style === "trailer";
+  const last = P().promo_last;
+  const empty = !d.hook && !d.points && !d.cta && !d.url && !d.logo;
+  const nPromo = (P().proposals || []).filter((x) => x.id !== p.id && x.promo && (x.style === "trailer") === trailer).length;
+  const logoName = d.logo ? d.logo.split(/[\\/]/).pop() : "";
+  return `<p class="muted" style="margin:0;font-size:13px">${trailer ? "Texterna är valfria. Utan egen slutbild visas filmens titel." : "Allt är valfritt och kan ändras när som helst – samma film kan användas för olika erbjudanden."}</p>
+    ${empty && last ? `<button class="btn small" data-act="promo-last">Fyll i senast använda texter</button>` : ""}
+    <label class="stack" style="gap:6px"><span class="flabel">${trailer ? "Inledande text" : "Krok – de första sekunderna"}</span>
+      <textarea class="field" rows="2" data-promo="hook" maxlength="120" placeholder="${trailer ? "I mörkret under ytan …" : "Dyk med oss i Gullmarsfjorden"}">${esc(d.hook)}</textarea></label>
+    <label class="stack" style="gap:6px"><span class="flabel">${trailer ? "Textskyltar (en per rad)" : "Säljpunkter (en per rad)"}</span>
+      <textarea class="field" rows="3" data-promo="points" placeholder="${trailer ? "… väntar något\nsom ingen har sett" : "Små grupper\nAll utrustning ingår"}">${esc(d.points)}</textarea></label>
+    <label class="stack" style="gap:6px"><span class="flabel">${trailer ? "Slutbild (titel eller datum)" : "Uppmaning på slutbilden"}</span>
+      <input class="field" data-promo="cta" maxlength="80" value="${esc(d.cta)}" placeholder="${trailer ? "Premiär i vår" : "Boka din plats"}"></label>
+    <label class="stack" style="gap:6px"><span class="flabel">Webbadress eller kontakt</span>
+      <input class="field" data-promo="url" maxlength="80" value="${esc(d.url)}" placeholder="www.exempel.se"></label>
+    <div class="stack" style="gap:6px"><span class="flabel">Logga</span>
+      <div class="row">${logoName ? `<span class="tag">${esc(logoName)}</span><button class="btn small" data-act="promo-logo-clear">Ta bort</button>` : '<span class="muted" style="font-size:13px">Ingen logga</span>'}
+      ${remote() ? "" : `<button class="btn small" data-act="promo-logo">${logoName ? "Byt" : "Välj logga"}</button>`}</div></div>
+    <label class="row" style="gap:10px;font-size:14px"><input type="checkbox" data-promo="endcard" ${d.endcard ? "checked" : ""} style="width:18px;height:18px;accent-color:var(--accent)">Slutbild med logga och uppmaning</label>
+    ${nPromo ? `<label class="row" style="gap:10px;font-size:14px"><input type="checkbox" data-promo="all" ${d.all ? "checked" : ""} style="width:18px;height:18px;accent-color:var(--accent)">Använd i alla ${nPromo + 1} ${trailer ? "trailrar" : "reklamförslag"}</label>` : ""}
+    <div class="row"><button class="btn small primary" data-act="promo-save">Spara texterna</button></div>`;
+}
+
+function lyricsForm(p) {
+  const ly = p.lyrics || {};
+  const bpl = ly.beats_per_line || 8;
+  return `<div class="stack" style="gap:8px;padding-bottom:14px;border-bottom:1px solid var(--line)">
+    <label class="stack" style="gap:6px"><span class="flabel">Sångtext (en rad visas i taget, tom rad = paus)</span>
+      <textarea class="field" rows="7" id="lyLines" placeholder="Under ytan\ndär tystnaden bor">${esc((ly.lines || []).join("\n"))}</textarea></label>
+    <div class="row" style="flex-wrap:nowrap;gap:10px">
+      <label class="stack" style="gap:6px;flex:1"><span class="flabel">Börjar vid (s)</span><input class="field" id="lyStart" type="number" min="0" step="0.5" value="${Number(ly.start || 0)}"></label>
+      <label class="stack" style="gap:6px;flex:1"><span class="flabel">Varje rad</span><select class="selfield" id="lyBpl">${[[4, "1 takt"], [8, "2 takter"], [16, "4 takter"]].map(([v, l]) => `<option value="${v}" ${v === bpl ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>
+    <div class="row"><button class="btn small primary" data-act="lyrics-save">Spara sångtexten</button></div>
+    <p class="muted" style="margin:0;font-size:12px">${p.bpm ? `Raderna följer låtens takt (${dec(p.bpm, 0)} BPM).` : "Välj musik först så följer raderna takten."}</p></div>`;
 }
 
 function viewEdit() {
@@ -517,6 +576,22 @@ document.addEventListener("click", async (ev) => {
     case "dive-remove": await api("POST", `/api/p/${state.pid}/divelog/remove`, {}); state.dive = null; return render();
     case "dive-units": { const u = (settings().units || "metric") === "metric" ? "imperial" : "metric"; await saveSettings({ units: u }); return render(); }
     case "ed-i18n-save": return saveI18n();
+    case "promo-save": {
+      const d = promoDraft(edProp());
+      await edit("promo", { hook: d.hook, points: d.points, cta: d.cta, url: d.url, logo: d.logo, endcard: d.endcard, all: d.all });
+      if (d.all) await loadProject(state.pid);
+      toast(d.all ? "Texterna används nu i alla reklamförslag." : "Texterna är sparade. Förhandsvisa för att se dem.", true);
+      return render();
+    }
+    case "promo-last": { const l = P().promo_last || {}; Object.assign(promoDraft(edProp()), { hook: l.hook || "", points: (l.points || []).join("\n"), cta: l.cta || "", url: l.url || "", logo: l.logo || "", endcard: l.endcard !== false }); return render(); }
+    case "promo-logo": {
+      const paths = await choosePaths("image");
+      if (!paths.length) return undefined;
+      try { const r = await api("POST", `/api/p/${state.pid}/logo`, { path: paths[0] }); promoDraft(edProp()).logo = r.logo; } catch (e) { fail(e); }
+      return render();
+    }
+    case "promo-logo-clear": promoDraft(edProp()).logo = ""; return render();
+    case "lyrics-save": return edit("lyrics", { lines: $("#lyLines").value, start: Number($("#lyStart").value || 0), beats_per_line: Number($("#lyBpl").value) });
     case "ed-grade-zero": { const g = curGrade(edProp()); ["exposure", "contrast", "saturation", "temperature", "tint", "sharpen", "vignette"].forEach((k) => { g[k] = 0; }); g.strength = 1; stageGrade(g); return render(); }
     case "ed-title": return edit("title", { text: $("#edTitle").value });
     case "ed-text": return edit("text", { i: state.ed.i, kind: $("#edTxtKind").value, text: $("#edTxt").value, sub: $("#edTxtSub").value });
@@ -533,6 +608,7 @@ document.addEventListener("click", async (ev) => {
 
 document.addEventListener("input", (ev) => {
   const t = ev.target;
+  if (t.dataset.promo && state.ed.promo) { state.ed.promo[t.dataset.promo] = t.type === "checkbox" ? t.checked : t.value; return undefined; }
   if (t.dataset.edgrade) return onGradeInput(t.dataset.edgrade, t.value);
   if (t.dataset.edlen !== undefined) { const v = document.querySelector("[data-edlenval]"); if (v) v.textContent = `${dec(Number(t.value))} s`; }
   return undefined;
@@ -543,6 +619,7 @@ document.addEventListener("change", (ev) => {
   const d = t.dataset;
   if (d.edlen !== undefined) return edit("trim", { i: state.ed.i, duration: Number(t.value) });
   if (d.edtr !== undefined) return edit("transition", { i: state.ed.i, type: t.value });
+  if (d.promo && state.ed.promo && t.type === "checkbox") { state.ed.promo[d.promo] = t.checked; return undefined; }
   if (d.edstab !== undefined) { const g = curGrade(edProp()); g.stabilize = t.checked; stageGrade(g); return render(); }
   if (d.edlang !== undefined) { state.ed.lang = t.value; state.ed.texts = null; return render(); }
   if (d.platform) return changePlatform(d.platform, t.value);

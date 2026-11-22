@@ -77,6 +77,11 @@ def selftest() -> int:
         b = ai.get_bio()
         assert b is not None, "artmodellen (BioCLIP) saknas"
         print("Artmodell:", len(b.species), "arter, topp:", b.top(b.embed([img]), 1)[0][0][0])
+        from . import cliptext, photo
+        enc = cliptext.get()
+        assert enc is not None, "CLIP-textdelen (sökning) saknas"
+        print("Textsökning:", enc.embed("a photo of an octopus").shape, "| bildstöd:", photo.PIL_OK, "| HEIC:", photo.HEIF)
+        assert photo.PIL_OK, "Pillow saknas (foton)"
     except Exception:  # noqa: BLE001
         traceback.print_exc()
         ok = False

@@ -203,7 +203,19 @@ def localize(proposal, lang, clips_species=None, free=None):
             sp = (clips_species or {}).get(t["text"])
             t["text"] = species_name(sp, lang) if sp else tr(t["text"])
         shots.append(t)
-    return {"title": title, "subtitle": sub, "shots": shots}
+    # reklamtexter (krok, säljpunkter, uppmaning) och sångtext: användarens egna, översatta om möjligt
+    pr = dict(proposal.get("promo") or {})
+    po = over.get("promo") or {}
+    promo = {
+        "hook": po.get("hook") or tr(pr.get("hook") or ""),
+        "points": po.get("points") or [tr(x) for x in (pr.get("points") or []) if x],
+        "cta": po.get("cta") or tr(pr.get("cta") or ""),
+        "url": pr.get("url") or "",
+        "logo": pr.get("logo") or "",
+        "endcard": pr.get("endcard", True),
+    }
+    lyrics = over.get("lyrics") or (proposal.get("lyrics") or {}).get("lines") or []
+    return {"title": title, "subtitle": sub, "shots": shots, "promo": promo, "lyrics": lyrics}
 
 
 def free_texts(proposal, lang):
@@ -212,7 +224,9 @@ def free_texts(proposal, lang):
         return []
     eff = proposal.get("effects") or {}
     out = []
-    cands = [eff.get("title")] + [(s.get("text") or {}).get("text") for s in proposal.get("shots", [])]
+    pr = proposal.get("promo") or {}
+    cands = ([eff.get("title")] + [(s.get("text") or {}).get("text") for s in proposal.get("shots", [])]
+             + [pr.get("hook"), pr.get("cta")] + list(pr.get("points") or []))
     for t in cands:
         if t and not fixed(t, lang):
             out.append(t)

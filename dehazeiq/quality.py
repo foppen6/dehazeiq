@@ -47,7 +47,7 @@ def assess(clips):
         reasons = []
         if a.get("best_sharp", 1) < CLIP_MIN_SHARP:
             reasons.append("Suddigt")
-        elif (median_focus and len(analyzed) >= 3 and a.get("best_focus") is not None
+        elif (median_focus and len(analyzed) >= 3 and a.get("best_focus") is not None and not c.get("is_photo")
               and a["best_focus"] < CLIP_REL_FOCUS * median_focus):
             reasons.append("Suddigt")
         if a.get("best_expo", 1) < CLIP_MIN_EXPO:
@@ -57,7 +57,8 @@ def assess(clips):
         weak_loc = a.get("subject_conf") is not None and a["subject_conf"] < CLIP_MIN_SUBJECT_CONF
         if weak_loc or (a.get("best_interest") is not None and a["best_interest"] < CLIP_MIN_INTEREST):
             reasons.append("Inget tydligt motiv")
-        if not reasons and len(analyzed) >= 4 and combined(a) < CLIP_REL_QUALITY * median_q:
+        # foton har användaren valt själv: jämförs inte med videoklippen
+        if not reasons and len(analyzed) >= 4 and not c.get("is_photo") and combined(a) < CLIP_REL_QUALITY * median_q:
             reasons.append("Svagare än resten")
         c["auto_excluded"] = bool(reasons)
         c["reasons"] = reasons
