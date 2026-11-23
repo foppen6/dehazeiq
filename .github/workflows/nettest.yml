@@ -1,5 +1,7 @@
 name: nettest
-on: workflow_dispatch
+on:
+  push:
+    branches: [nettest]
 jobs:
   t:
     runs-on: ubuntu-latest
