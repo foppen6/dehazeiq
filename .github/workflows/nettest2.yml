@@ -4,7 +4,7 @@ on:
     branches: [nettest2]
 jobs:
   t:
-    runs-on: macos-14
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
