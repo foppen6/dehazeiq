@@ -43,7 +43,7 @@ a = Analysis(
     pathex=[ROOT],
     binaries=binaries,
     datas=datas,
-    hiddenimports=["dehazeiq.app", "dehazeiq.launcher", "PIL.Image", "PIL.ImageOps", "pillow_heif"],
+    hiddenimports=["dehazeiq.app", "dehazeiq.launcher", "PIL.Image", "PIL.ImageOps", "pillow_heif", "certifi"],
     excludes=["torch", "open_clip", "tkinter", "matplotlib", "IPython"],
     noarchive=False,
 )

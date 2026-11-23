@@ -20,6 +20,10 @@ import sys
 import threading
 import time
 import urllib.request
+
+from . import net
+
+net.setup()
 from pathlib import Path
 
 import cv2

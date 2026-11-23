@@ -82,6 +82,14 @@ def selftest() -> int:
         assert enc is not None, "CLIP-textdelen (sökning) saknas"
         print("Textsökning:", enc.embed("a photo of an octopus").shape, "| bildstöd:", photo.PIL_OK, "| HEIC:", photo.HEIF)
         assert photo.PIL_OK, "Pillow saknas (foton)"
+        # HTTPS med appens certifikat (musik och Qwen-nedladdning) och Openverse-sökningen
+        from . import musiclib
+        try:
+            r = musiclib.openverse_search("calm ocean", commercial=True)
+            print("Openverse:", len(r["results"]), "träffar, t.ex.", (r["results"] or [{}])[0].get("title"))
+        except Exception as e:  # noqa: BLE001
+            assert "CERTIFICATE" not in str(e), f"HTTPS-certifikat fungerar inte: {e}"
+            print("Openverse kunde inte nås:", e)
     except Exception:  # noqa: BLE001
         traceback.print_exc()
         ok = False
@@ -179,6 +187,8 @@ def _show_error(message: str):
 
 
 def main(argv=None) -> int:
+    from . import net
+    net.setup()
     ap = argparse.ArgumentParser(prog="DeHazeIQ")
     ap.add_argument("--port", type=int, default=int(os.environ.get("DEHAZEIQ_PORT", 8765)))
     ap.add_argument("--lan", action="store_true")

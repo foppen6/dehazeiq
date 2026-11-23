@@ -20,6 +20,10 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+
+from . import net
+
+net.setup()
 from pathlib import Path
 
 import numpy as np
@@ -447,7 +451,7 @@ def starter_pack(progress=None, per_query=2):
         try:
             res = openverse_search(q, commercial=True, length="medium")["results"]
         except Exception as e:  # noqa: BLE001
-            errors.append(f"{q}: {e.__class__.__name__}")
+            errors.append(f"{q}: {str(e)[:120] or e.__class__.__name__}")
             continue
         n = 0
         for r in res:
@@ -470,7 +474,8 @@ def starter_pack(progress=None, per_query=2):
     if got:
         scan(lambda f, m: progress(0.6 + 0.4 * f, m) if progress else None)
     if not got:
-        raise RuntimeError("Kunde inte hämta gratis musik. Kontrollera internetanslutningen och försök igen under Musik.")
+        why = f" ({errors[0]})" if errors else ""
+        raise RuntimeError(f"Kunde inte hämta gratis musik{why}. Kontrollera internetanslutningen och försök igen under Musik.")
     return {"downloaded": len(got)}
 
 
