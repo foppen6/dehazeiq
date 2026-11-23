@@ -470,7 +470,9 @@ def download(item):
     if ext not in AUDIO_EXT:
         ft = "." + (item.get("filetype") or "mp3").lower().strip(".")
         ext = ft if ft in AUDIO_EXT else ".mp3"  # Jamendo anger t.ex. "mp32"
-    safe = re.sub(r"[^\w\- ]", "", f"{item.get('artist', '')} - {item.get('title', '')}").strip(" -")[:90] or "låt"
+    title, artist = item.get("title") or "", item.get("artist") or ""
+    name = title if (not artist or title.lower().startswith(artist.lower())) else f"{artist} - {title}"
+    safe = re.sub(r"[^\w\- ]", "", name).strip(" -")[:90] or "låt"
     dst = folder / f"{safe}{ext}"
     req = urllib.request.Request(url, headers={"User-Agent": UA, **(item.get("headers") or {})})
     tmp = dst.with_suffix(dst.suffix + ".part")
