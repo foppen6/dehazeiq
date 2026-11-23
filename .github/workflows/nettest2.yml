@@ -1,0 +1,32 @@
+name: nettest2
+on:
+  push:
+    branches: [nettest2]
+jobs:
+  t:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install numpy certifi
+      - run: |
+          export DEHAZEIQ_HOME=$RUNNER_TEMP/dh
+          python - <<'PY'
+          import types, sys
+          from dehazeiq import musiclib
+          r = musiclib.commons_search("Kevin MacLeod calm", commercial=True)
+          print("commons", r["count"], [(x["title"][:30], x["license"]["code"], x["duration"], x["filetype"]) for x in r["results"][:6]])
+          try:
+              r = musiclib.openverse_search("calm", commercial=True)
+              print("openverse", r["count"], [(x["title"][:30], x["license"]["code"], x["duration"]) for x in r["results"][:4]])
+          except Exception as e:
+              print("openverse error", e)
+          # nedladdning utan analys
+          import dehazeiq.musiclib as m
+          m.scan = lambda progress=None: {"tracks": 0}
+          print(m.starter_pack(per_query=1))
+          import os
+          for root, d, f in os.walk(m.DOWNLOAD_DIR):
+              for x in f: print(root[-30:], x, os.path.getsize(os.path.join(root, x)))
+          PY
