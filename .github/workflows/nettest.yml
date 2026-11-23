@@ -1,0 +1,17 @@
+name: nettest
+on: workflow_dispatch
+jobs:
+  t:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          UA="DeHazeIQ (+https://github.com/foppen6/dehazeiq)"
+          for q in "q=calm&category=music&license_type=commercial,modification&page_size=5" "q=calm&category=music&page_size=5" "q=ocean&page_size=5" "q=ambient&license=cc0,by&page_size=5" "q=calm%20ocean&license_type=commercial,modification&page_size=5&filter_dead=true&category=music"; do
+            echo "== $q"; curl -s -A "$UA" "https://api.openverse.org/v1/audio/?$q" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d.get('result_count'),[ (r['title'][:30],r['license'],r.get('category'),r.get('duration'),r['source'],r['url'][:70]) for r in d.get('results',[])][:5]) if 'results' in d else print(d)"; done
+          echo "== commons"
+          curl -s -A "$UA" "https://commons.wikimedia.org/w/api.php?action=query&format=json&generator=search&gsrnamespace=6&gsrlimit=8&gsrsearch=filetype%3Aaudio%20calm%20music&prop=imageinfo&iiprop=url%7Cextmetadata%7Csize%7Cmime&iiextmetadatafilter=LicenseShortName%7CArtist%7CObjectName" | python3 -c "
+          import sys,json;d=json.load(sys.stdin)
+          for p in (d.get('query',{}).get('pages',{}) or {}).values():
+              ii=p['imageinfo'][0]; m=ii.get('extmetadata',{})
+              print(p['title'][:50], ii.get('mime'), ii.get('size'), m.get('LicenseShortName',{}).get('value'), ii.get('duration'), ii['url'][:80])"
+          curl -s -o /tmp/x -w "%{http_code} %{size_download}\n" -A "$UA" "https://api.openverse.org/v1/audio/?q=piano&page_size=1"
