@@ -510,9 +510,11 @@ class Handler(BaseHTTPRequestHandler):
                 raise ApiError("Skriv vad du letar efter")
             src = (q.get("source") or ["openverse"])[0]
             try:
+                com = (q.get("commercial") or ["0"])[0] == "1"
                 if src == "openverse":
-                    return self._json(musiclib.openverse_search(text, (q.get("commercial") or ["0"])[0] == "1",
-                                                                (q.get("length") or [None])[0]))
+                    return self._json(musiclib.openverse_search(text, com, (q.get("length") or [None])[0]))
+                if src == "commons":
+                    return self._json(musiclib.commons_search(text, com))
                 return self._json(musiclib.custom_search(src, text))
             except ValueError as e:
                 raise ApiError(str(e))

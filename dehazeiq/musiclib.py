@@ -67,8 +67,11 @@ def license_from_code(code, attribution="", url="", source=""):
                 "needs_credit": False, "commercial": True, "source": source}
     if code.startswith("by"):
         nc = "nc" in code
-        return {"kind": "private" if nc else "cc", "code": code, "attribution": attribution, "url": url,
-                "needs_credit": True, "commercial": not nc, "source": source}
+        # ND får inte bearbetas (att lägga musik i en film räknas som bearbetning), SA kräver att
+        # filmen får samma licens – båda passar dåligt i reklam
+        return {"kind": "private" if nc or "nd" in code else "cc", "code": code, "attribution": attribution,
+                "url": url, "needs_credit": True, "commercial": not nc and "nd" not in code and "sa" not in code,
+                "source": source}
     return {"kind": "unknown", "code": code, "attribution": attribution, "url": url,
             "needs_credit": bool(attribution), "commercial": None, "source": source}
 
@@ -307,22 +310,77 @@ def _get_json(url, headers=None, timeout=20):
 
 
 def openverse_search(q, commercial=False, length=None, page=1):
-    params = {"q": q, "category": "music", "page_size": 20, "page": page, "filter_dead": "true",
+    params = {"q": q, "category": "music", "page_size": 20, "page": page,
               "license_type": "commercial,modification" if commercial else "modification"}
     if length in ("short", "medium", "long"):
         params["length"] = length
-    data = _get_json(OPENVERSE + "?" + urllib.parse.urlencode(params))
+    data = None
+    for attempt in range(3):  # Openverse är ibland överbelastad: försök igen en stund senare
+        try:
+            data = _get_json(OPENVERSE + "?" + urllib.parse.urlencode(params), timeout=40)
+            if "results" in data:
+                break
+        except Exception:  # noqa: BLE001
+            if attempt == 2:
+                raise
+        time.sleep(2 + 3 * attempt)
+    data = data or {}
     out = []
     for r in data.get("results") or []:
         if not r.get("url"):
             continue
         lic = license_from_code(r.get("license"), r.get("attribution") or "", r.get("license_url") or "",
                                 "Openverse · " + str(r.get("source") or r.get("provider") or ""))
+        if commercial and not lic.get("commercial"):
+            continue
         out.append({"id": r.get("id"), "title": r.get("title") or "Utan titel", "artist": r.get("creator") or "",
                     "url": r["url"], "duration": round((r.get("duration") or 0) / 1000.0, 1),
                     "filetype": r.get("filetype") or "", "license": lic,
                     "page": r.get("foreign_landing_url") or "", "source": "openverse"})
     return {"results": out, "count": data.get("result_count", len(out))}
+
+
+# ---------- Wikimedia Commons (gratis, stabil, ingen nyckel) ----------
+
+COMMONS = "https://commons.wikimedia.org/w/api.php"
+
+
+def _commons_license(short):
+    t = (short or "").lower()
+    if "cc0" in t or "public domain" in t or t.startswith("pd"):
+        return "cc0"
+    m = re.search(r"cc[ -]?(by(?:-[a-z]{2})*)", t)
+    return m.group(1) if m else ""
+
+
+def commons_search(q, commercial=False, limit=30):
+    params = {"action": "query", "format": "json", "generator": "search", "gsrnamespace": 6,
+              "gsrlimit": limit, "gsrsearch": f"filetype:audio {q}", "prop": "imageinfo",
+              "iiprop": "url|extmetadata|size|mime", "iiextmetadatafilter": "LicenseShortName|Artist|ObjectName|LicenseUrl"}
+    data = _get_json(COMMONS + "?" + urllib.parse.urlencode(params), timeout=30)
+    out = []
+    for pg in sorted((data.get("query") or {}).get("pages", {}).values(), key=lambda p: p.get("index", 0)):
+        ii = (pg.get("imageinfo") or [{}])[0]
+        meta = ii.get("extmetadata") or {}
+        dur = float(ii.get("duration") or 0)
+        if not ii.get("url") or (dur and not 30 <= dur <= 600) or (ii.get("size") or 0) > 40_000_000:
+            continue
+        code = _commons_license((meta.get("LicenseShortName") or {}).get("value"))
+        if not code:
+            continue
+        artist = re.sub(r"<[^>]+>", "", (meta.get("Artist") or {}).get("value") or "").strip()[:80]
+        title = re.sub(r"^File:|\.[a-z0-9]+$", "", pg.get("title") or "").strip()
+        title = re.sub(r"\s*\(ISRC [^)]*\)", "", title)
+        lic = license_from_code(code, f"\u201d{title}\u201d – {artist or 'okänd'} ({code.upper()}), Wikimedia Commons",
+                                (meta.get("LicenseUrl") or {}).get("value") or "", "Wikimedia Commons")
+        if commercial and not lic.get("commercial"):
+            continue
+        ext = Path(urllib.parse.urlparse(ii["url"]).path).suffix.lower().lstrip(".") or "ogg"
+        out.append({"id": str(pg.get("pageid")), "title": title, "artist": artist, "url": ii["url"],
+                    "duration": round(dur, 1), "filetype": ext, "license": lic,
+                    "page": f"https://commons.wikimedia.org/wiki/{urllib.parse.quote((pg.get('title') or '').replace(' ', '_'))}",
+                    "source": "commons"})
+    return {"results": out, "count": len(out)}
 
 
 # ---------- egna tjänster (JSON-beskrivning) ----------
@@ -410,7 +468,8 @@ def download(item):
     folder.mkdir(parents=True, exist_ok=True)
     ext = Path(urllib.parse.urlparse(url).path).suffix.lower()
     if ext not in AUDIO_EXT:
-        ext = "." + (item.get("filetype") or "mp3").lower().strip(".")
+        ft = "." + (item.get("filetype") or "mp3").lower().strip(".")
+        ext = ft if ft in AUDIO_EXT else ".mp3"  # Jamendo anger t.ex. "mp32"
     safe = re.sub(r"[^\w\- ]", "", f"{item.get('artist', '')} - {item.get('title', '')}").strip(" -")[:90] or "låt"
     dst = folder / f"{safe}{ext}"
     req = urllib.request.Request(url, headers={"User-Agent": UA, **(item.get("headers") or {})})
@@ -436,8 +495,8 @@ def download(item):
 # ---------- startpaket: gratis musik direkt från början ----------
 
 STARTER = [  # (sökord, karaktär) – några låtar av varje sort så att AI:n har något att välja mellan
-    ("calm ambient", "lugn"), ("underwater ambient", "lugn"), ("acoustic guitar", "mellan"),
-    ("cinematic", "mellan"), ("upbeat", "energisk"), ("electronic dance", "energisk"),
+    ("Kevin MacLeod calm", "lugn"), ("ambient music relaxing", "lugn"), ("acoustic guitar instrumental", "mellan"),
+    ("cinematic orchestral", "mellan"), ("Kevin MacLeod upbeat", "energisk"), ("electronic dance instrumental", "energisk"),
 ]
 
 
@@ -448,16 +507,21 @@ def starter_pack(progress=None, per_query=2):
     for k, (q, _) in enumerate(STARTER):
         if progress:
             progress(k / len(STARTER) * 0.6, f"Hämtar gratis musik: {q}")
-        try:
-            res = openverse_search(q, commercial=True, length="medium")["results"]
-        except Exception as e:  # noqa: BLE001
-            errors.append(f"{q}: {str(e)[:120] or e.__class__.__name__}")
-            continue
+        res = []
+        for fn in (commons_search, openverse_search):  # Commons först (stabil), Openverse som reserv
+            try:
+                res = fn(q, commercial=True)["results"]
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"{q}: {str(e)[:120] or e.__class__.__name__}")
+                continue
+            res = [r for r in res if (r["license"] or {}).get("code") in ("cc0", "by", "pdm")]
+            if res:
+                break
         n = 0
         for r in res:
             if n >= per_query or r["id"] in seen or not r["url"].startswith("https://"):
                 continue
-            if r["duration"] and not (40 <= r["duration"] <= 420):
+            if r["duration"] and not (45 <= r["duration"] <= 360):
                 continue
             try:
                 got.append(download(dict(r, source="Gratis startpaket")))

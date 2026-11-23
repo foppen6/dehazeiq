@@ -810,13 +810,13 @@ function viewMusic() {
         <button class="btn primary" data-act="music-starter" ${busy ? "disabled" : ""}>${busy ? "Hämtar …" : "Hämta gratis musik"}</button></div>`}</div></section>
     <section class="stack" style="gap:12px"><h2>Hämta gratis musik</h2>
       <div class="searchbar"><span class="sico">${icon("search", 17)}</span><input class="field" id="mq" type="search" value="${esc(sr ? sr.q : "")}" placeholder="T.ex. calm ocean, ambient piano, upbeat travel, cinematic" aria-label="Sök musik">
-        <select class="selfield" id="msrc" style="width:auto">${["openverse", ...(m.sources || [])].map((x) => `<option value="${esc(x)}" ${sr && sr.src === x ? "selected" : ""}>${x === "openverse" ? "Openverse (gratis)" : esc(x)}</option>`).join("")}</select>
+        <select class="selfield" id="msrc" style="width:auto">${["commons", "openverse", ...(m.sources || [])].map((x) => `<option value="${esc(x)}" ${sr && sr.src === x ? "selected" : ""}>${x === "openverse" ? "Openverse (gratis)" : x === "commons" ? "Wikimedia Commons (gratis)" : esc(x)}</option>`).join("")}</select>
         <button class="btn" data-act="music-search">Sök</button></div>
       <label class="row" style="gap:10px;font-size:14px"><input type="checkbox" id="mcom" ${sr && sr.commercial ? "checked" : ""} style="width:18px;height:18px;accent-color:var(--accent)">Bara musik som får användas i reklam</label>
       ${sr && sr.loading ? '<span class="muted">Söker …</span>' : ""}
       ${sr && sr.results && !sr.results.length ? '<span class="muted">Inga träffar. Sök gärna på engelska.</span>' : ""}
       <div class="mlist">${results}</div>
-      <p class="muted" style="margin:0;font-size:12px">Openverse samlar musik med öppen licens från bland annat Jamendo, Freesound och Wikimedia Commons. Musik med CC BY kräver att upphovspersonen namnges – det gör programmet automatiskt i slutet av filmen och i en textfil vid export.</p></section>
+      <p class="muted" style="margin:0;font-size:12px">Wikimedia Commons och Openverse (Jamendo, Freesound m.fl.) har musik med öppen licens. Sök gärna på engelska, t.ex. "Kevin MacLeod". Musik med CC BY kräver att upphovspersonen namnges – det gör programmet automatiskt i slutet av filmen och i en textfil vid export.</p></section>
     <section class="box"><h2 style="font-size:14px">Andra musiktjänster</h2><p style="margin:0">Har du Epidemic Sound, Artlist eller någon annan tjänst: ladda ner låtarna till en av mapparna ovan så används de som allt annat. Tjänster med eget API kan läggas till med en liten beskrivningsfil (adress och nyckel) i mappen <code>music_sources</code> i DeHazeIQ:s datamapp – se exempelfilen där.</p></section>
   </main>`;
 }
@@ -828,7 +828,7 @@ async function musicPost(verb, body) {
 async function musicSearch() {
   const q = ($("#mq") || {}).value || "";
   if (!q.trim()) return;
-  const src = ($("#msrc") || {}).value || "openverse";
+  const src = ($("#msrc") || {}).value || "commons";
   const commercial = !!($("#mcom") || {}).checked;
   state.msearch = { q, src, commercial, loading: true };
   render();
