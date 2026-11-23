@@ -108,6 +108,7 @@ function icon(name, size = 18) {
     pen: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>',
     trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
     search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+    layers: '<path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/>',
     wifi: '<path d="M2 8.8a15 15 0 0 1 20 0M5 12.6a10 10 0 0 1 14 0M8.5 16.3a5 5 0 0 1 7 0"/><circle cx="12" cy="19.5" r=".8" fill="currentColor"/>',
   }[name] || "";
   return `<svg aria-hidden="true" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
@@ -433,7 +434,7 @@ async function generate() {
   generating = true; render();
   try {
     const s = settings();
-    const r = await api("POST", `/api/p/${state.pid}/generate`, { style: s.style, format: s.format, length: s.length, theme: state.theme });
+    const r = await api("POST", `/api/p/${state.pid}/generate`, { style: s.style, format: s.format, length: s.length, theme: state.theme, variety: state.variety || "focus" });
     P().proposals = r.proposals.concat(P().proposals || []);
     state.shown = r.proposals.map((p) => p.id);
     saveShown();
@@ -739,6 +740,13 @@ function viewAnalyze() {
   return main + panel;
 }
 
+function varietyToggle(key = "variety") {
+  const v = (key === "variety" ? state.variety : (state.setup || {}).variety) || (key === "variety" ? "focus" : "");
+  const opts = key === "variety" ? [] : [["", "AI avgör per filmtyp"]];
+  return `<div class="chips" role="radiogroup">${opts.concat([["focus", "Olika filmer – olika fokus"], ["variants", "Varianter av samma film"]]).map(([k, l]) =>
+    `<button class="chip" data-variety="${k}" data-vkey="${key}" aria-pressed="${v === k}" title="${k === "focus" ? "Varje förslag handlar om något eget: ett djur, detaljerna, ett dyk, rörelse …" : k === "variants" ? "Samma berättelse och i stort sett samma klipp – olika stil, tempo, färg och musik" : ""}">${l}</button>`).join("")}</div>`;
+}
+
 /* ---------- sök i materialet och beskriv filmen med egna ord ---------- */
 function searchBar(sr) {
   if (!(state.info && state.info.search)) return "";
@@ -876,6 +884,7 @@ function propCard(p, idx) {
                   <button class="btn" data-edit="${p.id}">Redigera</button><button class="btn" data-export="${p.id}">Exportera</button>`}
         <button class="btn icon" data-regen="${p.id}" aria-label="Generera om detta förslag" title="Generera om">${icon("redo", 17)}</button>
       </div>
+      <button class="btn small" data-variants="${p.id}" title="Samma berättelse och i stort sett samma klipp – andra stilar, tempo och färger">${icon("layers", 14)}Fler varianter av den här filmen</button>
     </div>
   </article>`;
 }
@@ -929,6 +938,7 @@ function viewProposals() {
     <details class="more" ${state.moreOpen !== false ? "open" : ""} data-more>
       <summary>Stilar, berättelse och effekter för "Generera nya förslag"</summary>
       <div class="stack" style="gap:18px;padding-top:14px">
+        <div class="stack" style="gap:8px"><b>Vad ska förslagen vara?</b>${varietyToggle()}</div>
         <div class="stack" style="gap:8px"><b>Berättelse</b><div class="chips">${themeSel}</div></div>
         <div class="stack" style="gap:10px"><b>Stil</b>${styleSel}</div>
         <div class="stack" style="gap:8px"><b>Effekter <span class="muted" style="font-weight:400">· AI lägger till där det passar, slå av det du inte vill ha</span></b><div class="chips">${fxSel}</div></div>
@@ -1028,6 +1038,19 @@ document.addEventListener("click", async (ev) => {
   if (t.tagName === "SUMMARY") { state.moreOpen = !t.parentElement.open; return undefined; }
   if (d.stepLink) { ev.preventDefault(); state.view = d.stepLink; return render(); }
   if (d.edtext) { ev.preventDefault(); openEditor(d.edtext); state.ed.tab = "text"; return render(); }
+  if (d.variety !== undefined) {
+    if (d.vkey === "setup") state.setup.variety = d.variety; else state.variety = d.variety;
+    return render();
+  }
+  if (d.variants) {
+    try {
+      await api("POST", `/api/p/${state.pid}/proposal/${d.variants}/variants`, { count: 3 });
+      state.expectJob = true; loadQueue();
+      toast("Gör tre varianter i bakgrunden – de dyker upp bland förslagen.", true);
+      pollJob();
+    } catch (e) { fail(e); }
+    return undefined;
+  }
   if (d.step) { state.view = d.step; return render(); }
   if (d.proj) {
     await loadProject(d.proj);

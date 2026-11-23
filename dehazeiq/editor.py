@@ -151,8 +151,12 @@ def apply(project, prop, op, args):
         shots.pop(i)
     elif op == "move":
         i, s = shot_at()
-        j = max(0, min(len(shots) - 1, i + int(args.get("dir", 1))))
-        shots[i], shots[j] = shots[j], shots[i]
+        if args.get("to") is not None:  # dra och släpp: flytta klippet till en ny plats
+            j = max(0, min(len(shots) - 1, int(args["to"])))
+            shots.insert(j, shots.pop(i))
+        else:
+            j = max(0, min(len(shots) - 1, i + int(args.get("dir", 1))))
+            shots[i], shots[j] = shots[j], shots[i]
     elif op == "center":
         i, s = shot_at()
         s["cx"] = round(float(min(1.0, max(0.0, float(args.get("cx", 0.5))))), 3)
@@ -394,9 +398,70 @@ def _themes_by_kind(project, fmt):
     return th, by
 
 
+VARIETY_DEFAULT = {"auto": "focus", "reels": "focus", "animal": "focus", "prompt": "variants",
+                   "dive": "variants", "trip": "variants", "promo": "variants", "trailer": "variants",
+                   "musicvideo": "variants"}
+KIND_STYLES = {
+    "auto": ["cinematic", "documentary", "playful", "action", "calm"],
+    "reels": ["playful", "action", "cinematic", "vlog"],
+    "animal": ["documentary", "playful", "cinematic", "action"],
+    "dive": ["documentary", "cinematic", "calm", "action"],
+    "trip": ["cinematic", "documentary", "vlog", "action"],
+    "prompt": ["cinematic", "documentary", "playful"],
+    "promo": PROMO_STYLES, "musicvideo": MV_STYLES, "trailer": ["trailer"],
+}
+
+
+def focus_themes(project, fmt, kind, avoid=()):
+    """Olika fokus: teman med olika innehåll, varierade mellan sorter (djur, detaljer, dyk, rörelse …)."""
+    th, by = _themes_by_kind(project, fmt)
+    big = lambda ts: sorted([t for t in ts if t.get("count", 3) >= 2], key=lambda t: -t.get("score", 0))  # noqa: E731
+    if kind == "animal":
+        order = big(by.get("subject", [])) + big(by.get("species", [])) + big(by.get("fun", [])) + big(by.get("detail", []))
+    elif kind == "dive":
+        sess = sorted([t for t in by.get("session", []) if t.get("count", 3) >= 3], key=lambda t: -t.get("count", 0))
+        order = sess + [t for k in ("subject", "detail", "calm", "motion", "fun") for t in big(by.get(k, []))]
+    else:
+        # en av varje sort först (bästa), sedan resten – olika filmer, inte samma film i olika färger
+        kinds = sorted(by, key=lambda k: -max(t.get("score", 0) for t in by[k]))
+        order = [sorted(by[k], key=lambda t: -t.get("score", 0))[0] for k in kinds]
+        order += [t for k in kinds for t in sorted(by[k], key=lambda t: -t.get("score", 0))[1:]]
+    order = [t for t in order if t["id"] not in avoid] + [t for t in order if t["id"] in avoid]
+    seen, out = set(), []
+    for t in order:
+        if t["id"] not in seen:
+            seen.add(t["id"])
+            out.append(t)
+    return out
+
+
+def variants_of(project, prop, count=3, music=None):
+    """Fler varianter av samma film: samma tema och i stort sett samma klipp, andra stilar."""
+    pf = PLATFORMS.get(prop.get("platform") or "", None)
+    fmt = prop.get("format") or (pf or PLATFORMS["reels"])["format"]
+    length = float(prop.get("target_length") or prop.get("length") or 30)
+    pool = KIND_STYLES.get(prop.get("plan") or "", None) or ["cinematic", "documentary", "playful", "calm", "action",
+                                                              "vintage", "widescreen", "vlog"]
+    styles = [x for x in pool if x != prop.get("style")] or pool
+    favs = list(dict.fromkeys(s["clip_id"] for s in prop.get("shots", [])))
+    out = []
+    for k in range(count):
+        p = generator.generate(project, styles[k % len(styles)], fmt, length, None, music, favs, prop.get("theme"))
+        for key in ("plan", "plan_label", "platform", "promo", "lyrics", "prompt"):
+            if prop.get(key) is not None:
+                p[key] = prop[key]
+        if prop.get("title") and ("promo" in prop or prop.get("prompt")):
+            p["title"] = prop["title"]
+        p["variant_of"] = prop["id"]
+        out.append(p)
+    return out
+
+
 def plan_proposals(project, plan, music=None, favorites=(), avoid=()):
-    """Gör förslag för en filmtyp (dykfilm, resefilm, reels, djurporträtt eller AI:ns val)."""
+    """Gör förslag för en filmtyp (dykfilm, resefilm, reels, djurporträtt eller AI:ns val).
+    plan["variety"]: "focus" = olika filmer med olika fokus, "variants" = varianter av samma film."""
     kind = plan.get("type", "auto")
+    variety = plan.get("variety") or VARIETY_DEFAULT.get(kind, "focus")
     ft = FILM_TYPES.get(kind, FILM_TYPES["auto"])
     platform = plan.get("platform") or ft["platform"]
     pf = PLATFORMS.get(platform, PLATFORMS["reels"])
@@ -412,7 +477,40 @@ def plan_proposals(project, plan, music=None, favorites=(), avoid=()):
     query = (plan.get("query") or "").strip()
     q_theme = generator.search_theme(query, plan.get("title")) if query else None
     styles = [x for x in (plan.get("styles") or []) if x in STYLES]
-    if kind == "promo":
+    sty = styles or KIND_STYLES.get(kind, KIND_STYLES["auto"])
+    if variety == "variants" and kind in ("auto", "reels", "animal", "dive", "trip"):
+        # samma film i flera varianter: ett tema, samma klipp, olika stilar (tempo, färg, musik)
+        th, by = _themes_by_kind(project, fmt)
+        if q_theme:
+            theme = q_theme
+        elif kind == "dive" and by.get("session"):
+            theme = sorted(by["session"], key=lambda t: -t.get("count", 0))[0]["id"]
+        elif kind == "animal" and by.get("subject"):
+            theme = sorted(by["subject"], key=lambda t: -t.get("score", 0))[0]["id"]
+        elif kind == "trip" or not th:
+            theme = "trip"
+        else:
+            theme = focus_themes(project, fmt, kind, avoid)[0]["id"]
+        add(theme, sty[0])
+        favs = list(dict.fromkeys(list(favorites) + [s_["clip_id"] for s_ in out[0]["shots"]]))
+        for k in range(1, count):
+            p = generator.generate(project, sty[k % len(sty)], fmt, length, None, music, favs, theme)
+            out.append(p)
+        kind_done = True
+    elif variety == "focus" and kind not in ("auto", "reels", "animal") and not q_theme:
+        # olika filmer: varje variant får eget fokus (promo, musikvideo, trailer, dyk, resa)
+        fts = focus_themes(project, fmt, kind, avoid)
+        for k in range(count):
+            theme = fts[k % len(fts)]["id"] if fts else None
+            add(theme, sty[k % len(sty)])
+            if kind in ("promo", "trailer"):
+                out[-1]["promo"] = {}
+        kind_done = True
+    else:
+        kind_done = False
+    if kind_done:
+        pass
+    elif kind == "promo":
         for k in range(count):
             st = (styles or PROMO_STYLES)[k % len(styles or PROMO_STYLES)]
             add(q_theme, st)

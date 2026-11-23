@@ -284,6 +284,8 @@ def _clean_plans(plans):
         for k in ("query", "title", "prompt"):
             if isinstance(pl.get(k), str) and pl[k].strip():
                 item[k] = pl[k].strip()[:200]
+        if pl.get("variety") in ("focus", "variants"):
+            item["variety"] = pl["variety"]
         if isinstance(pl.get("styles"), list):
             item["styles"] = [x for x in pl["styles"] if x in STYLES][:6]
         out.append(item)
@@ -785,6 +787,11 @@ class Handler(BaseHTTPRequestHandler):
             length = max(5.0, min(length, 600.0))
             favs = [c["id"] for c in p.clips() if c.get("favorite") and c.get("analysis")]
             theme = body.get("theme") or None
+            if not theme and body.get("variety") == "variants":
+                # varianter av samma film: AI väljer EN berättelse, sedan tre stilar av den
+                fts = editor.focus_themes(p, fmt, "auto",
+                                          [x.get("theme") for x in (p.data.get("proposals") or [])[:3]])
+                theme = fts[0]["id"] if fts else "trip"
             try:
                 props = pipeline.generate(p.id, style, fmt, length, favs, theme)
             except RuntimeError as e:
@@ -799,6 +806,12 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({"proposal": pipeline.regenerate_one(p.id, prop_id)})
                 except RuntimeError as e:
                     raise ApiError(str(e))
+            if verb == "variants":
+                prop = p.proposal(prop_id)
+                n = max(1, min(6, int(body.get("count") or 3)))
+                JOBS.start(p.id, f"variants:{prop_id}", pipeline.make_variants, p.id, prop_id, n,
+                           label=f"Varianter av {prop.get('title') or prop['style_label']}", project_name=p.data["name"])
+                return self._json({"ok": True})
             if verb == "render":
                 res = body.get("resolution", "preview")
                 if res not in ("preview", "720p", "1080p", "4k"):

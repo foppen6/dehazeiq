@@ -238,6 +238,23 @@ def generate_plans(progress, pid, plans, render_previews=False):
     return ids
 
 
+def make_variants(progress, pid, prop_id, count=3, render_previews=True):
+    """Fler varianter av ett förslag: samma tema och klipp, andra stilar."""
+    from . import editor
+    proj = Project(pid)
+    prop = proj.proposal(prop_id)
+    if not prop:
+        raise RuntimeError("Förslaget finns inte")
+    progress(0.05, "Gör varianter av samma film")
+    made = editor.variants_of(proj, prop, count, proj.data.get("music"))
+    Project(pid).add_proposals(made)
+    if render_previews:
+        for i, p in enumerate(made):
+            render_proposal(_stage(progress, 0.2 + 0.8 * i / len(made), 0.2 + 0.8 * (i + 1) / len(made),
+                                   f"Förhandsvisning {i + 1} av {len(made)}"), pid, p["id"], "preview")
+    return [p["id"] for p in made]
+
+
 def edit_proposal(pid, prop_id, op, args):
     from . import editor
     proj = Project(pid)

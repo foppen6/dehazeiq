@@ -484,9 +484,13 @@ def build(theme, cands, ctx_pool, n, select):
     if kind == "session":
         sid = int(theme["id"].split(":")[1])
         pool = [c for c in cands if c["session"] == sid] or cands
-        body = sorted(select(pool, max(1, n - 2)), key=lambda c: c["time"])
+        body = sorted(select(pool, max(1, n)), key=lambda c: c["time"])
         opener = _context_pick(ctx_pool, ("surface", "descent"), sid, before=body[0]["time"], exclude=body)
         closer = _context_pick(ctx_pool, ("surface",), sid, after=body[-1]["time"], exclude=body)
+        extra = (1 if opener else 0) + (1 if closer else 0)
+        if extra and len(body) > max(1, n - extra):  # plats för början och slut: släpp de svagaste
+            keep = sorted(body, key=lambda c: -c["util_n"])[:max(1, n - extra)]
+            body = sorted(keep, key=lambda c: c["time"])
         return _dedupe(([opener] if opener else []) + body + ([closer] if closer else []))
 
     if kind == "detail":

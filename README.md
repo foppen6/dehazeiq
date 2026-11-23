@@ -123,6 +123,13 @@ liknande sekvens som AI:n föreslår, flytta och ta bort. Fliken **Färg** har u
 svartvitt, sepia, film, varm, kall och livlig) med styrka, samt exponering, kontrast, mättnad,
 temperatur, nyans, skärpa och vinjett – för hela filmen eller ett klipp, med före/efter. Fliken
 **Text** ändrar titeln, reklamtexter, logga och sångtext. Allt kan ångras.
+På tidslinjen dras klippen till ny plats, och verktygsraden ovanför flyttar och tar bort det valda
+klippet (även Delete, Alt+←/→ och Ctrl/Cmd+Z).
+
+**Olika filmer eller varianter:** när förslag skapas väljer man om de ska vara *olika filmer med
+olika fokus* (ett djur, detaljerna, ett dyk, rörelse …) eller *varianter av samma film* (samma
+berättelse och i stort sett samma klipp, med olika stil, tempo, färg och musik). Varje förslag har
+också knappen "Fler varianter av den här filmen".
 
 ## Stilar och övergångar
 

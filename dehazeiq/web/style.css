@@ -404,3 +404,7 @@ textarea.field { color: var(--text); height: auto; padding: 10px 12px; line-heig
 .ell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .linkbtn { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 0 2px; font: inherit; }
 .linkbtn:hover { color: var(--text); }
+.tltools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding-bottom: 8px; }
+.tlblock.dragging { opacity: .45; transform: scale(.96); }
+.tlblock.dropbefore { box-shadow: -4px 0 0 0 var(--accent); }
+.tlblock img { -webkit-user-drag: none; user-select: none; pointer-events: none; }

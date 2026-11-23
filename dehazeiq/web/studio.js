@@ -123,6 +123,7 @@ function viewSetup() {
     <div class="head"><h1>Vad vill du göra av materialet?</h1>
       <p class="lead">Välj en eller flera. AI:n ${isNew ? "analyserar först och " : ""}gör förslag av varje sort. Allt läggs i kön och körs i bakgrunden.</p></div>
     ${isNew ? "" : promptBar()}
+    <div class="stack" style="gap:8px"><b>Hur ska förslagen skilja sig åt?</b>${varietyToggle("setup")}</div>
     <div class="ftgrid">${cards}</div>
     ${opts ? `<section class="box stack" style="gap:14px">${opts}</section>` : ""}
     <section class="box" style="flex-direction:row;flex-wrap:wrap;align-items:center;gap:16px">
@@ -140,6 +141,7 @@ function setupPlans() {
   const su = state.setup;
   return Object.entries(su.plans).filter(([k, p]) => p.on && k !== "prompt").map(([k, p]) => ({
     type: k, platform: p.platform || filmTypes()[k].platform, length: p.length || null, count: p.count || null,
+    ...(su.variety ? { variety: su.variety } : {}),
   }));
 }
 
@@ -283,14 +285,21 @@ function edTimeline(p) {
   const blocks = p.shots.map((s, i) => {
     const fx = s.fx || {};
     const tags = [fx.speed > 1 ? "2×" : "", fx.speed && fx.speed < 1 ? "0,5×" : "", fx.freeze ? "Frys" : "", fx.zoom ? "Zoom" : "", fx.punch ? "Ryck" : "", fx.kenburns ? (fx.kenburns > 0 ? "Foto ↗" : "Foto ↙") : s.photo ? "Foto" : "", s.parent360 ? ({ planet: "Planet", ball: "Kula", whip: "360-svep", view: "360" }[(s.cam360 || {}).mode] || "360") : "", fx.roll ? "Roll" : "", s.grade ? "Färg" : "", s.manual_center ? "Flyttad" : ""].filter(Boolean);
-    return `<button class="tlblock ${i === state.ed.i ? "sel" : ""}" data-edshot="${i}" style="flex:${s.duration} 1 0" aria-label="Klipp ${i + 1}, ${dec(s.duration)} sekunder">
-      <img alt="" loading="lazy" src="${frameUrl(s.clip_id, s.src_start + Math.min(s.duration, 1.5), 160)}"><span class="tlnum num">${i + 1}</span><span class="tldur num">${dec(s.duration)} s</span>${tags.length ? `<span class="tltags">${tags.join(" · ")}</span>` : ""}</button>`;
+    return `<button class="tlblock ${i === state.ed.i ? "sel" : ""}" data-edshot="${i}" data-drag="${i}" style="flex:${s.duration} 1 0;touch-action:pan-y" aria-label="Klipp ${i + 1}, ${dec(s.duration)} sekunder. Dra för att flytta.">
+      <img alt="" loading="lazy" draggable="false" src="${frameUrl(s.clip_id, s.src_start + Math.min(s.duration, 1.5), 160)}"><span class="tlnum num">${i + 1}</span><span class="tldur num">${dec(s.duration)} s</span>${tags.length ? `<span class="tltags">${tags.join(" · ")}</span>` : ""}</button>`;
   }).join("");
   const title = (p.effects || {}).title;
   const trLabel = (state.info && state.info.transitions) || {};
   const textRow = p.shots.map((s, i) => `<span style="flex:${s.duration} 1 0;min-width:28px">${i === 0 && title ? `<span class="tltitle">${esc(title)}${s.text ? ` · ${esc(s.text.text)}` : ""}</span>` : s.text ? `<span class="tltitle" title="${esc(s.text.text)}">${esc(s.text.text)}</span>` : ""}</span>`).join("");
   const trRow = p.shots.map((s, i) => `<span style="flex:${s.duration} 1 0;min-width:28px;text-align:right;font-size:10px;color:${s.tr && s.tr !== "cut" ? "var(--accent)" : "var(--dim)"}">${i < p.shots.length - 1 ? esc(s.tr && s.tr !== "cut" ? trLabel[s.tr] || s.tr : "|") : ""}</span>`).join("");
+  const n = p.shots.length, i = state.ed.i;
   return `<section class="tl" id="edTimeline" aria-label="Tidslinje">
+    <div class="tltools">
+      <span class="muted" style="font-size:12px">Klipp ${i + 1} av ${n} · dra i klippen för att ändra ordning</span><span class="grow"></span>
+      <button class="btn small" data-edmove="-1" ${i <= 0 ? "disabled" : ""} title="Flytta åt vänster (Alt+←)">${svgi(ICO.left, 14)}Flytta</button>
+      <button class="btn small" data-edmove="1" ${i >= n - 1 ? "disabled" : ""} title="Flytta åt höger (Alt+→)">Flytta${svgi(ICO.right, 14)}</button>
+      <button class="btn small danger" data-act="ed-delete" ${n <= 1 ? "disabled" : ""} title="Ta bort klippet (Delete)">${icon("trash", 14)}Ta bort klipp</button>
+      <button class="btn small" data-act="ed-undo" title="Ångra (Ctrl/Cmd+Z)">Ångra</button></div>
     <div class="tltrack"><span class="tllab">Text</span><div class="tlrow">${textRow}</div></div>
     <div class="tltrack"><span class="tllab">Video</span><div class="tlrow">${blocks}</div></div>
     <div class="tltrack"><span class="tllab">Byte</span><div class="tlrow">${trRow}</div></div>
@@ -357,8 +366,7 @@ function edInspectorClip(p, s) {
         <input class="field" id="edTxt" value="${esc((s.text || {}).text || "")}" maxlength="60" placeholder="Ingen text" style="flex:1 1 auto;min-width:0"></div>
       <input class="field" id="edTxtSub" value="${esc((s.text || {}).sub || "")}" maxlength="60" placeholder="Andra raden, t.ex. latinskt namn">
       <div class="row"><button class="btn small" data-act="ed-text">Spara text</button>${s.text ? '<button class="btn small" data-act="ed-text-clear">Ta bort</button>' : ""}</div></div>
-    <div class="row push"><button class="btn small" data-edmove="-1">${svgi(ICO.left, 14)}Flytta</button><button class="btn small" data-edmove="1">Flytta${svgi(ICO.right, 14)}</button>
-      <span class="grow"></span><button class="btn small danger" data-act="ed-delete">${icon("trash", 14)}Ta bort</button></div>`;
+`;
 }
 
 function encSlider(g, k, label) {
@@ -586,7 +594,7 @@ document.addEventListener("click", async (ev) => {
     case "setup-go": return setupGo();
     case "export-queue": return exportQueued();
     case "ed-undo": return edit("undo");
-    case "ed-delete": return edit("delete", { i: state.ed.i });
+    case "ed-delete": await edit("delete", { i: state.ed.i }); state.ed.i = Math.min(state.ed.i, edProp().shots.length - 1); return render();
     case "ed-autocenter": return edit("auto_center", { i: state.ed.i });
     case "ed-grade-reset": return edit("grade_reset_shot", { i: state.ed.i });
     case "ed-enh-auto": { const g = curGrade(edProp()); g.dehaze = null; g.particles = null; g.stabilize = null; stageGrade(g); return render(); }
@@ -871,4 +879,54 @@ document.addEventListener("change", (ev) => {
 });
 document.addEventListener("keydown", (ev) => {
   if (ev.key === "Enter" && ev.target.id === "mq") { ev.preventDefault(); musicSearch(); }
+});
+
+
+/* ---------- tidslinjen: dra och släpp, tangentbord ---------- */
+let tlDrag = null;
+document.addEventListener("pointerdown", (ev) => {
+  const b = ev.target.closest("[data-drag]");
+  if (!b || state.view !== "edit") return;
+  tlDrag = { i: Number(b.dataset.drag), x: ev.clientX, el: b, moved: false };
+});
+document.addEventListener("dragstart", (ev) => { if (ev.target.closest && ev.target.closest("[data-drag]")) ev.preventDefault(); });
+document.addEventListener("pointercancel", () => { tlDrag = null; });
+document.addEventListener("pointermove", (ev) => {
+  if (!tlDrag) return;
+  if (!tlDrag.moved && Math.abs(ev.clientX - tlDrag.x) < 10) return;
+  tlDrag.moved = true;
+  tlDrag.el.classList.add("dragging");
+  const blocks = [...document.querySelectorAll("[data-drag]")];
+  let to = blocks.length - 1;
+  for (let k = 0; k < blocks.length; k++) {
+    const r = blocks[k].getBoundingClientRect();
+    if (ev.clientX < r.left + r.width / 2) { to = k; break; }
+  }
+  if (to > tlDrag.i) to -= 0; // släpp efter klippet till höger
+  blocks.forEach((x, k) => x.classList.toggle("dropbefore", k === to && to !== tlDrag.i));
+  tlDrag.to = to;
+});
+document.addEventListener("pointerup", async () => {
+  const d = tlDrag;
+  tlDrag = null;
+  document.querySelectorAll(".dragging,.dropbefore").forEach((x) => x.classList.remove("dragging", "dropbefore"));
+  if (!d || !d.moved || d.to === undefined) return;
+  let to = d.to > d.i ? d.to - 1 : d.to;
+  if (to === d.i) return;
+  state.ed.suppressClick = true;
+  await edit("move", { i: d.i, to });
+  state.ed.i = to;
+  render();
+});
+document.addEventListener("click", (ev) => {
+  if (state.ed && state.ed.suppressClick && ev.target.closest("[data-drag]")) { ev.stopImmediatePropagation(); ev.preventDefault(); state.ed.suppressClick = false; }
+}, true);
+document.addEventListener("keydown", async (ev) => {
+  if (state.view !== "edit" || !state.ed || ev.target.closest("input, textarea, select")) return;
+  const p = edProp();
+  if (!p) return;
+  if (ev.key === "Delete" || ev.key === "Backspace") { ev.preventDefault(); if (p.shots.length > 1) await edit("delete", { i: state.ed.i }); state.ed.i = Math.min(state.ed.i, edProp().shots.length - 1); render(); }
+  else if (ev.altKey && (ev.key === "ArrowLeft" || ev.key === "ArrowRight")) { ev.preventDefault(); const dir = ev.key === "ArrowLeft" ? -1 : 1; const j = state.ed.i + dir; if (j < 0 || j >= p.shots.length) return; await edit("move", { i: state.ed.i, dir }); state.ed.i = j; render(); }
+  else if (ev.key === "ArrowLeft" || ev.key === "ArrowRight") { state.ed.i = Math.max(0, Math.min(p.shots.length - 1, state.ed.i + (ev.key === "ArrowLeft" ? -1 : 1))); state.ed.alts = null; render(); }
+  else if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "z") { ev.preventDefault(); await edit("undo"); render(); }
 });
