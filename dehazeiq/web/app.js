@@ -439,6 +439,10 @@ async function generate() {
     state.shown = r.proposals.map((p) => p.id);
     saveShown();
     state.view = "proposals";
+    state.planTab = "custom";  // de nya förslagen i egen flik, så att de syns direkt
+    state.fresh = new Set(state.shown);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    toast(`${r.proposals.length} nya förslag: ${r.proposals.map((p) => p.title || p.style_label).join(", ")}`, true);
   } catch (e) { fail(e); }
   generating = false;
   render();
@@ -858,7 +862,7 @@ function propCard(p, idx) {
     <div class="top" style="${wide ? "flex-direction:column" : ""}">
       <div class="phone" style="width:${w}px;height:${h}px">${phone}</div>
       <div class="info">
-        <div class="stack" style="gap:4px"><span class="plabel" style="color:${si.color || "var(--accent)"}">Förslag ${"ABCDEFGHIJ"[idx] || ""} · ${esc(p.style_label)}</span>
+        <div class="stack" style="gap:4px"><span class="plabel" style="color:${si.color || "var(--accent)"}">Förslag ${"ABCDEFGHIJ"[idx] || ""} · ${esc(p.style_label)}${state.fresh && state.fresh.has(p.id) ? ' <span class="newtag">Ny</span>' : ""}</span>
           <h2 class="pname">${esc(p.title || p.style_label)}</h2><p class="pdesc">${esc(p.story || si.long || "")}</p>
           ${p.short ? `<p class="pdesc" style="color:var(--warn)">Kortare än önskat – det fanns bara ${fmtDur(p.length)} skarpt material.</p>` : ""}
           ${isPromo(p) && !(p.promo && (p.promo.hook || p.promo.cta || (p.promo.points || []).length)) ? `<p class="pdesc hint">${p.style === "trailer" ? "Lägg gärna till textskyltar" : "Lägg till dina reklamtexter och logga"} under <a href="#" data-edtext="${p.id}">Redigera › Text</a>. Filmen fungerar även utan.</p>` : ""}

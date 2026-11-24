@@ -215,7 +215,11 @@ def localize(proposal, lang, clips_species=None, free=None):
         "endcard": pr.get("endcard", True),
     }
     lyrics = over.get("lyrics") or (proposal.get("lyrics") or {}).get("lines") or []
-    return {"title": title, "subtitle": sub, "shots": shots, "promo": promo, "lyrics": lyrics}
+    oo = over.get("overlays") or {}
+    overlays = {it["id"]: {"text": (oo.get(it["id"]) or {}).get("text") or tr(it.get("text") or ""),
+                           "sub": (oo.get(it["id"]) or {}).get("sub") or tr(it.get("sub") or "")}
+                for it in proposal.get("overlays") or []}
+    return {"title": title, "subtitle": sub, "shots": shots, "promo": promo, "lyrics": lyrics, "overlays": overlays}
 
 
 def free_texts(proposal, lang):
@@ -226,7 +230,8 @@ def free_texts(proposal, lang):
     out = []
     pr = proposal.get("promo") or {}
     cands = ([eff.get("title")] + [(s.get("text") or {}).get("text") for s in proposal.get("shots", [])]
-             + [pr.get("hook"), pr.get("cta")] + list(pr.get("points") or []))
+             + [pr.get("hook"), pr.get("cta")] + list(pr.get("points") or [])
+             + [x for it in proposal.get("overlays") or [] for x in (it.get("text"), it.get("sub"))])
     for t in cands:
         if t and not fixed(t, lang):
             out.append(t)

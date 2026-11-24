@@ -26,6 +26,8 @@ def _snapshot(prop):
 
 def _finish(prop):
     """Räkna om positioner och längd efter en ändring; gamla renderingar gäller inte längre."""
+    from .texts import ensure_uids
+    ensure_uids(prop)
     pos = 0.0
     for s in prop["shots"]:
         s["at"] = round(pos, 3)
@@ -202,6 +204,45 @@ def apply(project, prop, op, args):
         else:
             kind = args.get("kind") if args.get("kind") in ("label", "chapter", "pop") else "label"
             s["text"] = {"kind": kind, "text": text, "sub": str(args.get("sub", "")).strip()[:60]}
+    elif op in ("overlay_add", "overlay_update", "overlay_delete", "overlay_suggest", "overlay_clear"):
+        from . import texts
+        texts.ensure_uids(prop)
+        ov = prop.setdefault("overlays", [])
+        if op == "overlay_add":
+            i, s = shot_at()
+            ov.append(texts.new_item(s["uid"], args.get("text") or "Ny text", args.get("style", "caption"),
+                                     args.get("sub", ""), args.get("offset", 0.3),
+                                     args.get("dur", min(2.6, max(1.0, float(s["duration"]) - 0.3)))))
+        elif op == "overlay_update":
+            it = next((x for x in ov if x["id"] == args.get("id")), None)
+            if not it:
+                raise EditError("Texten finns inte")
+            if "text" in args:
+                it["text"] = str(args["text"]).strip()[:90]
+            if "sub" in args:
+                it["sub"] = str(args["sub"]).strip()[:90]
+            if args.get("style") in texts.TEXT_STYLES:
+                it["style"] = args["style"]
+            if args.get("offset") is not None:
+                it["offset"] = max(0.0, float(args["offset"]))
+            if args.get("dur") is not None:
+                it["dur"] = max(0.6, min(15.0, float(args["dur"])))
+            if args.get("i") is not None:  # flytta texten till ett annat klipp
+                it["shot_uid"] = shots[max(0, min(len(shots) - 1, int(args["i"])))]["uid"]
+        elif op == "overlay_delete":
+            prop["overlays"] = [x for x in ov if x["id"] != args.get("id")]
+        elif op == "overlay_clear":
+            prop["overlays"] = []
+        else:  # AI föreslår texter i vald ton
+            got, how = texts.suggest(prop, args.get("tone", "doc"))
+            if args.get("replace", True):
+                prop["overlays"] = got
+                for s_ in shots:  # de automatiska klipptexterna ersätts av förslaget
+                    s_.pop("text", None)
+            else:
+                prop["overlays"] = ov + got
+            prop["overlay_tone"] = args.get("tone", "doc")
+            prop["overlay_how"] = how
     elif op == "i18n":
         lang = args.get("lang")
         from .i18n import LANGS

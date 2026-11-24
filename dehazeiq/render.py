@@ -222,6 +222,65 @@ def text_filters(kind, text, sub, files, out_w, out_h, dur, freeze=0.0, start=0.
             out.append(f"drawtext=fontfile=font.ttf:textfile={fa}:fontsize={fs}:fontcolor=white:x={int(out_w * 0.06)}"
                        f":y=h*0.72:box=1:boxcolor={col}@0.9:boxborderw={max(8, fs // 3)}:alpha='{a}'")
         return out
+    if kind == "free":  # fria texter i vald stil
+        end = end if end is not None else dur
+        a = _alpha(start, end, 0.18)
+        st = variant or "caption"
+        two = bool(sub)
+        if st == "doc":  # namnskylt nere till vänster med tunn linje
+            fs = _fit(_longest(text), out_w * 0.8, m * 0.06)
+            x, y = int(out_w * 0.07), int(out_h * (0.76 if out_h > out_w else 0.72))
+            out.append(f"drawbox=x={x - int(m * 0.018)}:y={y}:w={max(3, m // 160)}:h={int(fs * (2.3 if two else 1.2))}"
+                       f":color=white@0.9:t=fill:enable='between(t,{max(0, start):.2f},{end:.2f})'")
+            out.append(f"drawtext=fontfile=font.ttf:textfile={fa}:fontsize={fs}:fontcolor=white:x={x}:y={y}"
+                       f":shadowcolor=black@0.6:shadowx=2:shadowy=2:alpha='{a}'")
+            if two:
+                out.append(f"drawtext=fontfile=font.ttf:textfile={fb}:fontsize={int(fs * 0.62)}:fontcolor=0xD6E4EA"
+                           f":x={x}:y={y + int(fs * 1.35)}:shadowcolor=black@0.6:shadowx=1:shadowy=1:alpha='{a}'")
+            return out
+        if st == "fun":  # pratbubbla: svart text på gul ruta
+            fs = _fit(_longest(text), out_w * 0.85, m * 0.07)
+            out.append(f"drawtext=fontfile=font.ttf:textfile={fa}:fontsize={fs}:fontcolor=0x111111:x=(w-text_w)/2"
+                       f":y=h*0.16:box=1:boxcolor=0xFFD84A@0.96:boxborderw={max(12, fs // 2)}:line_spacing={fs // 4}"
+                       f":alpha='{a}'")
+            return out
+        if st == "title":
+            fs = _fit(_longest(text), out_w * 0.86, m * 0.11)
+            out.append(f"drawtext=fontfile=font.ttf:textfile={fa}:fontsize={fs}:fontcolor=white:x=(w-text_w)/2"
+                       f":y=(h-text_h)/2-{int(fs * 0.4) if two else 0}:shadowcolor=black@0.6:shadowx=3:shadowy=3"
+                       f":line_spacing={fs // 4}:alpha='{a}'")
+            if two:
+                out.append(f"drawtext=fontfile=font.ttf:textfile={fb}:fontsize={int(fs * 0.45)}:fontcolor=0xE6EEF3"
+                           f":x=(w-text_w)/2:y=(h+text_h)/2+{int(fs * 0.5)}:shadowcolor=black@0.6:shadowx=2:shadowy=2"
+                           f":alpha='{a}'")
+            return out
+        if st == "place":  # reseskylt uppe till vänster, versaler
+            fs = _fit(_longest(text).upper(), out_w * 0.8, m * 0.075)
+            x, y = int(out_w * 0.07), int(out_h * 0.09)
+            out.append(f"drawtext=fontfile=font.ttf:textfile={fa}:fontsize={fs}:fontcolor=white:x={x}:y={y}"
+                       f":shadowcolor=black@0.6:shadowx=2:shadowy=2:alpha='{a}'")
+            if two:
+                out.append(f"drawtext=fontfile=font.ttf:textfile={fb}:fontsize={int(fs * 0.5)}:fontcolor=0x9FE7F0"
+                           f":x={x}:y={y + int(fs * 1.25)}:shadowcolor=black@0.6:shadowx=1:shadowy=1:alpha='{a}'")
+            return out
+        if st == "meme":  # versaler med svart kant upptill
+            fs = _fit(_longest(text).upper(), out_w * 0.9, m * 0.09)
+            out.append(f"drawtext=fontfile=font.ttf:textfile={fa}:fontsize={fs}:fontcolor=white:borderw={max(3, fs // 12)}"
+                       f":bordercolor=black:x=(w-text_w)/2:y=h*0.08:line_spacing={fs // 5}:alpha='{a}'")
+            return out
+        if st == "minimal":
+            fs = _fit(_longest(text), out_w * 0.7, m * 0.042)
+            out.append(f"drawtext=fontfile=font.ttf:textfile={fa}:fontsize={fs}:fontcolor=white@0.92:x={int(out_w * 0.07)}"
+                       f":y=h-text_h-{int(out_h * 0.08)}:alpha='{a}'")
+            return out
+        if st == "chapter":
+            return text_filters("chapter", text, sub, files, out_w, out_h, dur, start=max(0.0, start))
+        # undertext: centrerad nere med halvgenomskinlig ruta
+        fs = _fit(_longest(text), out_w * 0.86, m * 0.052)
+        out.append(f"drawtext=fontfile=font.ttf:textfile={fa}:fontsize={fs}:fontcolor=white:x=(w-text_w)/2"
+                   f":y=h*0.80:box=1:boxcolor=black@0.45:boxborderw={max(8, fs // 3)}:line_spacing={fs // 4}"
+                   f":alpha='{a}'")
+        return out
     if kind == "credit":  # musiktack längst ner på slutet
         fs = _fit(text, out_w, m * 0.032)
         a = _alpha(start, dur + 5, 0.4)
@@ -615,8 +674,10 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
     has_promo = bool(variant and (promo.get("hook") or promo.get("points") or promo.get("cta") or promo.get("url")))
     lyric_cues = _lyric_cues(loc.get("lyrics") or [], proposal) if style.get("music_video") == "lyrics" else []
     credit = (proposal.get("music_credit") or "") if on.get("credits", True) and not style.get("no_music") else ""
+    from . import texts as texts_mod
+    free_cues = [(a, b, it, (loc.get("overlays") or {}).get(it["id"]) or it) for a, b, it in texts_mod.timeline(proposal)]
     texts_needed = ((on["title"] and loc["title"]) or (on["labels"] and any(loc["shots"])) or dive_on
-                    or has_promo or bool(lyric_cues) or bool(credit))
+                    or has_promo or bool(lyric_cues) or bool(credit) or bool(free_cues))
     font = fx_mod.title_font() if texts_needed else None
     if font:
         shutil.copyfile(font, tmp / "font.ttf")
@@ -646,6 +707,16 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
 
     def overlays(i, shot, fx, out_len):
         out = []
+        for k, (a0, a1, it, tx) in enumerate(free_cues if font else []):
+            s0, s1 = a0 - shot["at"], a1 - shot["at"]
+            if s1 <= 0 or s0 >= out_len:
+                continue
+            fa_, fb_ = f"o{i}_{k}a.txt", f"o{i}_{k}b.txt"
+            up = it.get("style") in ("place", "meme")
+            (tmp / fa_).write_text((tx.get("text") or "").upper() if up else (tx.get("text") or ""), "utf-8")
+            (tmp / fb_).write_text(tx.get("sub") or " ", "utf-8")
+            out += text_filters("free", tx.get("text") or "", tx.get("sub") or "", (fa_, fb_), out_w, out_h, out_len,
+                                start=s0, end=s1, variant=it.get("style"))
         if font and credit and i == len(shots) - 1:
             (tmp / "credit.txt").write_text(credit, "utf-8")
             out += text_filters("credit", credit, "", ("credit.txt", ""), out_w, out_h, out_len,

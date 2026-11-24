@@ -408,3 +408,9 @@ textarea.field { color: var(--text); height: auto; padding: 10px 12px; line-heig
 .tlblock.dragging { opacity: .45; transform: scale(.96); }
 .tlblock.dropbefore { box-shadow: -4px 0 0 0 var(--accent); }
 .tlblock img { -webkit-user-drag: none; user-select: none; pointer-events: none; }
+.newtag { background: var(--accent); color: #031014; border-radius: 6px; padding: 1px 6px; font-size: 10px; margin-left: 6px; letter-spacing: .04em; }
+.ovitem { display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel-2); }
+.ovitem.sel { border-color: var(--accent); }
+.ovbar { position: absolute; top: 2px; height: 20px; border-radius: 6px; border: 0; font: inherit; font-size: 10px; color: #031014; background: var(--accent); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding: 0 6px; cursor: pointer; text-align: left; }
+.ovbar.st-fun { background: #FFD84A; } .ovbar.st-doc { background: #E6EEF3; } .ovbar.st-meme { background: #fff; }
+.ovbar.st-place { background: #9FE7F0; } .ovbar.st-title { background: #C9B48A; } .ovbar.st-chapter { background: #B89AE8; }

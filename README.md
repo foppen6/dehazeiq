@@ -122,7 +122,11 @@ frysbild, långsam zoom, zoomryck, flytta utsnittet genom att klicka i originalb
 liknande sekvens som AI:n föreslår, flytta och ta bort. Fliken **Färg** har utseenden (bland annat
 svartvitt, sepia, film, varm, kall och livlig) med styrka, samt exponering, kontrast, mättnad,
 temperatur, nyans, skärpa och vinjett – för hela filmen eller ett klipp, med före/efter. Fliken
-**Text** ändrar titeln, reklamtexter, logga och sångtext. Allt kan ångras.
+**Text** ändrar titeln, reklamtexter, logga och sångtext – och har **Texter i filmen**: lägg till hur
+många texter som helst i åtta stilar (dokumentär namnskylt, humor/pratbubbla, rubrik, undertext,
+plats/reseskylt, meme, minimal, kapitel), välj klipp, start och längd. "Föreslå texter" skriver
+texter i en ton – dokumentär, humor, reseberättare, poetisk eller kort och käck – med Qwen när
+djupanalysen finns, annars med mallar utifrån vad AI:n känt igen. Allt kan ångras.
 På tidslinjen dras klippen till ny plats, och verktygsraden ovanför flyttar och tar bort det valda
 klippet (även Delete, Alt+←/→ och Ctrl/Cmd+Z).
 
@@ -345,6 +349,7 @@ dehazeiq/
   cliptext.py   CLIP:s textdel och tokeniserare (sökning med egna ord)
   search.py     sökning i materialet
   prompt.py     beskrivning med egna ord → filmplan
+  texts.py      fria texter i filmen, textstilar och AI-förslag i olika toner
   pano.py       360-film: AI-kamerabana, vyer, liten planet, kristallkula, 360-svep
   musiclib.py   musikbibliotek, Openverse, egna tjänster och licenser
   web/          gränssnittet (HTML/CSS/JS, logga)

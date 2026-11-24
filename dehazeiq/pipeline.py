@@ -205,9 +205,14 @@ def generate(pid, style, fmt, length, favorites=(), theme=None):
     if fmt not in FORMATS:
         raise RuntimeError(f"Okänt format: {fmt}")
     proj = Project(pid)
-    recent = [p.get("theme") for p in (proj.data.get("proposals") or [])[:3] if p.get("theme")]
+    last = (proj.data.get("proposals") or [])[:6]
+    recent = [p.get("theme") for p in last if p.get("theme")]
+    used = {s["clip_id"] for p in last for s in p.get("shots", [])}
     props = generator.generate_set(proj, style, fmt, float(length), proj.data.get("music"), favorites, theme,
-                                   avoid=recent)
+                                   avoid=recent, avoid_clips=used)
+    for pr in props:  # egen flik bland filmtyperna, så att de nya förslagen syns direkt
+        pr.setdefault("plan", "custom")
+        pr.setdefault("plan_label", "Egna förslag")
     proj.reload()
     proj.data.setdefault("settings", {}).update(format=fmt, length=length, style=style)
     proj.save()

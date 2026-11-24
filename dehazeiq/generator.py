@@ -522,7 +522,7 @@ def _resolve_theme(theme, cands, project):
 
 
 def generate(project, style_key="cinematic", fmt="9:16", length=30.0, seed=None,
-             music=None, favorites=(), theme=None):
+             music=None, favorites=(), theme=None, avoid_clips=()):
     if style_key not in STYLES:
         raise GenerateError(f"Okänd stil: {style_key}")
     style = STYLES[style_key]
@@ -543,6 +543,12 @@ def generate(project, style_key="cinematic", fmt="9:16", length=30.0, seed=None,
     # Filmen blir hellre kortare än utfylld: aldrig fler klipp än det finns höjdpunkter (+ sammanhang)
     n = min(n, max(1, len({(c["clip"]["id"], c["i0"]) for c in cands})) + 2)
     favs = list(favorites)
+    if avoid_clips:
+        # "Generera nya förslag": klipp som nyss användes får lägre prioritet, så att det blir nytt
+        av = set(avoid_clips) - set(favs)
+        for c in cands:
+            if c["clip"]["id"] in av:
+                c["util_n"] *= 0.72
 
     def select(pool, k):
         k = min(k, len(pool))
@@ -619,7 +625,7 @@ def generate(project, style_key="cinematic", fmt="9:16", length=30.0, seed=None,
 
 
 def generate_set(project, style="auto", fmt="9:16", length=30.0, music=None, favorites=(), theme=None,
-                 avoid=()):
+                 avoid=(), avoid_clips=()):
     """Tre förslag. Utan valt tema: tre olika berättelser (t.ex. djurporträtt, ett dyk, resan).
     Med valt tema: tre versioner av samma berättelse (tre stilar, eller tre varianter av en stil)."""
     if theme:
@@ -630,7 +636,7 @@ def generate_set(project, style="auto", fmt="9:16", length=30.0, music=None, fav
                 styles = ["playful", "action", "cinematic"]
         else:
             styles = [style] * 3
-        return [generate(project, s, fmt, length, None, music, favorites, theme) for s in styles]
+        return [generate(project, s, fmt, length, None, music, favorites, theme, avoid_clips) for s in styles]
     plan = story.auto_plan(themes(project, fmt), avoid)
-    return [generate(project, s if style == "auto" else style, fmt, length, None, music, favorites, t)
+    return [generate(project, s if style == "auto" else style, fmt, length, None, music, favorites, t, avoid_clips)
             for t, s in plan]
