@@ -1,0 +1,36 @@
+name: nettest4
+on: push
+jobs:
+  urls:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          for f in ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin ggerganov/whisper.cpp/resolve/main/ggml-base-q5_1.bin ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin; do
+            echo "$f $(curl -sIL -o /dev/null -w '%{http_code}' https://huggingface.co/$f) $(curl -sIL https://huggingface.co/$f | grep -i '^content-length' | tail -1)"
+          done
+          curl -s https://huggingface.co/api/models/ggml-org/whisper-vad | head -c 1500
+  mac:
+    runs-on: macos-latest
+    steps:
+      - run: |
+          git clone --depth 1 https://github.com/ggml-org/whisper.cpp w && cd w
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON -DWHISPER_BUILD_TESTS=OFF -DGGML_NATIVE=OFF
+          cmake --build build -j 4 --config Release --target whisper-cli
+          ls -la build/bin; otool -L build/bin/whisper-cli
+          build/bin/whisper-cli --help 2>&1 | head -90
+          curl -sL -o m.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q5_1.bin
+          curl -sL -o v.bin https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin
+          build/bin/whisper-cli -m m.bin -f samples/jfk.wav -l auto -ojf -of out --vad --vad-model v.bin -np && head -c 3000 out.json
+  win:
+    runs-on: windows-latest
+    steps:
+      - shell: bash
+        run: |
+          git clone --depth 1 https://github.com/ggml-org/whisper.cpp w && cd w
+          cmake -B build -DBUILD_SHARED_LIBS=OFF -DWHISPER_BUILD_TESTS=OFF -DGGML_NATIVE=OFF -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          cmake --build build -j 4 --config Release --target whisper-cli
+          find build -name 'whisper-cli.exe' -exec ls -la {} \;
+          exe=$(find build -name whisper-cli.exe | head -1)
+          ls "$(dirname "$exe")"
+          curl -sL -o m.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q5_1.bin
+          time "$exe" -m m.bin -f samples/jfk.wav -l auto -oj -of out -np && cat out.json
