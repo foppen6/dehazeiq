@@ -63,7 +63,7 @@ STYLES = {
         "avg_shot": 5.5, "min_shot": 3.5, "max_shot": 8.5,
         "beat_sync": 0.2, "motion_pref": -0.3, "variety": 0.6,
         "temperature": 0.2, "color": "natural", "orig_audio": 0.85,
-        "fade": 1.0,
+        "fade": 1.0, "speech_pref": 0.15,
     },
     "widescreen": {
         "label": "Filmisk bredbild",
@@ -98,7 +98,7 @@ STYLES = {
         "avg_shot": 2.4, "min_shot": 1.4, "max_shot": 4.0,
         "beat_sync": 0.7, "motion_pref": 0.2, "variety": 0.6,
         "temperature": 0.3, "color": "natural", "orig_audio": 0.35,
-        "fade": 0.5, "look_fx": {},
+        "fade": 0.5, "look_fx": {}, "speech_pref": 0.35,
     },
     "minimal": {
         "label": "Minimal",

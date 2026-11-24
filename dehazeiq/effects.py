@@ -26,6 +26,8 @@ EFFECTS = {
     "divedata": "Dykdata",
     "cam360": "360-effekter",
     "credits": "Musiktack",
+    "speech": "Undertexter från tal",
+    "voice": "Hör talet",
 }
 DEFAULT_EFFECTS = {k: True for k in EFFECTS}
 

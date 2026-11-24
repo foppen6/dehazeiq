@@ -39,9 +39,44 @@ def _sample_scores(d, qvs):
     return t, s
 
 
+def _norm_words(text):
+    import re
+    return [w for w in re.findall(r"[\wåäöÅÄÖ]+", str(text).lower()) if len(w) >= 3]
+
+
+def speech_hits(project, text, limit=24):
+    """Klipp där sökorden sägs (från tal till text): [{clip_id, name, t, text, said}]."""
+    words = _norm_words(text)
+    if not words:
+        return []
+    out = []
+    for c in project.clips():
+        for seg in ((c.get("speech") or {}).get("segments")) or []:
+            low = seg["text"].lower()
+            n = sum(1 for w in words if w in low)
+            if n:
+                out.append({"clip_id": c["id"], "name": c["name"], "t": seg["start"], "said": seg["text"],
+                            "score": n / len(words), "strong": n == len(words), "match": round(n / len(words), 2),
+                            "photo": False, "weak": bool(c.get("auto_excluded"))})
+    out.sort(key=lambda h: -h["score"])
+    seen, res = set(), []
+    for h in out:
+        if h["clip_id"] not in seen:
+            seen.add(h["clip_id"])
+            res.append(h)
+    return res[:limit]
+
+
 def search(project, text, limit=24):
-    """Bästa ögonblicken för sökordet: [{clip_id, name, t, score, strong}]."""
-    qvs = query_vec(text)
+    """Bästa ögonblicken för sökordet: [{clip_id, name, t, score, strong}].
+    Både vad som syns (CLIP) och vad som sägs (tal till text)."""
+    spoken = speech_hits(project, text, limit)
+    try:
+        qvs = query_vec(text)
+    except SearchError:
+        if spoken:
+            return {"query": text, "hits": [], "spoken": spoken, "available": True}
+        raise
     hits, every = [], []
     for c in project.clips():
         if not c.get("analysis") or c.get("is360") or c.get("excluded"):
@@ -59,7 +94,7 @@ def search(project, text, limit=24):
                      "score": float(s[i]), "photo": bool(c.get("is_photo")),
                      "weak": bool(c.get("auto_excluded"))})
     if not hits:
-        return {"query": text, "hits": [], "available": True}
+        return {"query": text, "hits": [], "spoken": spoken, "available": True}
     allv = np.concatenate(every)
     mu, sd = float(allv.mean()), float(allv.std() + 1e-6)
     top = max(h["score"] for h in hits)
@@ -69,19 +104,27 @@ def search(project, text, limit=24):
         h["match"] = round(float(np.clip((z - 0.5) / 2.5, 0, 1)), 2)  # 0–1 för gränssnittet
         h["score"] = round(h["score"], 4)
     hits.sort(key=lambda h: -h["score"])
-    return {"query": text, "hits": hits[:limit], "available": True}
+    return {"query": text, "hits": hits[:limit], "spoken": spoken, "available": True}
 
 
-def score_candidates(cands, qvs):
-    """Sätter c["q"] (likhet med sökorden) på generatorns sekvenser."""
+def score_candidates(cands, qvs, text=None):
+    """Sätter c["q"] (likhet med sökorden) på generatorns sekvenser.
+    Sägs sökorden i sekvensen räknas den som en tydlig träff."""
+    words = _norm_words(text) if text else []
     for c in cands:
         d = c["data"]
         t, s = _sample_scores(d, qvs)
         if t is None:
             c["q"] = 0.0
-            continue
-        m = (t >= c["start"] - 0.25) & (t <= c["end"] + 0.25)
-        c["q"] = float(s[m].max()) if m.any() else float(s.max()) - 0.02
+        else:
+            m = (t >= c["start"] - 0.25) & (t <= c["end"] + 0.25)
+            c["q"] = float(s[m].max()) if m.any() else float(s.max()) - 0.02
+        if words:
+            said = " ".join(g["text"].lower() for g in ((c["clip"].get("speech") or {}).get("segments") or [])
+                            if g["end"] > c["start"] and g["start"] < c["end"])
+            n = sum(1 for w in words if w in said)
+            if n:
+                c["q"] += 0.05 * n / len(words)
     return cands
 
 

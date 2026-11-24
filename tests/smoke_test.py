@@ -109,6 +109,17 @@ def main():
     print("Musikbibliotek:", musiclib.scan())
     m = musiclib.pick("action", 15)
     assert m and m["bpm"] > 0, "AI:n borde välja en låt ur biblioteket"
+    # tal till text: tolkning, filtrering av påhittad text och undertexter i filmens tid
+    from dehazeiq import whisper
+    segs, lang = whisper.parse_json({"result": {"language": "sv"}, "transcription": [
+        {"offsets": {"from": 500, "to": 2600}, "text": " Titta, en bläckfisk!", "tokens": [{"text": " Titta", "p": 0.9}]},
+        {"offsets": {"from": 3000, "to": 4000}, "text": " Tack för att ni tittade!", "tokens": [{"text": "x", "p": 0.9}]}]})
+    assert len(segs) == 1 and lang == "sv", segs
+    fake = {"a": {"duration": 6, "speech": {"segments": segs}}}
+    cues = whisper.subtitle_cues({"shots": [{"clip_id": "a", "src_start": 0.0, "src_end": 3.0, "at": 2.0,
+                                             "duration": 3.0}]}, fake)
+    assert cues and abs(cues[0][0] - 2.5) < 0.01, cues
+    print("Tal till text:", cues, whisper.whisper_status()["model"])
     print(f"OK på {time.time() - t:.1f} s. Testdata i {WORK}")
 
 

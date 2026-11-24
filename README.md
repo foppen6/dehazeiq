@@ -172,6 +172,7 @@ På Mac tolkar Qwen texten när djupanalysen är nedladdad, annars används inby
 
 I analysvyn går det att söka med egna ord (*bläckfisk*, *dykare med lampa*, *solnedgång*) –
 CLIP jämför orden med bilderna som analysen redan har sparat, så det går på någon sekund.
+Med tal till text visas också klippen där orden *sägs*.
 "Gör film av träffarna" gör tre förslag av det som matchar.
 
 ## Reklamfilm, trailer och musikvideo
@@ -267,13 +268,40 @@ bilder av organismer med artnamn. Den skiljer t.ex. bläckfisk, knot och maneter
 grupperas så att en djurfilm bara innehåller samma sorts djur. Artlistan finns i
 `packaging/bio_species.json` och kan byggas ut.
 
-## Djupanalys med Qwen3-VL (Mac med Apple-chip)
+## Djupanalys (Mac med Apple-chip)
 
 På en Mac med M-chip kan DeHazeIQ låta en språk- och bildmodell titta på klippen och beskriva vad
 som händer: vilket djur, vad det gör, hur roligt och vackert ögonblicket är och om motivet är
 skarpt. Det används till urval, dramaturgi (lugn början → handling → höjdpunkt) och berättartext.
-Modellen körs lokalt med llama.cpp och väljs efter datorns minne (30B vid 32 GB eller mer, annars
-8B eller 4B). Den laddas ner med en knapp i analysvyn första gången och körs sedan automatiskt.
+Modellen körs lokalt med llama.cpp. Under *Välj AI-modell* i analysvyn finns:
+
+| Modell | Storlek | Minne |
+|---|---|---|
+| Qwen3.6 35B-A3B (förval) | 20 GB | 32 GB |
+| Gemma 4 26B-A4B | 17 GB | 32 GB |
+| Qwen3-VL 30B-A3B (den tidigare) | 19 GB | 32 GB |
+| Qwen3.5 9B | 6 GB | 16 GB |
+| Gemma 4 E4B | 8 GB | 12 GB |
+| Qwen3.5 4B | 3 GB | 8 GB |
+
+En redan nedladdad modell används tills du väljer en annan. Byter du modell visar analysvyn hur
+många klipp som är beskrivna med den gamla, och *Beskriv igen* kör om dem.
+
+## Tal till text (Whisper)
+
+Whisper (whisper.cpp, följer med appen) lyssnar på klippen och skriver ner det som sägs – lokalt,
+utan internet. En liten röstdetektor (Silero VAD) och ett filter mot Whispers vanliga påhitt
+("Tack för att ni tittade") gör att bubbel och motorljud inte blir text.
+
+- **Undertexter från tal:** det som sägs visas längst ner i filmen och hamnar i .srt-filen.
+- **Hör talet:** musiken sänks och originalljudet höjs medan någon pratar.
+- **Urval:** vloggar och dokumentärer väljer gärna sekvenser där något sägs och klipper inte mitt i
+  en mening; musikvideor och reklam undviker prat.
+- **Sök:** sökningen hittar också klipp där orden sägs.
+
+Modellen laddas ner med en knapp i analysvyn: large-v3-turbo (0,57 GB) på Mac, small (0,19 GB) på
+PC – båda går att välja, liksom språk (automatiskt, svenska, engelska). Sedan körs det automatiskt
+efter varje analys. Båda effekterna kan stängas av under *Effekter*.
 
 ## Djuret i mitten
 

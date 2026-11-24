@@ -467,7 +467,7 @@ def build(theme, cands, ctx_pool, n, select):
         from . import search
         qvs = search.query_vec(theme["query"])
         pool_all = _dedupe(cands + [c for c in ctx_pool if not _has(cands, c)])
-        search.score_candidates(pool_all, qvs)
+        search.score_candidates(pool_all, qvs, theme["query"])
         pool = search.pick(pool_all, n)
         body = select(pool, n)
         if theme.get("order") == "time":

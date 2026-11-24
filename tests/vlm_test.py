@@ -1,4 +1,4 @@
-"""Kör djupanalysen på riktigt med den minsta modellen (Qwen3-VL 2B). Används av byggsystemet
+"""Kör djupanalysen på riktigt med den minsta modellen (Qwen3.5 4B). Används av byggsystemet
 för att kontrollera att llama-server, nedladdning, anrop och tolkning av svaret fungerar."""
 
 import os
@@ -17,11 +17,12 @@ os.environ["DEHAZEIQ_VLM_FORCE"] = "1"
 from dehazeiq import vlm  # noqa: E402
 
 vlm.MODEL_DIR = Path(os.environ["DEHAZEIQ_HOME"]) / "models" / "vlm"
-vlm.MODELS = [(0, "Qwen/Qwen3-VL-2B-Instruct-GGUF", "Qwen3-VL 2B", 2)]
+vlm.MODELS = [{"id": "test", "repo": "unsloth/Qwen3.5-4B-GGUF", "name": "Qwen3.5 4B", "need": 0, "size": 3,
+               "default": True, "about": ""}]
 print("llama-server:", vlm.server_binary())
 t = time.time()
 vlm.download(lambda f, m: None)
-print("Nedladdat på", round(time.time() - t), "s:", vlm.model_paths(vlm.MODELS[0][1]))
+print("Nedladdat på", round(time.time() - t), "s:", vlm.model_paths(vlm.MODELS[0]["repo"]))
 
 # En enkel testbild: en orange fisk mot blått vatten
 img = np.zeros((480, 854, 3), np.uint8)

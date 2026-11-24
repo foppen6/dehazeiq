@@ -287,6 +287,13 @@ def text_filters(kind, text, sub, files, out_w, out_h, dur, freeze=0.0, start=0.
         out.append(f"drawtext=fontfile=font.ttf:textfile={fa}:fontsize={fs}:fontcolor=0xE6EEF3:x=(w-text_w)/2"
                    f":y=h-text_h-{int(out_h * 0.045)}:shadowcolor=black@0.7:shadowx=1:shadowy=1:alpha='{a}'")
         return out
+    if kind == "speech":  # undertext från tal: längst ner, gul-vit med mörk ruta, läsbar på allt
+        fs = _fit(_longest(text), out_w * 0.9, m * 0.048)
+        a = _alpha(start, end if end is not None else dur, 0.08)
+        out.append(f"drawtext=fontfile=font.ttf:textfile={fa}:fontsize={fs}:fontcolor=0xFFF6D5:x=(w-text_w)/2"
+                   f":y=h-text_h-{int(out_h * 0.07)}:box=1:boxcolor=black@0.55:boxborderw={max(8, fs // 3)}"
+                   f":line_spacing={fs // 4}:alpha='{a}'")
+        return out
     if kind == "lyric":  # sångtext, en rad i taget
         fs = _fit(_longest(text), out_w, m * 0.072)
         a = _alpha(start, end if end is not None else dur, 0.12)
@@ -676,8 +683,12 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
     credit = (proposal.get("music_credit") or "") if on.get("credits", True) and not style.get("no_music") else ""
     from . import texts as texts_mod
     free_cues = [(a, b, it, (loc.get("overlays") or {}).get(it["id"]) or it) for a, b, it in texts_mod.timeline(proposal)]
+    from . import whisper as whisper_mod
+    talk = not style.get("no_text") and style.get("music_video") != "lyrics"
+    speech_cues = whisper_mod.subtitle_cues(proposal, clips) if talk and on.get("speech", True) else []
+    voice = whisper_mod.speech_ranges(proposal, clips) if talk and on.get("voice", True) else []
     texts_needed = ((on["title"] and loc["title"]) or (on["labels"] and any(loc["shots"])) or dive_on
-                    or has_promo or bool(lyric_cues) or bool(credit) or bool(free_cues))
+                    or has_promo or bool(lyric_cues) or bool(credit) or bool(free_cues) or bool(speech_cues))
     font = fx_mod.title_font() if texts_needed else None
     if font:
         shutil.copyfile(font, tmp / "font.ttf")
@@ -742,6 +753,14 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
                 fl = f"l{i}_{k}.txt"
                 (tmp / fl).write_text(line, "utf-8")
                 out += text_filters("lyric", line, "", (fl, ""), out_w, out_h, out_len, start=s0, end=s1)
+        if font and speech_cues:
+            for k, (a0, a1, line) in enumerate(speech_cues):
+                s0, s1 = a0 - shot["at"], a1 - shot["at"]
+                if s1 <= 0 or s0 >= out_len:
+                    continue
+                fs_ = f"s{i}_{k}.txt"
+                (tmp / fs_).write_text(line, "utf-8")
+                out += text_filters("speech", line, "", (fs_, ""), out_w, out_h, out_len, start=s0, end=s1)
         if i == 0 and title and loc["subtitle"]:
             out += text_filters("subtitle", loc["subtitle"], "", ("subtitle.txt", ""), out_w, out_h, out_len)
         tx = loc["shots"][i] if i < len(loc["shots"]) else None
@@ -901,10 +920,17 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
         tmp_out = out_path.with_suffix(".tmp.mp4")
         if music and Path(music).exists():
             fo = min(2.5, total / 3)
+            ovol, mvol = f"{orig:.3f}", "1"
+            if voice:  # någon pratar: talet upp, musiken ner (mjukt in och ut)
+                win = "+".join(f"clip((t-{a - 0.25:.2f})/0.25,0,1)*clip(({b + 0.3:.2f}-t)/0.3,0,1)"
+                               for a, b in _merge_ranges(voice)[:60])
+                ovol = f"'{orig:.3f}+({1.0 - orig:.3f})*min(1,{win})':eval=frame"
+                mvol = f"'1-0.75*min(1,{win})':eval=frame"
             fc = (f"[1:a]atrim=0:{total:.3f},asetpts=PTS-STARTPTS,"
                   f"aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
-                  f"afade=t=in:st=0:d=0.6,afade=t=out:st={max(0.0, total - fo):.3f}:d={fo:.3f}[m];"
-                  f"[0:a]volume={orig:.3f}[o];[o][m]amix=inputs=2:duration=first:normalize=0[a]")
+                  f"afade=t=in:st=0:d=0.6,afade=t=out:st={max(0.0, total - fo):.3f}:d={fo:.3f},"
+                  f"volume={mvol}[m];"
+                  f"[0:a]volume={ovol}[o];[o][m]amix=inputs=2:duration=first:normalize=0[a]")
             run([ffmpeg(), "-hide_banner", "-loglevel", "error", "-y",
                  "-i", str(joined), "-i", str(music), "-filter_complex", fc,
                  "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
@@ -919,6 +945,16 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
         return out_path
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _merge_ranges(rs, gap=0.6):
+    out = []
+    for a, b in sorted(rs):
+        if out and a - out[-1][1] < gap:
+            out[-1] = (out[-1][0], max(out[-1][1], b))
+        else:
+            out.append((a, b))
+    return out
 
 
 def still(project, proposal, idx, at=0.5, width=480, graded=True):
@@ -976,6 +1012,9 @@ def write_srt(project, proposal, path, lang="sv", free=None):
         if tx and tx.get("text"):
             line = tx["text"] + (f"\n{tx['sub']}" if tx.get("sub") else "")
             cues.append((s["at"] + 0.3, s["at"] + min(s["duration"] - 0.1, 4.5), line))
+    from . import whisper as whisper_mod
+    cues += whisper_mod.subtitle_cues(proposal, project.data["clips"])  # det som sägs i filmen
+    cues.sort(key=lambda c: c[0])
     if not cues:
         return False
 

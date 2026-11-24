@@ -23,7 +23,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 import cv2
 
 from . import (TAGLINE, __version__, ai, cliptext, divelog, editor, effects, generator, i18n, media, musiclib,
-               pipeline, prompt, render, search, tagging, vlm)
+               pipeline, prompt, render, search, tagging, vlm, whisper)
 from .config import FILM_TYPES, FORMATS, HOME, LOOKS, PLATFORMS, PROJECTS_DIR, STYLES
 from .project import JOBS, Project, auto_name, save_default_settings
 
@@ -298,11 +298,18 @@ def _auto_label(plans):
     return "Import, analys och " + ", ".join(FILM_TYPES[p["type"]]["label"].lower() for p in plans)
 
 
-def _vlm_download():
+def _vlm_download(model_id=None):
     try:
-        vlm.download()
+        vlm.download(model_id=model_id)
     except Exception as e:  # noqa: BLE001
         print("Nedladdning av djupanalysmodellen misslyckades:", e)
+
+
+def _whisper_download(model_id=None):
+    try:
+        whisper.download(model_id=model_id)
+    except Exception as e:  # noqa: BLE001
+        print("Nedladdning av Whisper misslyckades:", e)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -654,11 +661,47 @@ class Handler(BaseHTTPRequestHandler):
         if api == ["vlm", "download"]:
             if self.is_remote:
                 raise ApiError("Det här görs på datorn.", HTTPStatus.FORBIDDEN)
+            mid = body.get("model_id") or None
+            if mid:
+                try:
+                    vlm.set_choice(mid)
+                except ValueError as e:
+                    raise ApiError(str(e))
             st = vlm.status()
             if not st["supported"]:
                 raise ApiError("Djupanalys stöds inte på den här datorn")
             if st["download"].get("state") != "running":
-                threading.Thread(target=_vlm_download, daemon=True).start()
+                threading.Thread(target=_vlm_download, args=(mid,), daemon=True).start()
+            return self._json({"ok": True})
+        if api == ["vlm", "model"]:
+            if self.is_remote:
+                raise ApiError("Det här görs på datorn.", HTTPStatus.FORBIDDEN)
+            try:
+                vlm.set_choice(str(body.get("id") or ""))
+            except ValueError as e:
+                raise ApiError(str(e))
+            return self._json(vlm.status())
+        if api == ["whisper", "settings"]:
+            if self.is_remote:
+                raise ApiError("Det här görs på datorn.", HTTPStatus.FORBIDDEN)
+            try:
+                whisper.save_settings(model=body.get("model") or None, lang=body.get("lang") or None)
+            except ValueError as e:
+                raise ApiError(str(e))
+            return self._json(whisper.whisper_status())
+        if api == ["whisper", "download"]:
+            if self.is_remote:
+                raise ApiError("Det här görs på datorn.", HTTPStatus.FORBIDDEN)
+            if not whisper.binary():
+                raise ApiError("Tal till text finns inte i den här versionen")
+            mid = body.get("model_id") or None
+            if mid:
+                try:
+                    whisper.save_settings(model=mid)
+                except ValueError as e:
+                    raise ApiError(str(e))
+            if whisper.whisper_status()["download"].get("state") != "running":
+                threading.Thread(target=_whisper_download, args=(mid,), daemon=True).start()
             return self._json({"ok": True})
         if len(api) < 3 or api[0] != "p":
             raise ApiError("Hittades inte", HTTPStatus.NOT_FOUND)
@@ -722,6 +765,12 @@ class Handler(BaseHTTPRequestHandler):
         if action == ["analyze"]:
             JOBS.start(p.id, "analyze", pipeline.analyze_all, p.id, bool(body.get("redo")),
                        label="Analys" + (" och djupanalys" if vlm.ready() else ""), project_name=p.data["name"])
+            return self._json({"ok": True})
+        if action == ["speech"]:
+            if not whisper.ready():
+                raise ApiError("Ladda ner tal till text först")
+            JOBS.start(p.id, "speech", pipeline.transcribe, p.id, bool(body.get("redo")),
+                       label="Tal till text", project_name=p.data["name"])
             return self._json({"ok": True})
         if action == ["deep"]:
             if not vlm.ready():

@@ -107,6 +107,18 @@ def selftest() -> int:
         traceback.print_exc()
         ok = False
     try:
+        from . import whisper
+        wb = whisper.binary()
+        print("Tal till text: whisper-cli", wb or "saknas", "| förvald modell", whisper.model()["name"])
+        assert wb, "whisper-cli saknas i appen"
+        import subprocess as _s
+        r = _s.run([str(wb), "--version"], capture_output=True, text=True, timeout=60)
+        print("whisper-cli --version:", (r.stdout + r.stderr).strip().splitlines()[-1:])
+        assert r.returncode == 0, "whisper-cli startar inte i appen"
+    except Exception:  # noqa: BLE001
+        traceback.print_exc()
+        ok = False
+    try:
         import webview  # noqa: F401
         print("pywebview: finns")
     except Exception as e:  # noqa: BLE001

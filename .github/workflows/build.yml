@@ -26,7 +26,7 @@ jobs:
       - name: Hämta FFmpeg
         run: bash packaging/get_ffmpeg_mac.sh
 
-      - name: Hämta llama.cpp (djupanalys med Qwen3-VL)
+      - name: Hämta llama.cpp (djupanalys)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -50,6 +50,17 @@ jobs:
           cd ..
           ls -la packaging/llama | head -40
           packaging/llama/llama-server --version
+
+      - name: Bygg whisper.cpp (tal till text)
+        run: |
+          git clone --depth 1 https://github.com/ggml-org/whisper.cpp wcpp
+          cmake -S wcpp -B wcpp/build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DGGML_METAL=ON \
+            -DGGML_METAL_EMBED_LIBRARY=ON -DWHISPER_BUILD_TESTS=OFF -DGGML_NATIVE=OFF -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0
+          cmake --build wcpp/build -j 4 --config Release --target whisper-cli
+          mkdir -p packaging/whisper
+          cp wcpp/build/bin/whisper-cli packaging/whisper/
+          otool -L packaging/whisper/whisper-cli
+          packaging/whisper/whisper-cli --version
 
       - name: Hämta AI-modell
         env:
@@ -81,12 +92,18 @@ jobs:
       - name: Självtest av den byggda appen
         run: dist/DeHazeIQ.app/Contents/MacOS/DeHazeIQ --selftest
 
-      - name: Test av djupanalysen med en liten modell (Qwen3-VL 2B)
+      - name: Test av djupanalysen med en liten modell (Qwen3.5 4B)
         continue-on-error: true
         timeout-minutes: 25
         run: |
           pip install -r requirements.txt
           DEHAZEIQ_LLAMA="$(find dist/DeHazeIQ.app -name llama-server | head -1)" python tests/vlm_test.py
+
+      - name: Test av tal till text (Whisper base)
+        continue-on-error: true
+        timeout-minutes: 15
+        run: |
+          DEHAZEIQ_WHISPER="$(find dist/DeHazeIQ.app -name whisper-cli | head -1)" python tests/whisper_test.py
 
       - name: Skapa DMG
         run: |
@@ -120,6 +137,17 @@ jobs:
           Get-ChildItem ffx -Recurse -Include ffmpeg.exe,ffprobe.exe | Copy-Item -Destination packaging/ffmpeg
           packaging/ffmpeg/ffmpeg.exe -hide_banner -version | Select-Object -First 1
 
+      - name: Bygg whisper.cpp (tal till text)
+        shell: bash
+        run: |
+          git clone --depth 1 https://github.com/ggml-org/whisper.cpp wcpp
+          cmake -S wcpp -B wcpp/build -DBUILD_SHARED_LIBS=OFF -DWHISPER_BUILD_TESTS=OFF -DGGML_NATIVE=OFF \
+            -DGGML_OPENMP=OFF -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          cmake --build wcpp/build -j 4 --config Release --target whisper-cli
+          mkdir -p packaging/whisper
+          cp wcpp/build/bin/Release/whisper-cli.exe packaging/whisper/
+          packaging/whisper/whisper-cli.exe --version
+
       - name: Hämta AI-modell
         env:
           GH_TOKEN: ${{ github.token }}
@@ -150,6 +178,14 @@ jobs:
           $p = Start-Process -FilePath "dist\DeHazeIQ\DeHazeIQ.exe" -ArgumentList "--selftest" -Wait -PassThru
           if (Test-Path dehazeiq-selftest.log) { Get-Content dehazeiq-selftest.log }
           exit $p.ExitCode
+
+      - name: Test av tal till text (Whisper base)
+        continue-on-error: true
+        timeout-minutes: 15
+        shell: bash
+        run: |
+          pip install -r requirements.txt
+          DEHAZEIQ_WHISPER="$(pwd)/$(find dist/DeHazeIQ -name whisper-cli.exe | head -1)" python tests/whisper_test.py
 
       - name: Skapa installationsprogram
         shell: pwsh

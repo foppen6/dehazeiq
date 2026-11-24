@@ -414,3 +414,13 @@ textarea.field { color: var(--text); height: auto; padding: 10px 12px; line-heig
 .ovbar { position: absolute; top: 2px; height: 20px; border-radius: 6px; border: 0; font: inherit; font-size: 10px; color: #031014; background: var(--accent); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding: 0 6px; cursor: pointer; text-align: left; }
 .ovbar.st-fun { background: #FFD84A; } .ovbar.st-doc { background: #E6EEF3; } .ovbar.st-meme { background: #fff; }
 .ovbar.st-place { background: #9FE7F0; } .ovbar.st-title { background: #C9B48A; } .ovbar.st-chapter { background: #B89AE8; }
+
+/* tal till text */
+.said { font-size: 12.5px; color: var(--muted, #8aa); margin: 6px 0 2px; display: flex; gap: 6px; align-items: flex-start; line-height: 1.35; }
+.said svg { flex: none; margin-top: 2px; }
+.transcript { font-size: 13px; line-height: 1.5; max-height: 160px; overflow: auto; margin-top: 6px; }
+.transcript span.t { color: var(--muted, #8aa); font-variant-numeric: tabular-nums; margin-right: 6px; }
+.modelpick { display: grid; gap: 8px; margin-top: 10px; }
+.modelpick button { height: auto; min-height: 52px; text-align: left; display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 10px 12px; }
+.modelpick button small { grid-column: 1 / -1; opacity: .75; font-weight: 400; }
+.modelpick button[disabled] { opacity: .45; }

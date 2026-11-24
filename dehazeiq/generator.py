@@ -14,6 +14,7 @@ import uuid
 
 import numpy as np
 
+from . import whisper
 from . import divearc, analysis, effects, quality, story
 from .config import FORMATS, STYLES
 
@@ -116,6 +117,11 @@ def build_candidates(project, style, fmt="16:9", favorites=(), use_interest=True
     emb_kind = "clip" if all(k == "clip" for _, _, k in loaded) else "hist"
 
     wlen = float(np.clip(style["avg_shot"] * 1.6, style["min_shot"], style["max_shot"]))
+    # Tal (Whisper): vlogg och dokumentär väljer gärna klipp där något sägs, musikfilmer undviker dem
+    sp_pref = style.get("speech_pref")
+    if sp_pref is None:
+        sp_pref = (0.15 if style.get("label") == "Dokumentär" else
+                   -0.15 if style.get("no_text") or style.get("music_video") or style.get("promo") else 0.0)
     stride = max(1, int(round(0.5 / DT)))
     cands = []
     for c, d, _ in loaded:
@@ -145,6 +151,7 @@ def build_candidates(project, style, fmt="16:9", favorites=(), use_interest=True
         fw, fh = _crop_fraction(c, fmt)
         spread = d["spx"] if fw < 0.999 and "spx" in d else (d["spy"] if fh < 0.999 and "spy" in d else None)
         frac = fw if fw < 0.999 else fh
+        has_speech = bool((c.get("speech") or {}).get("segments"))
         for i0, i1 in _scenes(d["cut"]):
             scene_len = (i1 - i0) * DT
             if scene_len < style["min_shot"]:
@@ -168,14 +175,16 @@ def build_candidates(project, style, fmt="16:9", favorites=(), use_interest=True
                     passes = (float(frank[a:b].mean()) >= quality.WIN_MIN_FOCUS_RANK
                               and float(frank_s[a:b].min()) >= quality.WIN_MIN_FOCUS_RANK_LOW)
                 mi = float(interest[a:b].mean()) if interest is not None else None
-                if passes and mi is not None and use_interest:
-                    passes = mi >= quality.WIN_MIN_INTEREST
+                talk = whisper.speech_share(c, float(t[a]), float(t[b - 1]) + DT) if has_speech else 0.0
+                if passes and mi is not None and use_interest and not (sp_pref > 0 and talk >= 0.4):
+                    passes = mi >= quality.WIN_MIN_INTEREST  # någon som pratar är sevärt ändå
                 if not passes and not is_fav:
                     continue
                 util = ms + style["motion_pref"] * (mm - 0.3) * 0.5 - 0.8 * max(0.0, 0.55 - ma)
                 if mi is not None:
                     # AI: sevärdhet och skönhet väger lika tungt som teknisk kvalitet
                     util = 0.4 * util + 0.35 * mi + 0.25 * float(beauty[a:b].mean())
+                util += sp_pref * talk
                 if not passes:
                     util -= 1.0  # favorit utan godkänd sekvens: ta den minst dåliga
                 # Motivet måste rymmas i beskärningen (t.ex. 9:16 ur liggande video)
@@ -194,6 +203,7 @@ def build_candidates(project, style, fmt="16:9", favorites=(), use_interest=True
                 cands.append({
                     "clip": c, "data": d, "i0": a, "i1": b, "start": s, "end": e,
                     "util": float(util), "quality": float(ms), "motion": float(mm),
+                    "speech": round(whisper.speech_share(c, s, e), 3) if has_speech else 0.0,
                     "emb": _segment_embedding(d, emb_kind, s, e),
                     "time": float(c.get("created") or 0) + s,
                 })
@@ -368,13 +378,17 @@ def _place(c, dur, fmt):
     t = d["t"]
     q = d["quality"]
     s0, s1 = c["start"], c["end"]
+    segs = ((c["clip"].get("speech") or {}).get("segments")) or []
     if s1 - s0 <= dur + 1e-6:
         start = s0
     else:
-        best, start = -1.0, s0
+        best, start = -1e9, s0
         for s in np.arange(s0, s1 - dur + 1e-6, DT):
             m = (t >= s) & (t < s + dur)
             v = float(q[m].mean()) if m.any() else 0.0
+            if segs:  # klipp inte av en mening mitt i
+                e = s + dur
+                v -= 0.25 * sum(1 for g in segs if g["start"] < s - 0.1 < g["end"] or g["start"] < e + 0.1 < g["end"])
             if v > best:
                 best, start = v, float(s)
     fw, fh = _crop_fraction(c["clip"], fmt)

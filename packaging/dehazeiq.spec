@@ -38,6 +38,13 @@ llama = os.path.join(PKG, "llama")
 if os.path.isdir(llama):
     datas.append((llama, "llama"))
 
+# whisper.cpp (whisper-cli) för tal till text – Mac och Windows, byggs av byggsystemet
+whisper_dir = os.path.join(PKG, "whisper")
+if os.path.isdir(whisper_dir):
+    for f in os.listdir(whisper_dir):
+        if not f.startswith("."):
+            binaries.append((os.path.join(whisper_dir, f), "whisper"))
+
 a = Analysis(
     [os.path.join(PKG, "run_dehazeiq.py")],
     pathex=[ROOT],

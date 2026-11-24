@@ -1,11 +1,11 @@
-"""Djupanalys med Qwen3-VL: en språk- och bildmodell som beskriver vad som händer i klippen.
+"""Djupanalys med en bild- och språkmodell som beskriver vad som händer i klippen.
 
 Körs lokalt med llama.cpp (llama-server), som följer med Mac-versionen och använder
 Apple-chipets grafikdel. Modellen (flera GB) laddas ner först när användaren ber om det.
-Storleken väljs efter datorns minne:
-    ≥ 32 GB  Qwen3-VL-30B-A3B (snabb trots storleken: bara ~3 miljarder parametrar per ord)
-    ≥ 16 GB  Qwen3-VL-8B
-    ≥  8 GB  Qwen3-VL-4B
+Användaren väljer modell själv (MODELS); förvalet beror på datorns minne:
+    ≥ 32 GB  Qwen3.6 35B-A3B (snabb trots storleken: bara ~3 miljarder parametrar per ord)
+    ≥ 16 GB  Qwen3.5 9B
+    ≥  8 GB  Qwen3.5 4B
 """
 
 import base64
@@ -33,11 +33,21 @@ from .media import subprocess_kwargs
 
 VLM_VERSION = 2  # 2: pratbubbla (caption)
 HF = "https://huggingface.co"
-MODELS = [  # (minsta minne i GB, repo, visningsnamn, ungefärlig nedladdning i GB)
-    (32, "Qwen/Qwen3-VL-30B-A3B-Instruct-GGUF", "Qwen3-VL 30B", 19),
-    (16, "Qwen/Qwen3-VL-8B-Instruct-GGUF", "Qwen3-VL 8B", 6),
-    (8, "Qwen/Qwen3-VL-4B-Instruct-GGUF", "Qwen3-VL 4B", 3),
+MODELS = [  # bild- och språkmodeller som kan köras lokalt; "need" = minsta minne i GB
+    {"id": "qwen36-35b", "repo": "ggml-org/Qwen3.6-35B-A3B-GGUF", "name": "Qwen3.6 35B", "need": 32, "size": 20,
+     "default": True, "about": "Nyast och bäst på att beskriva vad som händer. Rekommenderas för 32 GB eller mer."},
+    {"id": "gemma4-26b", "repo": "unsloth/gemma-4-26B-A4B-it-GGUF", "name": "Gemma 4 26B", "need": 32, "size": 17,
+     "about": "Googles modell. Snabb och bra på bildtexter och språk."},
+    {"id": "qwen3vl-30b", "repo": "Qwen/Qwen3-VL-30B-A3B-Instruct-GGUF", "name": "Qwen3-VL 30B", "need": 32,
+     "size": 19, "about": "Den tidigare modellen. Stark på långa klipp."},
+    {"id": "qwen35-9b", "repo": "unsloth/Qwen3.5-9B-GGUF", "name": "Qwen3.5 9B", "need": 16, "size": 6,
+     "default": True, "about": "Bästa mellanstorleken för 16 GB."},
+    {"id": "gemma4-e4b", "repo": "ggml-org/gemma-4-E4B-it-GGUF", "name": "Gemma 4 E4B", "need": 12, "size": 8,
+     "about": "Liten och snabb."},
+    {"id": "qwen35-4b", "repo": "unsloth/Qwen3.5-4B-GGUF", "name": "Qwen3.5 4B", "need": 8, "size": 3,
+     "default": True, "about": "Minst, för datorer med 8 GB."},
 ]
+CHOICE_FILE = HOME / "vlm.json"
 MODEL_DIR = HOME / "models" / "vlm"
 _download = {"state": "idle", "progress": 0.0, "message": ""}
 _dl_lock = threading.Lock()
@@ -95,12 +105,47 @@ def gpu_ok():
     return sys.platform == "darwin" and platform.machine() == "arm64"
 
 
+def _as(m):
+    return {"id": m["id"], "repo": m["repo"], "name": m["name"], "size_gb": m["size"]}
+
+
+def chosen_id():
+    try:
+        return json.loads(CHOICE_FILE.read_text("utf-8")).get("model")
+    except (OSError, ValueError):
+        return None
+
+
+def set_choice(mid):
+    if mid not in {m["id"] for m in MODELS}:
+        raise ValueError("Okänd modell")
+    CHOICE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    CHOICE_FILE.write_text(json.dumps({"model": mid}), "utf-8")
+
+
 def choose_model():
+    """Användarens val om det får plats i minnet, annars den bästa som passar datorn.
+    En redan nedladdad modell väljs hellre än att börja om med en ny."""
     gb = ram_gb()
-    for need, repo, name, size in MODELS:
-        if gb >= need:
-            return {"repo": repo, "name": name, "size_gb": size}
-    return None
+    fits = [m for m in MODELS if gb >= m["need"]]
+    if not fits:
+        return None
+    cid = chosen_id()
+    for m in fits:
+        if m["id"] == cid:
+            return _as(m)
+    have = [m for m in fits if model_paths(m["repo"])]
+    if have:
+        return _as(have[0])
+    return _as(next((m for m in fits if m.get("default")), fits[0]))
+
+
+def models_list():
+    gb = ram_gb()
+    cur = (choose_model() or {}).get("id")
+    return [{"id": m["id"], "name": m["name"], "size_gb": m["size"], "about": m["about"], "fits": gb >= m["need"],
+             "need": m["need"], "installed": bool(model_paths(m["repo"])), "current": m["id"] == cur}
+            for m in MODELS]
 
 
 def model_paths(repo):
@@ -122,8 +167,13 @@ def status():
         "supported": bool(server_binary()) and gpu_ok() and m is not None,
         "binary": bool(server_binary()), "gpu": gpu_ok(), "ram_gb": round(ram_gb()),
         "model": m["name"] if m else None, "size_gb": m["size_gb"] if m else None,
-        "ready": bool(m and model_paths(m["repo"])),
+        "ready": bool(m and model_paths(m["repo"])), "models": models_list(),
     }
+    try:
+        from .whisper import whisper_status
+        st["whisper"] = whisper_status()
+    except Exception as e:  # noqa: BLE001
+        st["whisper"] = {"available": False, "error": str(e)}
     with _dl_lock:
         st["download"] = dict(_download)
     return st
@@ -140,7 +190,8 @@ def _pick_files(repo):
     req = urllib.request.Request(f"{HF}/api/models/{repo}", headers={"User-Agent": "DeHazeIQ"})
     with urllib.request.urlopen(req, timeout=60) as r:
         files = [s["rfilename"] for s in json.loads(r.read().decode("utf-8")).get("siblings", [])]
-    gguf = [f for f in files if f.lower().endswith(".gguf")]
+    gguf = [f for f in files if f.lower().endswith(".gguf") and "/" not in f
+            and not Path(f).name.lower().startswith(("mtp-", "dflash-"))]
     mm = [f for f in gguf if "mmproj" in f.lower()]
     llm = [f for f in gguf if "mmproj" not in f.lower()]
 
@@ -151,7 +202,7 @@ def _pick_files(repo):
                 return sorted(hit, key=len)[0]
         return sorted(cands, key=len)[0] if cands else None
 
-    model = pick(llm, ["q4_k_m", "q4_k_s", "q5_k_m", "q8_0"])
+    model = pick(llm, ["-q4_k_m", "q4_k_m", "q4_k_s", "q5_k_m", "q8_0"])
     mmproj = pick(mm, ["f16", "q8_0", "bf16"])
     if not model or not mmproj:
         raise RuntimeError(f"Hittade inga modellfiler i {repo}")
@@ -181,8 +232,10 @@ def _fetch(url, dst, report):
     part.replace(dst)
 
 
-def download(progress=None):
-    """Laddar ner den modell som passar datorn. Kan återupptas om den avbryts."""
+def download(progress=None, model_id=None):
+    """Laddar ner den valda modellen (eller den som passar datorn). Kan återupptas om den avbryts."""
+    if model_id:
+        set_choice(model_id)
     m = choose_model()
     if not m:
         raise RuntimeError("Datorn har för lite minne för djupanalys")
@@ -242,7 +295,7 @@ class Server:
             model, mmproj = paths
         self.port = _free_port()
         cmd = [str(server_binary()), "-m", str(model), "--mmproj", str(mmproj), "--host", "127.0.0.1",
-               "--port", str(self.port), "-c", str(ctx), "-ngl", os.environ.get("DEHAZEIQ_NGL", "99")]
+               "--port", str(self.port), "-c", str(ctx), "-ngl", os.environ.get("DEHAZEIQ_NGL", "99"), "--jinja"]
         log = open(HOME / "llama-server.log", "w", encoding="utf-8", errors="replace")
         self.proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, **subprocess_kwargs())
         self._log = log
@@ -270,13 +323,17 @@ class Server:
                 b64 = base64.b64encode(buf.tobytes()).decode("ascii")
                 content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
         body = {"messages": [{"role": "user", "content": content}], "temperature": 0.2,
-                "max_tokens": max_tokens}
+                "max_tokens": max_tokens,
+                # Qwen3.5/3.6 och Gemma 4 kan "tänka högt" först – inte här, svaret ska komma direkt
+                "chat_template_kwargs": {"enable_thinking": False}}
         req = urllib.request.Request(f"http://127.0.0.1:{self.port}/v1/chat/completions",
                                      data=json.dumps(body).encode("utf-8"),
                                      headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=300) as r:
             out = json.loads(r.read().decode("utf-8"))
-        return out["choices"][0]["message"]["content"]
+        msg = out["choices"][0]["message"]
+        text = msg.get("content") or ""
+        return re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip()
 
     def close(self):
         try:

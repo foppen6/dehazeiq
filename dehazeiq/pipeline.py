@@ -418,13 +418,15 @@ def deep_analyze(progress, pid, redo=False):
 
     from . import vlm
     proj = Project(pid)
+    model = (vlm.choose_model() or {}).get("name")
+    # om igen när analysversionen eller modellen har ändrats (t.ex. bytt till en nyare modell)
     clips = [c for c in proj.clips() if quality.is_usable(c) and c.get("analysis")
-             and (redo or (c.get("vlm") or {}).get("v") != vlm.VLM_VERSION)]
+             and (redo or (c.get("vlm") or {}).get("v") != vlm.VLM_VERSION
+                  or (c.get("vlm") or {}).get("model") != model)]
     if not clips:
         return {"described": 0}
     jobs = [(c, t) for c in clips for t in _keyframe_times(proj, c)]
     bio = ai.get_bio()
-    model = (vlm.choose_model() or {}).get("name")
     progress(0.0, f"Startar {model} …")
     done = 0
     with vlm.Server() as server:
@@ -451,14 +453,65 @@ def deep_analyze(progress, pid, redo=False):
     return {"described": len(clips), "frames": len(jobs)}
 
 
+def transcribe(progress, pid, redo=False):
+    """Tal till text (Whisper) för klipp med ljud. 360-vyer får sitt tal från originalklippet."""
+    from . import whisper
+    if not whisper.ready():
+        return {"transcribed": 0}
+    proj = Project(pid)
+    mid = whisper.model()["id"]
+
+    def todo(c):
+        sp = c.get("speech") or {}
+        return (redo or sp.get("v") != whisper.SPEECH_VERSION or sp.get("model") != mid) \
+            and c.get("has_audio") and not c.get("is360") and not c.get("is_photo")
+    clips = [c for c in proj.clips() if todo(c)]
+    if not clips:
+        return {"transcribed": 0}
+    done, talk, cache = 0, 0, {}
+    for i, c in enumerate(clips):
+        progress(i / len(clips), f"Lyssnar efter tal {i + 1} av {len(clips)}: {c['name']}")
+        parent = proj.data["clips"].get(c.get("parent360") or "")
+        src = Path(parent["path"]) if parent else Path(c["path"])
+        if not src.exists():
+            src = proj.proxy_path(c["id"])
+        try:
+            key = str(src)
+            if key not in cache:
+                cache[key] = whisper.transcribe(src)
+            r = cache[key]
+            proj.update_clip(c["id"], speech={"v": whisper.SPEECH_VERSION, "model": mid, "lang": r["lang"],
+                                              "segments": r["segments"]})
+            done += 1
+            talk += bool(r["segments"])
+        except Exception as e:  # noqa: BLE001
+            print("Tal till text misslyckades för", c["name"], e)
+    return {"transcribed": done, "with_speech": talk}
+
+
+def _speech_on(pid):
+    from . import whisper
+    s = (Project(pid).data.get("settings") or {})
+    return whisper.ready() and s.get("speech_auto", True)
+
+
 def analyze_all(progress, pid, redo=False):
-    """Analys och – om modellen finns – djupanalys i samma jobb."""
+    """Analys, tal till text och – om modellen finns – djupanalys i samma jobb."""
     from . import vlm
     deep = vlm.ready()
-    res = analyze(_stage(progress, 0.0, 0.7 if deep else 1.0, "Analys"), pid, redo)
+    talk = _speech_on(pid)
+    a_hi = 0.6 if deep else (0.8 if talk else 1.0)
+    res = analyze(_stage(progress, 0.0, a_hi, "Analys"), pid, redo)
+    if talk:
+        t_hi = 0.7 if deep else 1.0
+        try:
+            res["speech"] = transcribe(_stage(progress, a_hi, t_hi, "Tal"), pid, redo)
+        except Exception as e:  # noqa: BLE001
+            print("Tal till text misslyckades:", e)
+        a_hi = t_hi
     if deep:
         try:
-            res["deep"] = deep_analyze(_stage(progress, 0.7, 1.0, "Djupanalys"), pid, redo)
+            res["deep"] = deep_analyze(_stage(progress, a_hi, 1.0, "Djupanalys"), pid, redo)
         except Exception as e:  # noqa: BLE001
             print("Djupanalysen misslyckades:", e)
             res["deep_error"] = str(e)
@@ -480,7 +533,14 @@ def auto(progress, pid, paths=None):
         result["import"] = import_media(_stage(progress, 0.0, 0.35, "1/4 Läser in"), pid, paths)
     from . import vlm
     deep = vlm.ready()
-    result["analysis"] = analyze(_stage(progress, 0.35, 0.6 if deep else 0.72, "2/4 Analyserar"), pid)
+    talk = _speech_on(pid)
+    a_hi = 0.55 if deep else (0.66 if talk else 0.72)
+    result["analysis"] = analyze(_stage(progress, 0.35, a_hi, "2/4 Analyserar"), pid)
+    if talk:
+        try:
+            result["speech"] = transcribe(_stage(progress, a_hi, 0.6 if deep else 0.72, "2/4 Tal"), pid)
+        except Exception as e:  # noqa: BLE001
+            print("Tal till text misslyckades, fortsätter utan:", e)
     if deep:
         try:
             result["deep"] = deep_analyze(_stage(progress, 0.6, 0.72, "2/4 Djupanalys"), pid)

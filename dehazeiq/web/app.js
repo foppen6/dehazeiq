@@ -96,6 +96,7 @@ const fail = (e) => toast(e.message || String(e));
 function icon(name, size = 18) {
   const p = {
     upload: '<path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>',
+    mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/>',
     spark: '<path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/>',
     music: '<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>',
     redo: '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>',
@@ -359,7 +360,7 @@ async function saveSettings(patch) {
 const EFFECT_INFO = { transitions: "Mjuka övergångar", slowmo: "Slowmotion", zoom: "Långsam zoom", title: "Titel",
   vignette: "Vinjett", fast: "Snabbspolning", freeze: "Frysbild", punch: "Zoomryck", labels: "Textskyltar", sfx: "Ljudeffekter",
   enhance: "Bildförbättring", stabilize: "Stabilisering", grain: "Filmkorn", letterbox: "Svarta kanter", flash: "Blixt på takt", divedata: "Dykdata",
-  cam360: "360-effekter", credits: "Musiktack" };
+  cam360: "360-effekter", credits: "Musiktack", speech: "Undertexter från tal", voice: "Hör talet" };
 const effectsOn = () => Object.assign(Object.fromEntries(Object.keys(EFFECT_INFO).map((k) => [k, true])), settings().effects || {});
 
 async function toggleEffect(key) {
@@ -609,41 +610,92 @@ function meter(v) {
 
 async function loadVlm() {
   try {
+    const prev = state.vlm || {};
     state.vlm = await api("GET", "/api/vlm");
     const dl = state.vlm.download || {};
-    if (dl.state === "running") {
+    const wdl = (state.vlm.whisper || {}).download || {};
+    if (dl.state === "running" || wdl.state === "running") {
       if (!state.vlmPoll) state.vlmPoll = setInterval(loadVlm, 1500);
     } else if (state.vlmPoll) {
       clearInterval(state.vlmPoll); state.vlmPoll = null;
-      if (dl.state === "done") toast("Djupanalysen är klar att använda. Den körs automatiskt efter varje analys.", true);
-      if (dl.state === "error") toast(`Nedladdningen avbröts: ${dl.message}. Försök igen – den fortsätter där den slutade.`);
     }
+    const was = (prev.download || {}).state, wwas = ((prev.whisper || {}).download || {}).state;
+    if (was === "running" && dl.state === "done") toast("Djupanalysen är klar att använda. Den körs automatiskt efter varje analys.", true);
+    if (was === "running" && dl.state === "error") toast(`Nedladdningen avbröts: ${dl.message}. Försök igen – den fortsätter där den slutade.`);
+    if (wwas === "running" && wdl.state === "done") toast("Tal till text är klart. Tryck ”Lyssna efter tal” eller kör analysen – det sker sedan automatiskt.", true);
+    if (wwas === "running" && wdl.state === "error") toast(`Nedladdningen av Whisper avbröts: ${wdl.message}`);
     const el = $("#vlmCard");
     if (el) el.outerHTML = deepCard();
-  } catch (e) { /* ingen djupanalys */ }
+  } catch (e) { /* ingen AI-info */ }
+}
+
+function modelPicker(v) {
+  const list = (v.models || []).map((m) => `<button class="btn" data-vlm-model="${m.id}" ${m.fits ? "" : "disabled"} aria-pressed="${!!m.current}"
+      title="${m.fits ? "" : `Kräver minst ${m.need} GB minne`}">
+      <b>${esc(m.name)}${m.current ? " · vald" : ""}</b><span class="muted num">${m.installed ? "Nedladdad" : `${m.size_gb} GB`}</span>
+      <small>${esc(m.about)}${m.fits ? "" : ` Kräver ${m.need} GB.`}</small></button>`).join("");
+  return `<div class="modelpick">${list}</div>`;
+}
+
+function speechCard() {
+  const w = (state.vlm || {}).whisper;
+  if (!w || !w.available || (state.info && state.info.remote)) return "";
+  const dl = w.download || {};
+  const withAudio = clips().filter((c) => c.has_audio && !c.is360 && !c.is_photo);
+  const heard = withAudio.filter((c) => c.speech);
+  const talk = heard.filter((c) => c.speech.segments && c.speech.segments.length);
+  let body, btn = "";
+  if (dl.state === "running") {
+    body = esc(dl.message || "Laddar ner …");
+    btn = `<div class="bar" style="width:160px"><i style="width:${Math.round((dl.progress || 0) * 100)}%"></i></div>`;
+  } else if (!w.ready) {
+    body = `Whisper lyssnar på klippen och skriver ner det som sägs – helt på datorn, utan internet. Ger automatiska undertexter, och vloggar och dokumentärer väljer gärna klipp där någon pratar. ${w.model.id !== "turbo" ? "På den här datorn används en mindre, snabbare modell." : ""}`;
+    btn = `<button class="btn primary" data-act="whisper-download">Ladda ner ${esc(w.model.name)} (${String(w.model.size_gb).replace(".", ",")} GB)</button>`;
+  } else {
+    body = heard.length ? `Tal hittat i ${talk.length} av ${withAudio.length} klipp med ljud. Undertexter läggs in automatiskt (kan stängas av under Effekter).`
+      : `${esc(w.model.name)} är redo. Lyssnar automatiskt efter varje analys.`;
+    btn = `<button class="btn" data-act="speech" ${running() || !withAudio.length ? "disabled" : ""}>${heard.length ? "Lyssna igen" : "Lyssna efter tal"}</button>`;
+  }
+  const langs = Object.entries(w.langs || {}).map(([k, l]) => `<button class="chip" data-wlang="${k}" aria-pressed="${w.lang === k}">${l}</button>`).join("");
+  const models = (w.models || []).map((m) => `<button class="chip" data-wmodel="${m.id}" aria-pressed="${!!m.current}" title="${esc(m.about)}">${esc(m.name.replace("Whisper ", ""))}${m.recommended ? " ★" : ""}${m.installed ? "" : ` · ${String(m.size_gb).replace(".", ",")} GB`}</button>`).join("");
+  const lines = talk.slice(0, 4).map((c) => `<div><b style="font-weight:500">${esc(c.name)}</b>: ${c.speech.segments.slice(0, 2).map((g) => `<span class="t">${fmtDur(g.start)}</span>${esc(g.text)}`).join(" ")}</div>`).join("");
+  return `<section class="box">
+    <div class="row" style="align-items:center;gap:14px"><div class="stack grow" style="gap:4px"><b>${icon("mic", 15)} Tal till text · ${esc(w.model.name)}</b>
+      <span class="muted" style="font-size:13px">${body}</span></div>${btn}</div>
+    <div class="row" style="gap:10px;flex-wrap:wrap;font-size:12px;align-items:center"><span class="muted">Språk</span><div class="chips">${langs}</div>
+      <span class="muted">Modell</span><div class="chips">${models}</div></div>
+    ${lines ? `<div class="transcript">${lines}</div>` : ""}</section>`;
 }
 
 function deepCard() {
   const v = state.vlm;
-  if (!v || !v.supported || (state.info && state.info.remote)) return '<div id="vlmCard"></div>';
-  const dl = v.download || {};
-  const described = clips().filter((c) => c.vlm && c.vlm.frames).length;
-  const usable = clips().filter((c) => c.analysis && !c.excluded && !c.auto_excluded).length;
-  let body, btn = "";
-  if (dl.state === "running") {
-    body = `${esc(dl.message || "Laddar ner …")}`;
-    btn = `<div class="bar" style="width:160px"><i style="width:${Math.round((dl.progress || 0) * 100)}%"></i></div>`;
-  } else if (!v.ready) {
-    body = `AI:n tittar på klippen och beskriver vad som händer: vilket djur, vad det gör, hur roligt och vackert det är. Ger bättre urval, dramaturgi och berättartext. Körs lokalt på din ${v.ram_gb} GB-Mac.`;
-    btn = `<button class="btn primary" data-act="vlm-download">Ladda ner ${esc(v.model)} (${v.size_gb} GB)</button>`;
-  } else {
-    body = described ? `${described} av ${usable} klipp är beskrivna med ${esc(v.model)}. Körs automatiskt efter varje analys.`
-      : `${esc(v.model)} är redo. Körs automatiskt efter varje analys.`;
-    btn = `<button class="btn" data-act="deep" ${running() ? "disabled" : ""}>${described ? "Beskriv igen" : "Kör djupanalys"}</button>`;
+  if (!v || (state.info && state.info.remote)) return '<div id="vlmCard"></div>';
+  let deep = "";
+  if (v.supported) {
+    const dl = v.download || {};
+    const described = clips().filter((c) => c.vlm && c.vlm.frames).length;
+    const stale = clips().filter((c) => c.vlm && c.vlm.frames && c.vlm.model && c.vlm.model !== v.model).length;
+    const usable = clips().filter((c) => c.analysis && !c.excluded && !c.auto_excluded).length;
+    let body, btn = "";
+    if (dl.state === "running") {
+      body = `${esc(dl.message || "Laddar ner …")}`;
+      btn = `<div class="bar" style="width:160px"><i style="width:${Math.round((dl.progress || 0) * 100)}%"></i></div>`;
+    } else if (!v.ready) {
+      body = `AI:n tittar på klippen och beskriver vad som händer: vilket djur, vad det gör, hur roligt och vackert det är. Ger bättre urval, dramaturgi och berättartext. Körs lokalt på din ${v.ram_gb} GB-dator.`;
+      btn = `<button class="btn primary" data-act="vlm-download">Ladda ner ${esc(v.model)} (${v.size_gb} GB)</button>`;
+    } else {
+      body = stale ? `Du har bytt till ${esc(v.model)}. ${stale} klipp är beskrivna med en annan modell – kör djupanalysen igen för att använda den nya.`
+        : described ? `${described} av ${usable} klipp är beskrivna med ${esc(v.model)}. Körs automatiskt efter varje analys.`
+        : `${esc(v.model)} är redo. Körs automatiskt efter varje analys.`;
+      btn = `<button class="btn ${stale ? "primary" : ""}" data-act="deep" ${running() ? "disabled" : ""}>${described ? "Beskriv igen" : "Kör djupanalys"}</button>`;
+    }
+    deep = `<section class="box">
+      <div class="row" style="align-items:center;gap:14px"><div class="stack grow" style="gap:4px"><b>Djupanalys · ${esc(v.model || "")}</b>
+        <span class="muted" style="font-size:13px">${body}</span></div>${btn}
+        <button class="btn small" data-act="vlm-pick" aria-expanded="${!!state.vlmPick}">Välj AI-modell</button></div>
+      ${state.vlmPick ? modelPicker(v) : ""}</section>`;
   }
-  return `<section class="box" id="vlmCard" style="flex-direction:row;align-items:center;gap:14px">
-    <div class="stack grow" style="gap:4px"><b>Djupanalys · ${esc(v.model || "Qwen3-VL")}</b>
-      <span class="muted" style="font-size:13px">${body}</span></div>${btn}</section>`;
+  return `<div id="vlmCard" class="stack" style="gap:14px">${deep}${speechCard()}</div>`;
 }
 
 function outdatedBanner() {
@@ -762,7 +814,16 @@ function searchBar(sr) {
 function searchResults(sr) {
   if (sr.loading) return '<div class="empty">Söker …</div>';
   const hits = sr.hits || [];
-  if (!hits.length) return '<div class="empty">Inga träffar. Prova andra ord, till exempel det du ser i bilden.</div>';
+  const spoken = sr.spoken || [];
+  const said = spoken.length ? `<p class="lead" style="margin:4px 0 0">Sägs i ${spoken.length} klipp</p>
+    <div class="grid">${spoken.map((h) => `<article class="ccard">
+      <div class="img"><img loading="lazy" alt="" src="${frameUrl(h.clip_id, h.t, 480)}">
+        <span class="badge num" style="right:10px;bottom:10px;font-weight:500">${fmtDur(h.t)}</span></div>
+      <div class="body"><span style="font-size:13px" title="${esc(h.name)}">${esc(h.name)}</span>
+        <div class="said">${icon("mic", 13)}”${esc(h.said)}”</div>
+        <div class="card-actions"><button class="toggle fav" data-fav="${h.clip_id}" aria-pressed="${!!(clips().find((c) => c.id === h.clip_id) || {}).favorite}">${icon("star", 14)}Måste med</button></div></div></article>`).join("")}</div>` : "";
+  if (!hits.length && !spoken.length) return '<div class="empty">Inga träffar. Prova andra ord, till exempel det du ser i bilden eller något som sägs.</div>';
+  if (!hits.length) return said;
   const strong = hits.filter((h) => h.strong).length;
   const cards = hits.map((h) => `<article class="ccard ${h.strong ? "" : "off"}">
       <div class="img"><img loading="lazy" alt="" src="${frameUrl(h.clip_id, h.t, 480)}">
@@ -774,7 +835,7 @@ function searchResults(sr) {
         <div class="card-actions"><button class="toggle fav" data-fav="${h.clip_id}" aria-pressed="${!!(clips().find((c) => c.id === h.clip_id) || {}).favorite}">${icon("star", 14)}Måste med</button></div></div></article>`).join("");
   return `<div class="spread"><p class="lead" style="margin:0">${strong} tydliga träffar för ”${esc(sr.query)}”</p>
       <button class="btn primary" data-act="search-film" ${running() ? "disabled" : ""}>${icon("film", 16)}Gör film av träffarna</button></div>
-    <div class="grid">${cards}</div>`;
+    ${said}<div class="grid">${cards}</div>`;
 }
 
 async function runSearch() {
@@ -1068,6 +1129,25 @@ document.addEventListener("click", async (ev) => {
   if (d.length) return saveSettings({ length: Number(d.length) });
   if (d.style) return saveSettings({ style: d.style });
   if (d.effect) return toggleEffect(d.effect);
+  if (d.vlmModel) {
+    try {
+      const r = await api("POST", "/api/vlm/model", { id: d.vlmModel });
+      const m = (r.models || []).find((x) => x.id === d.vlmModel) || {};
+      if (!m.installed) { await api("POST", "/api/vlm/download", { model_id: d.vlmModel }); toast(`Laddar ner ${m.name} (${m.size_gb} GB) …`, true); }
+      else toast(`${m.name} vald. Kör djupanalysen igen för att använda den.`, true);
+      state.vlmPick = false;
+    } catch (e) { fail(e); }
+    return loadVlm();
+  }
+  if (d.wlang) { try { await api("POST", "/api/whisper/settings", { lang: d.wlang }); } catch (e) { fail(e); } return loadVlm(); }
+  if (d.wmodel) {
+    try {
+      const r = await api("POST", "/api/whisper/settings", { model: d.wmodel });
+      const m = (r.models || []).find((x) => x.id === d.wmodel) || {};
+      if (!m.installed) await api("POST", "/api/whisper/download", { model_id: d.wmodel });
+    } catch (e) { fail(e); }
+    return loadVlm();
+  }
   if (d.theme !== undefined) { state.theme = d.theme || null; return render(); }
   if (d.filter) { state.filter = d.filter; return render(); }
   if (d.fav) return toggleClip(d.fav, "favorite");
@@ -1091,6 +1171,14 @@ document.addEventListener("click", async (ev) => {
     case "vlm-download":
       await api("POST", "/api/vlm/download", {});
       return loadVlm();
+    case "vlm-pick": state.vlmPick = !state.vlmPick; return loadVlm();
+    case "whisper-download":
+      await api("POST", "/api/whisper/download", {});
+      return loadVlm();
+    case "speech":
+      await api("POST", `/api/p/${state.pid}/speech`, { redo: true });
+      state.expectJob = true;
+      return pollJob();
     case "deep":
       await api("POST", `/api/p/${state.pid}/deep`, { redo: true });
       state.expectJob = true;
