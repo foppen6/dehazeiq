@@ -1,0 +1,21 @@
+name: nettest3
+on:
+  push:
+    branches: [nettest3]
+jobs:
+  t:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          for q in "Qwen3.5-VL" "Qwen3.5" "gemma-4" "Qwen3.6"; do
+            echo "== search $q"
+            curl -s "https://huggingface.co/api/models?search=$q&filter=gguf&sort=downloads&limit=15" | python3 -c "import sys,json;[print(m['id'], m.get('downloads')) for m in json.load(sys.stdin)]"
+          done
+          for r in Qwen/Qwen3.5-VL-30B-A3B-Instruct-GGUF Qwen/Qwen3.5-VL-7B-Instruct-GGUF unsloth/gemma-4-26b-a4b-it-GGUF ggml-org/gemma-4-26b-a4b-it-GGUF unsloth/Qwen3.5-35B-A3B-GGUF Qwen/Qwen3.5-27B-GGUF ggml-org/whisper.cpp; do
+            echo "== $r"; curl -s "https://huggingface.co/api/models/$r" | python3 -c "
+          import sys,json
+          d=json.load(sys.stdin)
+          if 'error' in d: print(d); sys.exit()
+          fs=[s['rfilename'] for s in d.get('siblings',[])]
+          print(len(fs), [f for f in fs if 'mmproj' in f.lower()][:6], [f for f in fs if 'Q4_K_M' in f or 'large-v3-turbo' in f][:8])"
+          done
