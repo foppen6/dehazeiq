@@ -278,6 +278,7 @@ Modellen körs lokalt med llama.cpp. Under *Välj AI-modell* i analysvyn finns:
 | Modell | Storlek | Minne |
 |---|---|---|
 | Qwen3.6 35B-A3B (förval) | 20 GB | 32 GB |
+| Qwen3.6 27B (noggrannast, 3–5 × långsammare) | 17 GB | 24 GB |
 | Gemma 4 26B-A4B | 17 GB | 32 GB |
 | Qwen3-VL 30B-A3B (den tidigare) | 19 GB | 32 GB |
 | Qwen3.5 9B | 6 GB | 16 GB |

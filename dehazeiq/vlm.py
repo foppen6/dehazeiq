@@ -36,6 +36,8 @@ HF = "https://huggingface.co"
 MODELS = [  # bild- och språkmodeller som kan köras lokalt; "need" = minsta minne i GB
     {"id": "qwen36-35b", "repo": "ggml-org/Qwen3.6-35B-A3B-GGUF", "name": "Qwen3.6 35B", "need": 32, "size": 20,
      "default": True, "about": "Nyast och bäst på att beskriva vad som händer. Rekommenderas för 32 GB eller mer."},
+    {"id": "qwen36-27b", "repo": "unsloth/Qwen3.6-27B-GGUF", "name": "Qwen3.6 27B", "need": 24, "size": 17,
+     "about": "Noggrannast: alla 27 miljarder parametrar räknas för varje ord – men 3–5 gånger långsammare."},
     {"id": "gemma4-26b", "repo": "unsloth/gemma-4-26B-A4B-it-GGUF", "name": "Gemma 4 26B", "need": 32, "size": 17,
      "about": "Googles modell. Snabb och bra på bildtexter och språk."},
     {"id": "qwen3vl-30b", "repo": "Qwen/Qwen3-VL-30B-A3B-Instruct-GGUF", "name": "Qwen3-VL 30B", "need": 32,

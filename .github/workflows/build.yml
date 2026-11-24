@@ -199,6 +199,32 @@ jobs:
           name: DeHazeIQ-windows
           path: Output/DeHazeIQ-Setup.exe
 
+  modelcheck:
+    name: Kontrollera AI-modellernas filer
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Hitta modell- och bildfiler för varje valbar modell
+        run: |
+          python3 - <<'PY'
+          import json, urllib.request
+          import importlib.util, sys, types
+          src = open("dehazeiq/vlm.py", encoding="utf-8").read()
+          start = src.index("MODELS = ["); end = src.index("]\n", start) + 1
+          ns = {}; exec(src[start:end], ns)
+          fns = src[src.index("def _pick_files"):src.index("def _fetch")]
+          g = {"urllib": urllib, "json": json, "HF": "https://huggingface.co", "Path": __import__("pathlib").Path}
+          exec(fns, g)
+          bad = 0
+          for m in ns["MODELS"]:
+              try:
+                  print(m["id"], "→", g["_pick_files"](m["repo"]))
+              except Exception as e:
+                  bad += 1; print(m["id"], "FEL:", e)
+          sys.exit(1 if bad else 0)
+          PY
+
   release:
     name: Skapa release
     # Varje lyckat bygge på main uppdaterar releasen för aktuell version (v + __version__)
