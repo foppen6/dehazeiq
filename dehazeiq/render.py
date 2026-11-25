@@ -769,7 +769,8 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
     lyric_cues = _lyric_cues(loc.get("lyrics") or [], proposal) if style.get("music_video") == "lyrics" else []
     credit = (proposal.get("music_credit") or "") if on.get("credits", True) and not style.get("no_music") else ""
     from . import texts as texts_mod
-    free_cues = [(a, b, it, (loc.get("overlays") or {}).get(it["id"]) or it) for a, b, it in texts_mod.timeline(proposal)]
+    free_cues = [(a, b, it, (loc.get("overlays") or {}).get(it["id"]) or it) for a, b, it in texts_mod.timeline(proposal)
+                 if not (it.get("auto") and not on.get("labels", True))]  # Effekter › Textskyltar av
     from . import whisper as whisper_mod
     talk = not style.get("no_text") and style.get("music_video") != "lyrics"
     speech_cues = whisper_mod.subtitle_cues(proposal, clips) if talk and on.get("speech", True) else []

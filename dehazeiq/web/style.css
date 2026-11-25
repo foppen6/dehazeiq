@@ -459,3 +459,40 @@ textarea.field { color: var(--text); height: auto; padding: 10px 12px; line-heig
 .favbtn[aria-pressed="true"] { color: #FFD84A; border-color: #FFD84A66; background: #FFD84A14; }
 .favbtn[aria-pressed="true"] svg { fill: #FFD84A; }
 .pcard.fav { box-shadow: 0 0 0 1.5px #FFD84A88; }
+
+/* redigering: tidslinjen under förhandsvisningen, allt ryms i fönstret */
+.edmain { --stageh: clamp(220px, calc(100vh - 500px), 760px); }
+.edgrid { grid-template-columns: minmax(0, 1fr) 380px; }
+.edleft { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.edleft .tl { margin-top: 0; }
+.edstill { height: var(--stageh); }
+.edorig { width: min(460px, 100%); max-height: var(--stageh); }
+.edorig video, .edorig img { max-height: var(--stageh); object-fit: contain; }
+.edinsp { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; min-height: 0; overscroll-behavior: contain; }
+.edinsp .edtabs { position: sticky; top: -18px; z-index: 5; margin: -18px -18px 0; padding: 12px 18px; background: var(--panel); border-bottom: 1px solid var(--line); }
+@media (max-width: 980px) {
+  .edgrid { grid-template-columns: 1fr; }
+  .edmain { --stageh: clamp(220px, 52vh, 620px); }
+  .edinsp { position: static; max-height: none; overflow: visible; }
+  .edinsp .edtabs { top: 0; }
+  .tlrow { overflow-x: auto; }
+}
+@media (max-height: 760px) and (min-width: 981px) { .edmain { --stageh: clamp(200px, calc(100vh - 420px), 600px); } .stagemodes { margin-bottom: 8px; } }
+.ovmeta { font-size: 11px; color: var(--text-2, #9fb0bb); display: flex; gap: 6px; align-items: center; }
+.ovbar.sel { box-shadow: 0 0 0 2px #fff; }
+.ovbar.empty { background: transparent; border: 1px dashed var(--line); color: var(--text-2, #9fb0bb); text-align: center; cursor: pointer; }
+.edmain { padding-top: 14px; }
+.edhead { margin-bottom: 12px; align-items: center; }
+.edhead h1 { font-size: 22px; margin: 0; }
+.edhead .lead { margin: 2px 0 0; font-size: 13px; }
+.edstill.placer video { pointer-events: none; }
+.edleft .tl { gap: 6px; padding: 10px 14px; }
+.edleft .tltools { padding-bottom: 4px; }
+.edleft .tlblock { height: 60px; }
+@media (max-height: 820px) and (min-width: 981px) {
+  .edleft .tlblock { height: 46px; }
+  .edleft .tltools .muted { display: none; }
+  .edleft .tl > .muted.num { display: none; }
+  .edleft .tltrack:nth-last-of-type(1) .tlaudio { padding: 2px 8px; }
+}
+.edstill { height: auto; max-height: var(--stageh); }

@@ -228,6 +228,25 @@ def apply(project, prop, op, args):
             else:
                 s.pop("nomatch", None)
         prop["match"] = m
+    elif op == "materialize":
+        from . import texts
+        if not texts.materialize(prop):
+            hist.pop()  # inget att göra: ingen ångra-punkt
+    elif op == "speech_text":
+        # rätta eller ta bort en talundertext (gäller klippet i hela projektet)
+        clip = project.data["clips"].get(args.get("clip_id"))
+        segs = ((clip or {}).get("speech") or {}).get("segments") or []
+        k = int(args.get("k", -1))
+        if not 0 <= k < len(segs):
+            raise EditError("Repliken finns inte")
+        segs = [dict(x) for x in segs]
+        if args.get("delete") or not str(args.get("text", "")).strip():
+            segs.pop(k)
+        else:
+            segs[k]["text"] = str(args["text"]).strip()[:200]
+        project.update_clip(clip["id"], speech=dict(clip["speech"], segments=segs))
+        project.reload()
+        hist.pop()  # gäller klippet, inte filmen: ingen ångra-punkt
     elif op == "cover":
         i, s = shot_at()
         prop["cover"] = {"i": i, "at": round(max(0.0, min(0.99, float(args.get("at", 0.45)))), 3)}
@@ -299,7 +318,10 @@ def apply(project, prop, op, args):
         elif op == "overlay_delete":
             prop["overlays"] = [x for x in ov if x["id"] != args.get("id")]
         elif op == "overlay_clear":
-            prop["overlays"] = []
+            if args.get("auto_only"):
+                prop["overlays"] = [x for x in ov if not x.get("auto")]
+            else:
+                prop["overlays"] = []
         else:  # AI föreslår texter i vald ton
             got, how = texts.suggest(prop, args.get("tone", "doc"))
             if args.get("replace", True):

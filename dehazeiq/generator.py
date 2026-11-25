@@ -663,6 +663,8 @@ def generate(project, style_key="cinematic", fmt="9:16", length=30.0, seed=None,
         "renders": {},
     }
     prop = effects.plan(prop, {c["id"]: c for c in project.clips()}, style_key)
+    from . import texts as _texts
+    _texts.materialize(prop)  # artnamn och kapitel blir vanliga texter som går att ändra
     if style.get("social"):
         social_post(prop, style["social"], rng, seq)
     return prop

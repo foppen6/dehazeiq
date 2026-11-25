@@ -157,6 +157,16 @@ skarv), Fotodump och Cinematic reel. Filmtypen *Sociala medier-trender* gör fyr
 Längden väljs direkt i redigeringen (7, 15, 30, 60 eller 90 s), och vid export sparas en
 **omslagsbild** med texterna bredvid filmen – vald bild eller AI:ns bästa.
 
+**Alla texter på ett ställe:** Text-fliken listar alla texter i filmen i tidsordning – titel,
+artnamn, kapitel och pratbubblor (märkta AI), egna texter och talundertexter. Allt sparas direkt när
+man ändrar; varje text kan få annan stil, animation, typsnitt och plats eller tas bort, och *Ta bort
+AI:ns* rensar de automatiska. Talundertexter kan rättas eller tas bort (gäller klippet i alla filmer).
+Texterna syns som staplar i tidslinjen – klicka för att öppna, dra för att flytta i tid.
+
+**Redigeringen anpassar sig efter fönstret:** förhandsvisningen med tidslinjen direkt under till
+vänster, inställningarna till höger (scrollar för sig). Förhandsvisningen blir så stor som fönstret
+tillåter; i smala fönster ligger allt under varandra.
+
 **Färgmatchning:** klippen får samma ljushet, kontrast och färgton som ett referensklipp, så att
 filmen ser ut att vara filmad vid ett tillfälle – även med flera kameror. AI:n väljer det bästa
 klippet som referens (under och ovan ytan matchas var för sig); i Färg-fliken kan man välja *Matcha

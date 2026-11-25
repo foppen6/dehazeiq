@@ -275,6 +275,8 @@ function openEditor(propId) {
   state.ed = { prop: propId, i: 0, tab: "clip", scope: "film", alts: null, mode: "clip", stamp: Date.now() };
   state.view = "edit";
   render();
+  const p = edProp();
+  if (p && p.shots.some((s) => s.text)) edit("materialize", {}).then(() => render());  // gamla förslag: artnamn m.m. blir vanliga texter
   requestShotPreview(100);
 }
 
@@ -319,7 +321,6 @@ function edTimeline(p) {
   }).join("");
   const title = (p.effects || {}).title;
   const trLabel = (state.info && state.info.transitions) || {};
-  const textRow = p.shots.map((s, i) => `<span style="flex:${s.duration} 1 0;min-width:28px">${i === 0 && title ? `<span class="tltitle">${esc(title)}${s.text ? ` · ${esc(s.text.text)}` : ""}</span>` : s.text ? `<span class="tltitle" title="${esc(s.text.text)}">${esc(s.text.text)}</span>` : ""}</span>`).join("");
   const trRow = p.shots.map((s, i) => `<span style="flex:${s.duration} 1 0;min-width:28px;text-align:right;font-size:10px;color:${s.tr && s.tr !== "cut" ? "var(--accent)" : "var(--dim)"}">${i < p.shots.length - 1 ? esc(s.tr && s.tr !== "cut" ? trLabel[s.tr] || s.tr : "|") : ""}</span>`).join("");
   const n = p.shots.length, i = state.ed.i;
   return `<section class="tl" id="edTimeline" aria-label="Tidslinje">
@@ -329,8 +330,7 @@ function edTimeline(p) {
       <button class="btn small" data-edmove="1" ${i >= n - 1 ? "disabled" : ""} title="Flytta åt höger (Alt+→)">Flytta${svgi(ICO.right, 14)}</button>
       <button class="btn small danger" data-act="ed-delete" ${n <= 1 ? "disabled" : ""} title="Ta bort klippet (Delete)">${icon("trash", 14)}Ta bort klipp</button>
       <button class="btn small" data-act="ed-undo" title="Ångra (Ctrl/Cmd+Z)">Ångra</button></div>
-    <div class="tltrack"><span class="tllab">Text</span><div class="tlrow">${textRow}</div></div>
-    ${(p.overlays || []).length ? `<div class="tltrack"><span class="tllab">Texter</span><div class="tlrow" style="position:relative;height:24px">${ovBars(p, total)}</div></div>` : ""}
+    ${(() => { const ob = ovBars(p, total); return `<div class="tltrack"><span class="tllab">Text</span><div class="tlrow" style="position:relative;height:${ob.lanes * 24}px">${ob.html || '<button class="ovbar empty" data-act="ov-add" style="left:0;width:100%;top:0">+ Lägg till text</button>'}</div></div>`; })()}
     <div class="tltrack"><span class="tllab">Video</span><div class="tlrow">${blocks}</div></div>
     <div class="tltrack"><span class="tllab">Byte</span><div class="tlrow">${trRow}</div></div>
     <div class="tltrack"><span class="tllab">Ljud</span><div class="tlrow"><span class="tlaudio">${p.music_name ? `${esc(p.music_name)} · ${dec(p.bpm, 0)} BPM` : "Originalljud"}</span></div></div>
@@ -394,12 +394,10 @@ function edInspectorClip(p, s) {
         : '<span class="muted" style="font-size:13px">Inga fler liknande sekvenser.</span>'}</div>
     ${state.ed.i < p.shots.length - 1 ? `<label class="stack" style="gap:8px"><span class="flabel">Övergång till nästa klipp</span>
       <select class="selfield" data-edtr>${Object.entries((state.info && state.info.transitions) || { cut: "Rakt klipp" }).map(([k, l]) => `<option value="${k}" ${(s.tr || "cut") === k ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label>` : ""}
-    <div class="stack" style="gap:8px"><span class="flabel">Text på klippet</span>
-      <div class="row" style="flex-wrap:nowrap"><select class="selfield" id="edTxtKind" style="flex:0 0 130px">
-        ${[["label", "Artnamn"], ["chapter", "Kapitel"], ["pop", "Pratbubbla"]].map(([k, l]) => `<option value="${k}" ${((s.text || {}).kind || "label") === k ? "selected" : ""}>${l}</option>`).join("")}</select>
-        <input class="field" id="edTxt" value="${esc((s.text || {}).text || "")}" maxlength="60" placeholder="Ingen text" style="flex:1 1 auto;min-width:0"></div>
-      <input class="field" id="edTxtSub" value="${esc((s.text || {}).sub || "")}" maxlength="60" placeholder="Andra raden, t.ex. latinskt namn">
-      <div class="row"><button class="btn small" data-act="ed-text">Spara text</button>${s.text ? '<button class="btn small" data-act="ed-text-clear">Ta bort</button>' : ""}</div></div>
+    <div class="stack" style="gap:8px"><span class="flabel">Texter på klippet</span>
+      ${(() => { const here = (p.overlays || []).filter((o) => o.shot_uid === s.uid);
+        return `${here.length ? here.map((o) => `<button class="chip" data-ovsel="${o.id}" data-edshot="${state.ed.i}" style="justify-content:flex-start">${esc(o.text.slice(0, 40))}${o.auto ? " · AI" : ""}</button>`).join("") : '<span class="muted" style="font-size:13px">Ingen text på klippet.</span>'}
+        <button class="btn small" data-act="ov-add">+ Lägg till text</button>`; })()}</div>
 `;
 }
 
@@ -498,18 +496,54 @@ const POS9 = [[0.5, 0.16, "↑"], [0.5, 0.5, "•"], [0.5, 0.76, "↓"], [0.24, 
 const TONES = { doc: "Dokumentär", fun: "Humor", travel: "Reseberättare", poetic: "Poetisk", short: "Kort och käck", social: "Sociala medier – krok och POV" };
 
 function ovBars(p, total) {
+  // texter som överlappar i tid läggs på egna rader
   const at = Object.fromEntries(p.shots.map((s, i) => [s.uid, { at: s.at, i }]));
-  return (p.overlays || []).map((o) => {
+  const items = [];
+  const title = (p.effects || {}).title;
+  if (title && p.shots.length) items.push({ a: 0, b: Math.min(3.5, p.shots[0].duration), html: (l, w, top) => `<button class="ovbar st-title" data-act="ed-title-focus" style="left:${l}%;width:${w}%;top:${top}px" title="Titel: ${esc(title)}">${esc(title)}</button>` });
+  (p.overlays || []).forEach((o) => {
     const s = at[o.shot_uid];
-    if (!s || !total) return "";
-    const l = ((s.at + o.offset) / total) * 100, w = Math.min(100 - l, (o.dur / total) * 100);
-    return `<button class="ovbar st-${o.style}" data-ovsel="${o.id}" data-edshot="${s.i}" style="left:${l}%;width:${Math.max(2, w)}%" title="${esc(o.text)}">${esc(o.text)}</button>`;
+    if (!s) return;
+    const a = s.at + Number(o.offset || 0);
+    items.push({ a, b: a + Number(o.dur || 2), html: (l, w, top) => `<button class="ovbar st-${o.style} ${state.ed.ov === o.id ? "sel" : ""}" data-ovsel="${o.id}" data-edshot="${s.i}" style="left:${l}%;width:${w}%;top:${top}px" title="${esc(o.text)}">${o.auto ? "AI · " : ""}${esc(o.text)}</button>` });
+  });
+  items.sort((x, y) => x.a - y.a);
+  const ends = [];
+  const html = items.map((it) => {
+    let lane = ends.findIndex((e) => e <= it.a + 0.05);
+    if (lane < 0) { lane = ends.length; ends.push(0); }
+    ends[lane] = it.b;
+    const l = (it.a / total) * 100, w = Math.max(2, Math.min(100 - l, ((it.b - it.a) / total) * 100));
+    return it.html(l, w, lane * 24);
   }).join("");
+  return { html, lanes: Math.max(1, ends.length) };
 }
 
+const AUTO_LABEL = { label: "Artnamn", chapter: "Kapitel", pop: "Pratbubbla" };
+function ovTime(p, o) {
+  const s = p.shots.find((x) => x.uid === o.shot_uid);
+  return s ? s.at + Number(o.offset || 0) : 1e9;
+}
+function speechRows(p) {
+  const cl = clips();
+  const rows = [];
+  p.shots.forEach((s, i) => {
+    const c = cl.find((x) => x.id === s.clip_id);
+    const segs = ((c && c.speech) || {}).segments || [];
+    const sp = (s.fx || {}).speed || 1;
+    if (Math.abs(sp - 1) > 0.1) return;
+    const a = s.src_start, b = s.src_start + s.duration;
+    segs.forEach((g, k) => {
+      if (g.end > a + 0.1 && g.start < b - 0.1) rows.push({ t: s.at + Math.max(0, g.start - a), i, clip: c.id, k, text: g.text });
+    });
+  });
+  return rows;
+}
 function freeTextsForm(p) {
   const n = p.shots.length;
-  const items = (p.overlays || []).map((o) => {
+  const sorted = (p.overlays || []).slice().sort((a, b) => ovTime(p, a) - ovTime(p, b));
+  const nAuto = sorted.filter((o) => o.auto).length;
+  const items = sorted.map((o) => {
     const idx = Math.max(0, p.shots.findIndex((s) => s.uid === o.shot_uid));
     const sel = state.ed.ov === o.id;
     const opt = (obj, cur) => Object.entries(obj).map(([k, l]) => `<option value="${k}" ${(cur || "") === k ? "selected" : ""}>${l}</option>`).join("");
@@ -526,6 +560,7 @@ function freeTextsForm(p) {
         <div class="row" style="gap:4px;flex-wrap:wrap">${POS9.map(([x, y, l]) => `<button class="btn icon small" data-ovpos="${o.id}" data-x="${x}" data-y="${y}" aria-label="Placera">${l}</button>`).join("")}
           <button class="btn small" data-ovpos="${o.id}" data-x="" data-y="" ${o.x == null ? 'aria-pressed="true"' : ""}>Stilens plats</button></div></div>` : "";
     return `<div class="ovitem ${sel ? "sel" : ""}" data-ovid="${o.id}">
+      <div class="ovmeta"><span class="num">${fmtDur(ovTime(p, o))}</span> · klipp ${idx + 1}${o.auto ? ` <span class="badge" style="position:static">AI · ${AUTO_LABEL[o.auto] || "auto"}</span>` : ""}</div>
       <div class="row" style="flex-wrap:nowrap;gap:6px">
         <select class="selfield" data-ovf="style" style="flex:1 1 auto">${opt(TEXT_STYLES, o.style)}</select>
         ${sel ? "" : `<button class="btn small" data-ovsel="${o.id}" data-edshot="${idx}">Effekter</button>`}
@@ -545,9 +580,25 @@ function freeTextsForm(p) {
     <div class="row" style="flex-wrap:nowrap;gap:6px"><select class="selfield" data-edtone style="flex:1 1 auto">${Object.entries(TONES).map(([k, l]) => `<option value="${k}" ${k === tone ? "selected" : ""}>${l}</option>`).join("")}</select>
       <button class="btn small primary" data-act="ov-suggest" ${state.ed.suggesting ? "disabled" : ""}>${state.ed.suggesting ? "Skriver …" : `${icon("spark", 14)}Föreslå texter`}</button></div>
     <span class="muted" style="font-size:12px">${state.info && state.info.llm ? "Djupanalysen skriver texter utifrån vad som händer i klippen." : "Förslagen bygger på vad AI:n känt igen i klippen. Med djupanalysen (Mac) skrivs de fritt utifrån vad som händer."} Förslaget ersätter de automatiska texterna – allt går att ändra och ångra.</span>
-    ${items || '<span class="muted" style="font-size:13px">Inga egna texter än.</span>'}
+    <div class="spread" style="align-items:center"><span class="flabel">Alla texter · ${sorted.length}</span>
+      ${nAuto ? `<button class="btn small" data-act="ov-clear-auto">Ta bort AI:ns ${nAuto}</button>` : ""}</div>
+    ${items || '<span class="muted" style="font-size:13px">Inga texter i filmen än.</span>'}
     <button class="btn small" data-act="ov-add">+ Lägg till text på klipp ${state.ed.i + 1}${n ? "" : ""}</button>
-    ${tpl}</div>`;
+    ${tpl}
+    ${speechSection(p)}</div>`;
+}
+
+function speechSection(p) {
+  const rows = speechRows(p);
+  if (!rows.length) return "";
+  const on = effectsOn().speech !== false;
+  return `<div class="stack" style="gap:8px;padding-top:12px;border-top:1px solid var(--line)">
+    <div class="spread" style="align-items:center"><span class="flabel">Talundertexter · ${rows.length}</span>
+      <button class="btn small" data-effect="speech">${on ? "Stäng av" : "Slå på"}</button></div>
+    <span class="muted" style="font-size:12px">Det Whisper hörde. Rätta orden här – ändringen gäller klippet i alla filmer.</span>
+    ${rows.map((r) => `<div class="ovitem"><div class="ovmeta"><span class="num">${fmtDur(r.t)}</span> · klipp ${r.i + 1} <span class="badge" style="position:static">Tal</span></div>
+      <div class="row" style="flex-wrap:nowrap;gap:6px"><textarea class="field" rows="${r.text.length > 44 ? 2 : 1}" data-speechclip="${r.clip}" data-speechk="${r.k}">${esc(r.text)}</textarea>
+      <button class="btn icon small" data-speechdel="${r.clip}" data-k="${r.k}" aria-label="Ta bort repliken">${icon("trash", 14)}</button></div></div>`).join("")}</div>`;
 }
 
 function edInspectorText(p) {
@@ -577,8 +628,8 @@ function edInspectorText(p) {
   if (isPromo(p)) return sel + promoForm(p) + freeTextsForm(p);
   const lyr = p.style === "mv_lyrics" ? lyricsForm(p) : "";
   return `${sel}${lyr}<label class="stack" style="gap:6px"><span class="flabel">Titel i början av filmen</span>
-      <input class="field" id="edTitle" value="${esc(title)}" maxlength="80" placeholder="Ingen titel"></label>
-    <div class="row"><button class="btn small primary" data-act="ed-title">Spara titel</button><button class="btn small" data-act="ed-title-clear">Ta bort titel</button></div>
+      <div class="row" style="flex-wrap:nowrap;gap:6px"><input class="field" id="edTitle" data-edtitle value="${esc(title)}" maxlength="80" placeholder="Ingen titel" style="flex:1 1 auto">
+      ${title ? `<button class="btn icon small" data-act="ed-title-clear" aria-label="Ta bort titeln">${icon("trash", 14)}</button>` : ""}</div></label>
     ${freeTextsForm(p)}`;
 }
 
@@ -644,25 +695,28 @@ function viewEdit() {
   const src = frameUrl(s.clip_id, s.src_start + Math.min(s.duration, 1.5) * ((s.fx || {}).speed || 1), 640);
   const cx = s.cx ?? 0.5, cy = s.cy ?? 0.5;
   return `<main class="main wide edmain">
-    <div class="spread"><div class="head"><h1>${esc(p.title || p.style_label)}</h1>
+    <div class="spread edhead"><div class="head"><h1>${esc(p.title || p.style_label)}</h1>
       <p class="lead">${esc(p.style_label)} · ${p.platform ? `${esc(platformLabel(p.platform))} · ` : ""}${p.format} · ${fmtDur(p.length)}</p></div>
       <div class="row">${platformSelect(p)}${lengthSelect(p)}<button class="btn" data-act="ed-undo" ${(p.history || []).length ? "" : "disabled"}>${svgi(ICO.undo, 16)}Ångra</button>
         ${prev ? "" : `<button class="btn" data-preview="${p.id}" ${busyHere ? "disabled" : ""}>${icon("play", 14)}${busyHere ? "Renderar …" : "Förhandsvisa filmen"}</button>`}
         <button class="btn primary" data-export="${p.id}">Exportera</button></div></div>
     <div class="edgrid">
-      <section class="edstage">
-        ${edStage(p, i, s, src, cx, cy, tab, prev, busyHere)}
-      </section>
-      <aside class="edinsp"><div class="seg" role="tablist" style="grid-template-columns:repeat(3,minmax(0,1fr))">${tabs}</div>${inspector}</aside>
+      <div class="edleft">
+        <section class="edstage">
+          ${edStage(p, i, s, src, cx, cy, tab, prev, busyHere)}
+        </section>
+        ${edTimeline(p)}
+      </div>
+      <aside class="edinsp"><div class="seg edtabs" role="tablist" style="grid-template-columns:repeat(3,minmax(0,1fr))">${tabs}</div>${inspector}</aside>
     </div>
-    ${edTimeline(p)}
   </main>`;
 }
 
 const STAGE_MODES = [["clip", "Klippet"], ["compare", "Före/efter"], ["side", "Sida vid sida"], ["film", "Hela filmen"]];
 function edStage(p, i, s, src, cx, cy, tab, prev, busyHere) {
   const mode = state.ed.mode || "clip";
-  const ar = p.format.replace(":", "/");
+  const [fw, fh] = p.format.split(":").map(Number);
+  const ar = `${fw}/${fh};width:min(100%, calc(var(--stageh) * ${(fw / fh).toFixed(4)}));height:auto`;
   const sp = (state.ed.shotPrev || {})[i];
   const fresh = sp && sp.stamp === state.ed.stamp;
   const after = stillUrl(p, i, true), before = stillUrl(p, i, false);
@@ -672,11 +726,9 @@ function edStage(p, i, s, src, cx, cy, tab, prev, busyHere) {
   let body = "";
   if (mode === "clip" && tab === "text") {
     body = `<figure class="edfig"><div class="edstill placer" style="aspect-ratio:${ar}" data-edplace>
-      <img id="edStill" alt="Klicka för att placera texten" src="${after}">${p.format !== "16:9" ? '<span class="safezone"></span>' : ""}</div>
-      <figcaption>Klicka i bilden för att placera vald text. Streckat: där appens knappar ligger.</figcaption></figure>
-      <figure class="edfig"><div class="edstill" style="aspect-ratio:${ar}">
-      ${fresh ? `<video id="edClipVid" src="${mediaUrl("shots", sp.file)}" poster="${after}" autoplay loop playsinline controls></video>`
-        : `<img alt="" src="${after}">`}${status}</div><figcaption>Med animationen</figcaption></figure>`;
+      ${fresh ? `<video id="edClipVid" src="${mediaUrl("shots", sp.file)}" poster="${after}" autoplay loop muted playsinline></video>`
+        : `<img id="edStill" alt="Klicka för att placera texten" src="${after}">`}${status}${p.format !== "16:9" ? '<span class="safezone"></span>' : ""}</div>
+      <figcaption>Klicka i bilden för att flytta vald text dit.${p.format !== "16:9" ? " Streckat: där appens knappar inte täcker." : ""}</figcaption></figure>`;
   } else if (mode === "clip") {
     body = `<figure class="edfig"><div class="edstill" style="aspect-ratio:${ar}">
       ${fresh ? `<video id="edClipVid" src="${mediaUrl("shots", sp.file)}" poster="${after}" autoplay loop playsinline controls></video>`
@@ -703,6 +755,7 @@ function edStage(p, i, s, src, cx, cy, tab, prev, busyHere) {
       : `<div class="empty" style="padding:28px">Filmen har ändrats sedan den senaste förhandsvisningen.<br><button class="btn primary" data-preview="${p.id}" style="margin-top:12px">${icon("play", 14)}Förhandsvisa hela filmen</button></div>`;
   }
   if (mode === "side") setTimeout(wireOrigLoop, 0);
+  setTimeout(fitStage, 0);
   const source = tab === "clip" && mode !== "side" && mode !== "film" ? `<figure class="edfig"><figcaption>Originalbild – klicka för att flytta utsnittet</figcaption>
       <div class="edsrc" data-edsrc><img alt="Originalbilden" src="${src}"><span class="edring" style="left:${cx * 100}%;top:${cy * 100}%"></span></div></figure>` : "";
   return `${seg}<div class="edviews">${body}${source}</div>`;
@@ -741,7 +794,24 @@ function paintStage() {
   const src = frameUrl(s.clip_id, s.src_start + Math.min(s.duration, 1.5) * ((s.fx || {}).speed || 1), 640);
   st.innerHTML = edStage(p, i, s, src, s.cx ?? 0.5, s.cy ?? 0.5, state.ed.tab, p.renders && p.renders.preview, running(`render:preview:${p.id}`));
   wireOrigLoop();
+  fitStage();
 }
+function fitStage() {
+  const main = document.querySelector(".edmain");
+  const left = document.querySelector(".edleft");
+  if (!main || !left) return;
+  if (window.innerWidth <= 980) { main.style.removeProperty("--stageh"); return; }
+  const top = left.getBoundingClientRect().top + window.scrollY;
+  const tl = document.getElementById("edTimeline");
+  const tlH = tl ? tl.getBoundingClientRect().height : 220;
+  const st = document.querySelector(".edstage");
+  const still = st && st.querySelector(".edstill");
+  const chrome = st && still ? st.getBoundingClientRect().height - still.getBoundingClientRect().height : 120;
+  const h = Math.max(180, Math.min(820, window.innerHeight - top - tlH - chrome - 30));
+  main.style.setProperty("--stageh", `${Math.round(h)}px`);
+}
+window.addEventListener("resize", () => { if (state.view === "edit") fitStage(); });
+
 function wireOrigLoop() {
   const v = document.getElementById("edOrigVid");
   if (!v || !v.dataset.loop) return;
@@ -821,6 +891,7 @@ document.addEventListener("click", async (ev) => {
   if (d.edspeed) return edit("speed", { i: state.ed.i, mode: d.edspeed });
   if (d.edfx) return edit("fx", { i: state.ed.i, effect: d.edfx });
   if (d.ovdel) return edit("overlay_delete", { id: d.ovdel });
+  if (d.speechdel) return speechEdit(d.speechdel, Number(d.k), "", true);
   if (d.ovpos) return edit("overlay_update", { id: d.ovpos, x: d.x === "" ? null : Number(d.x), y: d.y === "" ? null : Number(d.y) });
   if (d.ovreset) return edit("overlay_update", { id: d.ovreset, color: "", box: "", font: "", anim: "", size: 1 });
   if (d.ovtpl) {
@@ -831,8 +902,13 @@ document.addEventListener("click", async (ev) => {
     return render();
   }
   if (d.edplace !== undefined) {
-    const o = (edProp().overlays || []).find((x) => x.id === state.ed.ov);
-    if (!o) return toast("Välj en text först (tryck på Effekter vid texten).");
+    const pp = edProp();
+    let o = (pp.overlays || []).find((x) => x.id === state.ed.ov);
+    if (!o) {  // ingen vald: ta texten på det här klippet
+      o = (pp.overlays || []).find((x) => x.shot_uid === pp.shots[state.ed.i].uid);
+      if (!o) return toast("Klippet har ingen text. Lägg till en först.");
+      state.ed.ov = o.id;
+    }
     const r = t.getBoundingClientRect();
     return edit("overlay_update", { id: o.id, x: Math.round(((ev.clientX - r.left) / r.width) * 1000) / 1000, y: Math.round(((ev.clientY - r.top) / r.height) * 1000) / 1000 });
   }
@@ -876,6 +952,8 @@ document.addEventListener("click", async (ev) => {
     case "dive-remove": await api("POST", `/api/p/${state.pid}/divelog/remove`, {}); state.dive = null; return render();
     case "dive-units": { const u = (settings().units || "metric") === "metric" ? "imperial" : "metric"; await saveSettings({ units: u }); return render(); }
     case "ed-i18n-save": return saveI18n();
+    case "ed-title-focus": state.ed.tab = "text"; render(); setTimeout(() => { const el = document.getElementById("edTitle"); if (el) { el.focus(); el.select(); } }, 50); return undefined;
+    case "ov-clear-auto": return edit("overlay_clear", { auto_only: true });
     case "ov-add": { await edit("overlay_add", { i: state.ed.i, text: "Ny text", style: (state.ed.tone && { fun: "fun", doc: "doc", travel: "place", short: "meme" }[state.ed.tone]) || "caption" }); const ov = edProp().overlays || []; state.ed.ov = ov.length ? ov[ov.length - 1].id : null; state.ed.tab = "text"; return render(); }
     case "ov-suggest": {
       state.ed.suggesting = true; render();
@@ -953,6 +1031,8 @@ document.addEventListener("change", (ev) => {
   if (d.edlen !== undefined) return edit("trim", { i: state.ed.i, duration: Number(t.value) });
   if (d.edtr !== undefined) return edit("transition", { i: state.ed.i, type: t.value });
   if (d.edfitcolor !== undefined) return edit("fit", { i: state.ed.i, bg: t.value });
+  if (d.edtitle !== undefined) return edit("title", { text: t.value });
+  if (d.speechclip) { speechEdit(d.speechclip, Number(d.speechk), t.value); return undefined; }
   if (d.edmatchskip !== undefined) { edit("match", { i: state.ed.i, skip: t.checked }).then(loadMatchInfo); return undefined; }
   if (d.edmatchk !== undefined) { edit("match", { strength: Number(t.value) }, { quiet: true }); return undefined; }
   if (d.proplen) return changeLength(d.proplen, t.value);
@@ -1240,11 +1320,22 @@ document.addEventListener("keydown", async (ev) => {
   else if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "z") { ev.preventDefault(); await edit("undo"); render(); }
 });
 
+async function speechEdit(clipId, k, text, del = false) {
+  await edit("speech_text", { clip_id: clipId, k, text, delete: del });
+  try {  // klippens tal ligger i projektet: hämta om det
+    const c = clips().find((x) => x.id === clipId);
+    const segs = [...(((c || {}).speech || {}).segments || [])];
+    if (del || !text.trim()) segs.splice(k, 1); else segs[k] = Object.assign({}, segs[k], { text: text.trim() });
+    if (c) c.speech = Object.assign({}, c.speech, { segments: segs });
+  } catch (e) { /* uppdateras vid nästa laddning */ }
+  render();
+}
+
 /* Dra en text i textraden på tidslinjen för att ändra när den visas */
 let ovDrag = null;
 document.addEventListener("pointerdown", (ev) => {
   const b = ev.target.closest(".ovbar");
-  if (!b || state.view !== "edit") return;
+  if (!b || state.view !== "edit" || !b.dataset.ovsel) return;
   const row = b.parentElement.getBoundingClientRect();
   ovDrag = { id: b.dataset.ovsel, x: ev.clientX, el: b, w: row.width, left0: parseFloat(b.style.left), moved: false };
 });

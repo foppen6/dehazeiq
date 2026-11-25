@@ -94,6 +94,34 @@ def clean_look(it, args):
     return it
 
 
+AUTO_STYLE = {"label": "doc", "chapter": "chapter", "pop": "fun"}
+
+
+def materialize(prop):
+    """Gör om de automatiska klipptexterna (artnamn, kapitel, pratbubblor) till vanliga texter som
+    går att ändra, flytta, ge effekter och ta bort som alla andra. Returnerar antal omgjorda."""
+    ensure_uids(prop)
+    ov = prop.setdefault("overlays", [])
+    n = 0
+    for s in prop.get("shots", []):
+        t = s.pop("text", None)
+        if not t or not t.get("text"):
+            continue
+        kind = t.get("kind", "label")
+        d = float(s.get("duration", 3.0))
+        if kind == "pop":
+            off, dur = max(0.0, d - 1.7), 1.6
+        elif kind == "chapter":
+            off, dur = 0.2, min(2.6, max(1.0, d - 0.3))
+        else:
+            off, dur = 0.4, min(3.6, max(1.0, d - 0.5))
+        it = new_item(s["uid"], t["text"], AUTO_STYLE.get(kind, "doc"), t.get("sub", ""), off, dur)
+        it["auto"] = kind
+        ov.append(it)
+        n += 1
+    return n
+
+
 def timeline(prop):
     """Texterna med absoluta tider i filmen: [(start, slut, item)]."""
     by = {s.get("uid"): s for s in prop.get("shots", [])}
