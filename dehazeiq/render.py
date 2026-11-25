@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 
 from .config import COLOR_PROFILES, FORMATS, GRADE_KEYS, LOOKS, OUTPUT_FPS, RESOLUTIONS, STYLES
-from . import divelog, i18n, pano
+from . import divelog, i18n, pano, textfx
 from . import effects as fx_mod
 from .media import MediaError, ffmpeg, run, video_encoder_args
 
@@ -771,9 +771,34 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
             a = t0 + k * per
             point_cues.append((a, a + min(per, 3.4) - 0.15, ptxt))
 
+    use_fx = textfx.PIL_OK  # egna texter och tal ritas med effekter av textfx (annars drawtext)
+
+    def text_layer(i, shot, out_len):
+        """Lager med egna texter och talundertexter (animerade) för klipp i, eller None."""
+        if not use_fx:
+            return None
+        cues = []
+        for a0, a1, it, tx in free_cues:
+            s0, s1 = a0 - shot["at"], a1 - shot["at"]
+            if s1 > 0 and s0 < out_len:
+                cues.append({"start": s0, "end": s1, "item": dict(it, text=tx.get("text") or "", sub=tx.get("sub") or "")})
+        for a0, a1, line in speech_cues:
+            s0, s1 = a0 - shot["at"], a1 - shot["at"]
+            if s1 > 0 and s0 < out_len:
+                cues.append({"start": s0, "end": s1, "item": {"text": line, "style": "speech",
+                                                              "anim": "karaoke" if on.get("karaoke", True) else "fade"}})
+        if not cues:
+            return None
+        try:
+            return textfx.layer(cues, out_w, out_h, out_len, OUTPUT_FPS, tmp / f"tx{i}",
+                                fmt=proposal["format"] if on.get("safezone", True) else None)
+        except Exception as e:  # noqa: BLE001
+            print("Texterna kunde inte ritas:", e)
+            return None
+
     def overlays(i, shot, fx, out_len):
         out = []
-        for k, (a0, a1, it, tx) in enumerate(free_cues if font else []):
+        for k, (a0, a1, it, tx) in enumerate(free_cues if font and not use_fx else []):
             s0, s1 = a0 - shot["at"], a1 - shot["at"]
             if s1 <= 0 or s0 >= out_len:
                 continue
@@ -808,7 +833,7 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
                 fl = f"l{i}_{k}.txt"
                 (tmp / fl).write_text(line, "utf-8")
                 out += text_filters("lyric", line, "", (fl, ""), out_w, out_h, out_len, start=s0, end=s1)
-        if font and speech_cues:
+        if font and speech_cues and not use_fx:
             for k, (a0, a1, line) in enumerate(speech_cues):
                 s0, s1 = a0 - shot["at"], a1 - shot["at"]
                 if s1 <= 0 or s0 >= out_len:
@@ -898,12 +923,21 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
                 lfx.pop("letterbox", None)
             flash = bool(on.get("flash") and style.get("beat_flash") and i % int(style["beat_flash"]) == 0 and i > 0)
 
+            layer = text_layer(i, shot, dur + pad)
+
+            raw = bool((shot.get("fx") or {}).get("raw"))  # "före"-bilden: originalet utan något gjort
+            if raw:
+                enh, levels, lfx = {}, None, {}
+
             def encode(fx, vignette, title, texts):
-                vf = _shot_filter(fshot, sw, sh, out_w, out_h, style, wb=wb,
+                lay = layer if texts is not None else None
+                if lay:
+                    texts = list(texts) + ["@OVL@"]
+                vf = _shot_filter(fshot, sw, sh, out_w, out_h, dict(style, color="") if raw else style, wb=wb and not raw,
                                   fade_in=style["fade"] if i == 0 else 0.0,
                                   fade_out=style["fade"] if i == len(shots) - 1 and not endcard else 0.0,
                                   fx=fx, pad=pad, vignette=vignette, title=title,
-                                  grade=shot.get("grade") or proposal.get("grade"), texts=texts,
+                                  grade=None if raw else (shot.get("grade") or proposal.get("grade")), texts=texts,
                                   enh=enh if texts is not None else {}, levels=levels,
                                   look_fx=lfx if texts is not None else {}, flash=flash and texts is not None,
                                   pre=pano_pre)
@@ -912,8 +946,15 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
                        "-ss", f"{shot['src_start']:.3f}", "-t", f"{read:.3f}", "-i", str(src)]
                 if not has_audio:
                     cmd += ["-f", "lavfi", "-t", f"{out_len:.3f}", "-i", "anullsrc=r=48000:cl=stereo"]
-                vmap = (["-filter_complex", f"[0:v:0][0:v:1]hstack=inputs=2,{vf}[v]", "-map", "[v]"] if pano_two
-                        else ["-map", "0:v:0", "-vf", vf])
+                if lay:  # texternas lager: bildsekvens som läggs ovanpå (före toningar)
+                    li = 2 if not has_audio else 1
+                    cmd += ["-framerate", str(OUTPUT_FPS), "-i", lay]
+                    vf = vf.replace(",@OVL@", f"[tp];[tp][{li}:v]overlay=x=0:y=0:eof_action=pass:format=auto[tq];[tq]null", 1)
+                    head = "[0:v:0][0:v:1]hstack=inputs=2," if pano_two else "[0:v:0]"
+                    vmap = ["-filter_complex", f"{head}{vf}[v]", "-map", "[v]"]
+                else:
+                    vmap = (["-filter_complex", f"[0:v:0][0:v:1]hstack=inputs=2,{vf}[v]", "-map", "[v]"] if pano_two
+                            else ["-map", "0:v:0", "-vf", vf])
                 cmd += [*vmap, "-map", "0:a:0" if has_audio else "1:a:0",
                         "-af", _audio_filter(fx if has_audio else {}, out_len),
                         *video_encoder_args(out_w, out_h, quality),
@@ -982,7 +1023,8 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
                 ovol = f"'{orig:.3f}+({1.0 - orig:.3f})*min(1,{win})':eval=frame"
                 mvol = f"'1-0.75*min(1,{win})':eval=frame"
             moff = float(proposal.get("music_offset") or 0.0)  # förhandsvisning av ett klipp mitt i filmen
-            fades = ("" if moff else f"afade=t=in:st=0:d=0.6,afade=t=out:st={max(0.0, total - fo):.3f}:d={fo:.3f},")
+            fades = ("" if moff else "afade=t=in:st=0:d=0.6," if proposal.get("loop")
+                     else f"afade=t=in:st=0:d=0.6,afade=t=out:st={max(0.0, total - fo):.3f}:d={fo:.3f},")
             fc = (f"[1:a]atrim={moff:.3f}:{moff + total:.3f},asetpts=PTS-STARTPTS,"
                   f"aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,{fades}"
                   f"volume={mvol}[m];"
@@ -1050,7 +1092,7 @@ def _merge_ranges(rs, gap=0.6):
     return out
 
 
-def still(project, proposal, idx, at=0.5, width=480, graded=True, effects=None):
+def still(project, proposal, idx, at=0.5, width=480, graded=True, effects=None, texts=True):
     """En bild ur ett klipp i förslaget, utsnitt, inpassning, bildförbättring och färg som i filmen
     (för redigeringen). graded=False: originalbilden i samma utsnitt (för före/efter).
     at: andel av klippets längd (0..1). Returnerar JPEG-bytes."""
@@ -1077,7 +1119,7 @@ def still(project, proposal, idx, at=0.5, width=480, graded=True, effects=None):
         cy = float(np.interp(rel, ts, [k[2] for k in path]))
     style = STYLES[proposal["style"]]
     parts = place_filters(shot, sw, sh, out_w, out_h, cx, cy) + [f"scale={out_w}:{out_h}:flags=bicubic", "setsar=1"]
-    if graded:
+    if graded and not (shot.get("fx") or {}).get("raw"):
         on = effects if effects is not None else fx_mod.enabled(project.data.get("settings"))
         r, g, b = shot.get("wb_gains", [1, 1, 1])
         if max(abs(r - 1), abs(g - 1), abs(b - 1)) > 0.02:
@@ -1113,6 +1155,27 @@ def still(project, proposal, idx, at=0.5, width=480, graded=True, effects=None):
         if graded:  # något filter fungerar inte på den här bilden: visa åtminstone utsnittet
             return still(project, proposal, idx, at, width, False)
         raise MediaError(r.stderr.decode("utf-8", "replace")[-400:])
+    if graded and texts and textfx.PIL_OK:
+        # egna texter, färdiga, så att man ser var de hamnar
+        from . import texts as texts_mod
+        tl = rel / speed
+        cues = [{"start": a - shot["at"], "end": b - shot["at"], "item": it}
+                for a, b, it in texts_mod.timeline(proposal) if a - shot["at"] < shot["duration"] and b > shot["at"]]
+        on_ = [c for c in cues if c["start"] - 0.01 <= tl < c["end"]] or \
+              [dict(c, start=tl, end=tl + 1) for c in cues[:1]]  # visa åtminstone den första texten
+        if on_:
+            try:
+                import io
+                from PIL import Image
+                base = Image.open(io.BytesIO(r.stdout)).convert("RGBA")
+                lay = textfx.frame_image(on_, tl, base.width, base.height, proposal["format"], settled=True)
+                if lay:
+                    base.alpha_composite(lay)
+                    b = io.BytesIO()
+                    base.convert("RGB").save(b, "JPEG", quality=88)
+                    return b.getvalue()
+            except Exception as e:  # noqa: BLE001
+                print("Texten kunde inte visas på bilden:", e)
     return r.stdout
 
 

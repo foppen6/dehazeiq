@@ -82,6 +82,22 @@ def main():
     assert render.shot_preview(p, pr, 0, p.dir / "shots") == sp  # oförändrat: återanvänds
     r = pipeline.render_proposal(prog, p.id, pr["id"], "preview")
     print("Film med inpassning:", r["file"])
+    # v0.19: sociala medier-stilar och texter med effekter
+    from dehazeiq import generator, textfx
+    p.reload()
+    for st in ("hookreel", "pov", "beforeafter", "top5", "loopreel", "photodump", "cinereel"):
+        sp_ = generator.generate(p, st, "9:16", 15, None, p.data.get("music"))
+        print(st, len(sp_["shots"]), "klipp", [o["style"] for o in sp_.get("overlays") or []][:4],
+              "loop" if sp_.get("loop") else "")
+        if st in ("hookreel", "beforeafter"):
+            p.add_proposals([sp_])
+            r = pipeline.render_proposal(prog, p.id, sp_["id"], "preview")
+            print("  renderad:", r["file"])
+    if textfx.PIL_OK:
+        pat = textfx.layer([{"start": 0.1, "end": 2, "item": {"text": "POV: test 🐙", "style": "pov"}},
+                            {"start": 0.5, "end": 2.5, "item": {"text": "Ord för ord här", "style": "hook"}}],
+                           540, 960, 3.0, 30, WORK / "txl", fmt="9:16")
+        assert pat and len(list((WORK / "txl").glob("*.png"))) >= 90
     # v0.13: foton, beskrivning med egna ord, reklam, musikvideo och trailer
     from dehazeiq import editor, photo, prompt
     if photo.PIL_OK:

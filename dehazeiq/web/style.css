@@ -441,3 +441,14 @@ textarea.field { color: var(--text); height: auto; padding: 10px 12px; line-heig
 .edorig { width: min(460px, 100%); border-radius: 12px; overflow: hidden; border: 1px solid #22303D; background: #000; }
 .edorig video, .edorig img { width: 100%; display: block; }
 .tledited { position: absolute; right: 5px; top: 5px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px rgba(0,0,0,.5); }
+.edstill.placer { cursor: crosshair; }
+.safezone { position: absolute; left: 6%; right: 14%; top: 12%; bottom: 21%; border: 1.5px dashed rgba(255,255,255,.55); border-radius: 6px; pointer-events: none; }
+.ovitem textarea.field { resize: vertical; min-height: 38px; font: inherit; }
+.ovbar { cursor: grab; touch-action: none; }
+.ovbar.dragging { cursor: grabbing; opacity: .8; }
+.ovitem .row > label { min-width: 0; }
+.ovitem input.field, .ovitem select.selfield { width: 100%; min-width: 0; box-sizing: border-box; }
+.ovitem .sl input[type=range] { min-width: 0; }
+.edfig { align-items: center; max-width: 100%; }
+.edfig figcaption { max-width: 340px; text-align: center; }
+.edfig > .edstill { flex: none; }

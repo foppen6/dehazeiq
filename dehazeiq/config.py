@@ -166,6 +166,56 @@ STYLES = {
         "temperature": 0.28, "color": "cinematic", "orig_audio": 0.0,
         "fade": 0.6, "look_fx": {}, "music_video": "lyrics", "bar_sync": True, "no_auto_text": True,
     },
+    # Sociala medier (Instagram, TikTok, Shorts)
+    "hookreel": {
+        "label": "Hook-reel",
+        "avg_shot": 1.4, "min_shot": 0.7, "max_shot": 2.6,
+        "beat_sync": 0.95, "motion_pref": 0.5, "variety": 0.5,
+        "temperature": 0.3, "color": "punchy", "orig_audio": 0.05,
+        "fade": 0.15, "look_fx": {}, "social": "social", "no_auto_text": True,
+    },
+    "pov": {
+        "label": "POV",
+        "avg_shot": 2.6, "min_shot": 1.4, "max_shot": 4.2,
+        "beat_sync": 0.7, "motion_pref": 0.1, "variety": 0.6,
+        "temperature": 0.28, "color": "natural", "orig_audio": 0.2,
+        "fade": 0.3, "look_fx": {}, "social": "pov", "no_auto_text": True, "speech_pref": 0.2,
+    },
+    "beforeafter": {
+        "label": "Före/efter",
+        "avg_shot": 2.6, "min_shot": 1.6, "max_shot": 3.6,
+        "beat_sync": 0.8, "motion_pref": -0.1, "variety": 0.7,
+        "temperature": 0.28, "color": "punchy", "orig_audio": 0.0,
+        "fade": 0.2, "look_fx": {}, "social": "beforeafter", "no_auto_text": True,
+    },
+    "top5": {
+        "label": "Topp 5",
+        "avg_shot": 3.0, "min_shot": 2.0, "max_shot": 4.5,
+        "beat_sync": 0.8, "motion_pref": 0.1, "variety": 0.9,
+        "temperature": 0.28, "color": "punchy", "orig_audio": 0.0,
+        "fade": 0.2, "look_fx": {}, "social": "top5", "no_auto_text": True,
+    },
+    "loopreel": {
+        "label": "Loop",
+        "avg_shot": 2.0, "min_shot": 1.0, "max_shot": 3.2,
+        "beat_sync": 0.9, "motion_pref": 0.2, "variety": 0.6,
+        "temperature": 0.28, "color": "cinematic", "orig_audio": 0.0,
+        "fade": 0.0, "look_fx": {}, "social": "loop", "no_auto_text": True,
+    },
+    "photodump": {
+        "label": "Fotodump",
+        "avg_shot": 0.55, "min_shot": 0.35, "max_shot": 0.9,
+        "beat_sync": 1.0, "motion_pref": 0.0, "variety": 0.9,
+        "temperature": 0.28, "color": "playful", "orig_audio": 0.0,
+        "fade": 0.1, "look_fx": {}, "social": "dump", "no_auto_text": True,
+    },
+    "cinereel": {
+        "label": "Cinematic reel",
+        "avg_shot": 3.0, "min_shot": 2.0, "max_shot": 5.0,
+        "beat_sync": 0.6, "motion_pref": -0.3, "variety": 0.6,
+        "temperature": 0.22, "color": "cinematic", "orig_audio": 0.05,
+        "fade": 0.8, "look_fx": {"letterbox": 1}, "social": "cine",
+    },
     "playful": {
         "label": "Lekfull",
         "avg_shot": 2.2, "min_shot": 1.0, "max_shot": 3.6,
@@ -204,6 +254,7 @@ FILM_TYPES = {
     "dive": {"label": "Dykfilm", "platform": "youtube", "count": 3},
     "trip": {"label": "Resefilm", "platform": "youtube", "count": 3},
     "reels": {"label": "Reels och shorts", "platform": "reels", "count": 6},
+    "social": {"label": "Sociala medier-trender", "platform": "reels", "count": 4, "length": 15},
     "animal": {"label": "Djurporträtt", "platform": "feed", "count": 3},
     "promo": {"label": "Reklamfilm", "platform": "reels", "count": 4, "length": 30},
     "musicvideo": {"label": "Musikvideo", "platform": "reels", "count": 4},
@@ -211,6 +262,8 @@ FILM_TYPES = {
     "prompt": {"label": "Egen beskrivning", "platform": "reels", "count": 3},
 }
 
+SOCIAL_STYLES = ["hookreel", "pov", "beforeafter", "top5", "loopreel", "photodump", "cinereel"]
+LENGTH_PRESETS = [7, 15, 30, 60, 90]
 PROMO_STYLES = ["promo_energy", "promo_premium", "promo_info", "promo_experience"]
 MV_STYLES = ["musicvideo", "mv_ballad", "mv_glitch", "mv_lyrics"]
 

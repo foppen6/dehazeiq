@@ -387,12 +387,14 @@ def auto_fit(c, start, dur, fmt):
     m = (t >= start) & (t < start + dur)
     if not m.any() or float(np.median(d["sstr"][m])) < 0.08:
         return None  # inget tydligt motiv: vanlig beskärning
-    spread = float(np.percentile(d[key][m], 70))
-    need = min(1.0, 4.4 * spread)  # motivet ±2 standardavvikelser och lite luft
-    if need <= frac * 1.12:
+    if "loc_conf" in d and len(d["loc_conf"]) and float(np.percentile(d["loc_conf"], 75)) >= 0.03:
+        return None  # AI:n har hittat djuret på en tydlig plats: beskärningen följer det
+    spread = float(np.median(d[key][m]))
+    need = min(1.0, 3.4 * spread)  # motivet ±1,7 standardavvikelser – brett motiv (stim, manta, dykgrupp)
+    if need <= frac * 1.25:
         return None
     z = float(np.log(need) / np.log(frac))
-    z = max(0.45, round(z, 2))  # aldrig mer än ungefär halva vägen mot hela bilden automatiskt
+    z = max(0.5, round(z, 2))  # aldrig mer än halva vägen mot hela bilden automatiskt
     return None if z >= 0.95 else {"zoom": z, "bg": "blur", "auto": True}
 
 
@@ -660,7 +662,99 @@ def generate(project, style_key="cinematic", fmt="9:16", length=30.0, seed=None,
         "shots": shots,
         "renders": {},
     }
-    return effects.plan(prop, {c["id"]: c for c in project.clips()}, style_key)
+    prop = effects.plan(prop, {c["id"]: c for c in project.clips()}, style_key)
+    if style.get("social"):
+        social_post(prop, style["social"], rng, seq)
+    return prop
+
+
+def social_post(prop, kind, rng, seq=None):
+    """Trender för sociala medier: krok och texter, före/efter, nedräkning, sömlös loop."""
+    from . import texts
+    shots = prop["shots"]
+    texts.ensure_uids(prop)
+    ov = []
+    if kind in ("social", "pov", "dump"):
+        ov = texts.suggest_rules(prop, "social", rng)
+        if kind == "social" and ov:  # hook-reel: alltid en stor krok först
+            ov[0].update(text=rng.choice(texts.HOOKS), style="hook")
+        if kind == "pov" and ov:
+            first = ov[0]
+            if not first["text"].upper().startswith("POV"):
+                lab = texts._label(shots[0]) or "något ingen har sett"
+                first["text"] = f"POV: {lab.lower()} framför masken"
+            first["style"] = "pov"
+        if kind == "dump":
+            ov = ov[:1]
+            if ov:
+                ov[0].update(text="Fotodump 📸", style="tiktok")
+    elif kind == "top5":
+        # fem olika motiv, räknas ned 5 → 1 (det bästa sist)
+        seen, pick = set(), []
+        for s in sorted(shots, key=lambda x: x.get("quality", 0)):
+            lab = texts._label(s) or s.get("label") or ""
+            key = lab or s["clip_id"]
+            if key not in seen:
+                seen.add(key)
+                pick.append(s)
+        pick = pick[-5:]
+        if len(pick) >= 3:
+            prop["shots"] = shots = pick
+            n = len(shots)
+            for k, s in enumerate(shots):
+                s["duration"] = max(s["duration"], 2.4)
+                lab = texts._label(s) or s.get("label") or ""
+                ov.append(texts.new_item(s["uid"], str(n - k), "number", lab, 0.15, min(2.4, s["duration"] - 0.1)))
+    elif kind == "beforeafter":
+        # bästa undervattensklippen: först originalet, sedan resultatet med en svepande övergång
+        cand = [s for s in shots if s.get("underwater") and not s.get("photo")] or shots
+        best = sorted(cand, key=lambda x: -x.get("quality", 0))[:3]
+        out = []
+        for s in best:
+            import copy as _c
+            b = _c.deepcopy(s)
+            b["uid"] = ""
+            b["fx"] = dict(b.get("fx") or {}, raw=1)
+            b["tr"] = "wipeleft"
+            a = _c.deepcopy(s)
+            a["uid"] = ""
+            a["tr"] = "cut"
+            out += [b, a]
+        if out:
+            prop["shots"] = shots = out
+            texts.ensure_uids(prop)
+            for k in range(0, len(shots), 2):
+                ov.append(texts.new_item(shots[k]["uid"], "FÖRE", "tiktok", "", 0.1, shots[k]["duration"] - 0.2))
+                ov.append(texts.new_item(shots[k + 1]["uid"], "EFTER", "tiktok", "", 0.1, shots[k + 1]["duration"] - 0.2,
+                                         box="#FFE14D"))
+            ov.insert(0, texts.new_item(shots[0]["uid"], "Vad AI gör med undervattensfilm", "hook", "", 0.0,
+                                        shots[0]["duration"], y=0.25))
+    elif kind == "loop":
+        # sista klippet slutar där det första börjar: filmen går runt utan synlig skarv
+        if len(shots) >= 3:
+            first = shots[0]
+            last = dict(shots[-1])
+            if first["src_start"] >= last["duration"] * 0.8:
+                d = min(last["duration"], first["src_start"])
+                last.update(clip_id=first["clip_id"], name=first["name"], src_start=round(first["src_start"] - d, 3),
+                            src_end=first["src_start"], duration=round(d, 3), cx=first["cx"], cy=first["cy"],
+                            path=[], uid="", tr="cut", fx={})
+                last.pop("fit", None)
+                if first.get("fit"):
+                    last["fit"] = first["fit"]
+                shots[-1] = last
+        prop["loop"] = True
+    pos = 0.0
+    for s in prop["shots"]:
+        s["at"] = round(pos, 3)
+        pos += s["duration"]
+    prop["length"] = round(pos, 2)
+    prop["n_shots"] = len(prop["shots"])
+    texts.ensure_uids(prop)
+    if ov:
+        prop["overlays"] = ov
+        prop["overlay_tone"] = "social"
+    return prop
 
 
 def generate_set(project, style="auto", fmt="9:16", length=30.0, music=None, favorites=(), theme=None,

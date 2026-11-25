@@ -107,6 +107,16 @@ def selftest() -> int:
         traceback.print_exc()
         ok = False
     try:
+        from . import textfx
+        print("Texteffekter: typsnitt", ", ".join(textfx.fonts_available().values()))
+        im = textfx.Block({"text": "Test 🐙", "style": "hook"}, 1080, 1920).render()
+        assert im.width > 10, "texteffekterna fungerar inte"
+        if getattr(sys, "frozen", False):
+            assert len(textfx.fonts_available()) >= 6, "typsnitten saknas i appen"
+    except Exception:  # noqa: BLE001
+        traceback.print_exc()
+        ok = False
+    try:
         from . import whisper
         wb = whisper.binary()
         print("Tal till text: whisper-cli", wb or "saknas", "| förvald modell", whisper.model()["name"])

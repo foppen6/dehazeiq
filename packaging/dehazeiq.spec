@@ -45,6 +45,11 @@ if os.path.isdir(whisper_dir):
         if not f.startswith("."):
             binaries.append((os.path.join(whisper_dir, f), "whisper"))
 
+# fria typsnitt för texteffekterna
+fonts_dir = os.path.join(PKG, "fonts")
+if os.path.isdir(fonts_dir):
+    datas.append((fonts_dir, "fonts"))
+
 a = Analysis(
     [os.path.join(PKG, "run_dehazeiq.py")],
     pathex=[ROOT],

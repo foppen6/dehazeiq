@@ -22,15 +22,28 @@ TEXT_STYLES = {
     "meme": "Meme",
     "minimal": "Minimal",
     "chapter": "Kapitel",
+    "tiktok": "TikTok – vit ruta",
+    "hook": "Krok – stor och fet",
+    "pov": "POV",
+    "highlight": "Överstruken",
+    "neon": "Neon",
+    "number": "Nummer (topplista)",
+    "quote": "Citat",
 }
+ANIM_KEYS = ("fade", "typewriter", "words", "pop", "slide_up", "slide_left", "zoom", "glitch", "highlight",
+             "bounce", "karaoke")
+FONT_KEYS = ("sans", "impact", "bebas", "black", "marker", "script", "comic", "serif")
 TONES = {
     "doc": "Dokumentär",
     "fun": "Humor",
     "travel": "Reseberättare",
     "poetic": "Poetisk",
     "short": "Kort och käck",
+    "social": "Sociala medier – krok och POV",
 }
-TONE_STYLE = {"doc": "doc", "fun": "fun", "travel": "place", "poetic": "caption", "short": "meme"}
+TONE_STYLE = {"doc": "doc", "fun": "fun", "travel": "place", "poetic": "caption", "short": "meme", "social": "tiktok"}
+HOOKS = ["Vänta tills slutet", "Det här hade jag inte väntat mig", "Ingen tror mig när jag berättar",
+         "Därför dyker jag", "Kolla vad som gömmer sig här"]
 
 
 def ensure_uids(prop):
@@ -40,10 +53,45 @@ def ensure_uids(prop):
     return prop
 
 
-def new_item(shot_uid, text, style="caption", sub="", offset=0.3, dur=2.6):
-    return {"id": uuid.uuid4().hex[:8], "shot_uid": shot_uid, "text": str(text).strip()[:90],
-            "sub": str(sub or "").strip()[:90], "style": style if style in TEXT_STYLES else "caption",
-            "offset": max(0.0, float(offset)), "dur": max(0.6, min(15.0, float(dur)))}
+def new_item(shot_uid, text, style="caption", sub="", offset=0.3, dur=2.6, **extra):
+    it = {"id": uuid.uuid4().hex[:8], "shot_uid": shot_uid, "text": str(text).strip()[:160],
+          "sub": str(sub or "").strip()[:120], "style": style if style in TEXT_STYLES else "caption",
+          "offset": max(0.0, float(offset)), "dur": max(0.6, min(15.0, float(dur)))}
+    clean_look(it, extra)
+    return it
+
+
+def clean_look(it, args):
+    """Utseende och animation för en text: anim, x, y (0..1, None = stilens plats), size, color, font, box."""
+    if "anim" in args:
+        a = args.get("anim")
+        if a in ANIM_KEYS:
+            it["anim"] = a
+        else:
+            it.pop("anim", None)  # stilens egen
+    for k in ("x", "y"):
+        if k in args:
+            if args[k] is None or args[k] == "":
+                it.pop(k, None)
+            else:
+                it[k] = round(max(0.0, min(1.0, float(args[k]))), 3)
+    if "size" in args and args["size"] is not None:
+        it["size"] = round(max(0.4, min(2.5, float(args["size"]))), 2)
+    if "font" in args:
+        if args["font"] in FONT_KEYS:
+            it["font"] = args["font"]
+        else:
+            it.pop("font", None)
+    for k in ("color", "box"):
+        if k in args:
+            v = str(args[k] or "").strip()
+            if v == "none" and k == "box":
+                it[k] = "none"
+            elif re.fullmatch(r"#?[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?", v):
+                it[k] = "#" + v.lstrip("#")
+            else:
+                it.pop(k, None)
+    return it
 
 
 def timeline(prop):
@@ -124,6 +172,21 @@ def suggest_rules(prop, tone, rng=None):
             if i in (0, len(shots) // 2, len(shots) - 1) and s["duration"] >= 1.6:
                 items.append(new_item(s["uid"], POETIC[(i + rng.randrange(6)) % len(POETIC)], "caption", "", 0.4,
                                       min(3.4, s["duration"])))
+        elif tone == "social":
+            if i == 0:
+                lab0 = _label(s)
+                hook = (f"POV: {lab0.lower()} framför masken" if lab0 and rng.random() < 0.5 else rng.choice(HOOKS))
+                items.append(new_item(s["uid"], hook, "hook" if not hook.startswith("POV") else "pov", "", 0.1,
+                                      min(2.8, s["duration"])))
+            elif lab and lab not in seen and s["duration"] >= 1.4 and len(items) < 5:
+                seen.add(lab)
+                items.append(new_item(s["uid"], rng.choice([f"{lab} 😍", f"Hej {lab.lower()}!", f"{lab} på riktigt",
+                                                            f"Titta: {lab.lower()}"]), "tiktok", "", 0.25,
+                                      min(2.4, s["duration"] - 0.2)))
+            elif i == len(shots) - 1 and s["duration"] >= 1.2:
+                items.append(new_item(s["uid"], rng.choice(["Följ för mer under ytan 🌊", "Vilken var din favorit?",
+                                                            "Spara till nästa dyk"]), "tiktok", "", 0.2,
+                                      min(2.6, s["duration"])))
         elif tone == "short":
             if i in (0, len(shots) - 1) and s["duration"] >= 1.2:
                 items.append(new_item(s["uid"], rng.choice(SHORT), "meme", "", 0.2, min(2.4, s["duration"])))
@@ -138,7 +201,9 @@ def suggest_llm(prop, tone, server):
         lines.append(f"{i + 1}. {s.get('desc') or _label(s) or 'undervattensbild'} ({s['duration']:.1f} s)")
     how = {"doc": "saklig dokumentär, artnamn och korta fakta", "fun": "rolig, humoristisk, gärna djurets 'tankar'",
            "travel": "personlig reseberättare i jag-form", "poetic": "poetisk och stämningsfull",
-           "short": "kort, käck och slagkraftig som i sociala medier"}[tone]
+           "short": "kort, käck och slagkraftig som i sociala medier",
+           "social": "som en virala reel på Instagram/TikTok: första texten är en krok eller POV, sedan korta "
+                     "rader med emoji, sista en uppmaning"}[tone]
     ask = ("Du skriver texter som visas i en kort film. Ton: " + how + ".\nKlippen i ordning:\n" + "\n".join(lines) +
            "\nSkriv texter på SVENSKA till ungefär vart annat klipp (inte alla), max 6 ord per text. "
            "Svara ENDAST med JSON: [{\"klipp\": nummer, \"text\": \"...\", \"undertext\": \"...\"}]")
@@ -158,7 +223,9 @@ def suggest_llm(prop, tone, server):
             continue
         if 0 <= k < len(shots) and str(d.get("text") or "").strip():
             s = shots[k]
-            items.append(new_item(s["uid"], d["text"], TONE_STYLE.get(tone, "caption"), d.get("undertext") or "",
+            st = ("pov" if str(d["text"]).upper().startswith("POV") else "hook") if (tone == "social" and not items) \
+                else TONE_STYLE.get(tone, "caption")
+            items.append(new_item(s["uid"], d["text"], st, d.get("undertext") or "",
                                   0.3, min(3.2, max(1.2, s["duration"] - 0.2))))
     return items or None
 

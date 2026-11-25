@@ -372,6 +372,17 @@ def render_proposal(progress, pid, prop_id, resolution="preview", lang="sv"):
                                                   f"Licens: {lic.get('code', '').upper()} {lic.get('url', '')}".strip(),
                                                   lic.get("source", "")) if x and x != "Licens:") + "\n", "utf-8")
             result["credits"] = txt.name
+        try:  # omslagsbild för inlägget: vald bild, annars den bästa, med texterna
+            cov = prop.get("cover") or {}
+            shots = prop["shots"]
+            ci = cov.get("i") if isinstance(cov.get("i"), int) and 0 <= cov.get("i") < len(shots) else \
+                max(range(len(shots)), key=lambda k: shots[k].get("quality", 0))
+            w = {"720p": 720, "1080p": 1080, "4k": 1080}.get(resolution, 1080)
+            jpg = out.with_suffix(".omslag.jpg")
+            jpg.write_bytes(render.still(proj, prop, ci, float(cov.get("at", 0.45)), w))
+            result["cover"] = jpg.name
+        except Exception as e:  # noqa: BLE001
+            print("Omslagsbilden kunde inte göras:", e)
     proj.update_proposal(prop_id, renders=renders)
     return result
 

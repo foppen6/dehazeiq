@@ -28,6 +28,8 @@ EFFECTS = {
     "credits": "Musiktack",
     "speech": "Undertexter från tal",
     "voice": "Hör talet",
+    "karaoke": "Karaoke på tal",
+    "safezone": "Säker zon för appar",
 }
 DEFAULT_EFFECTS = {k: True for k in EFFECTS}
 

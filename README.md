@@ -141,6 +141,22 @@ tidslinjen.
 eller valfri färg). AI:n gör det själv när motivet – en manta, ett stim, en dykgrupp – inte ryms i en
 stående beskärning; *Låt AI välja* och *Samma på alla klipp* finns i redigeringen.
 
+**Texter med effekter:** egna texter ritas med riktiga typsnitt (följer med appen: Anton, Bebas Neue,
+Archivo Black, Permanent Marker, Pacifico, Bangers, DM Serif Display – fria licenser), konturer,
+rundade rutor, skuggor, glöd och emojier. Femton stilar, bland annat TikTok-ruta, krok, POV,
+överstruken, neon, nummer och citat. Animationer: tona in, skrivmaskin, ord för ord, pop, glid upp,
+glid in från sidan, zooma in, glitch, överstrykning, gungar och karaoke. Varje text kan få eget
+typsnitt, storlek, färg och ruta, och placeras genom att klicka i bilden. Texterna hålls inom
+Instagrams och TikToks säkra zon (där appens knappar inte täcker), och i textraden på tidslinjen dras
+en text till en ny tid. Talundertexter visas som karaoke: ordet som sägs lyser upp. Snabbmallar och
+tonen *Sociala medier – krok och POV* finns under Text.
+
+**Stilar för sociala medier:** Hook-reel (stor krok direkt, snabbt på takten), POV, Före/efter
+(originalet sveps över till resultatet), Topp 5 (nedräkning med stora siffror), Loop (går runt utan
+skarv), Fotodump och Cinematic reel. Filmtypen *Sociala medier-trender* gör fyra av dem på en gång.
+Längden väljs direkt i redigeringen (7, 15, 30, 60 eller 90 s), och vid export sparas en
+**omslagsbild** med texterna bredvid filmen – vald bild eller AI:ns bästa.
+
 **Olika filmer eller varianter:** när förslag skapas väljer man om de ska vara *olika filmer med
 olika fokus* (ett djur, detaljerna, ett dyk, rörelse …) eller *varianter av samma film* (samma
 berättelse och i stort sett samma klipp, med olika stil, tempo, färg och musik). Varje förslag har

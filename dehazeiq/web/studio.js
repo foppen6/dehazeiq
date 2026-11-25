@@ -10,6 +10,7 @@ const FT_ICON = {
   promo: '<path d="M3 11v2a1 1 0 0 0 1 1h3l5 4V6L7 10H4a1 1 0 0 0-1 1z"/><path d="M16 8a5 5 0 0 1 0 8M19 5a9 9 0 0 1 0 14"/>',
   musicvideo: '<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>',
   trailer: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="m10 9 5 3-5 3z"/>',
+  social: '<path d="M12 21s-7-4.4-9.3-9A5 5 0 0 1 12 6a5 5 0 0 1 9.3 6c-2.3 4.6-9.3 9-9.3 9z"/>',
 };
 const FT_DESC = {
   auto: "AI läser materialet och föreslår den mix av berättelser som passar bäst.",
@@ -20,6 +21,7 @@ const FT_DESC = {
   promo: "Fyra reklamvarianter. Krok, säljpunkter, logga och uppmaning läggs in efteråt – samma film kan användas för olika saker.",
   musicvideo: "Fyra varianter till din låt: i takt, ballad, glitch och med din sångtext. Bästa klippet hamnar på refrängen.",
   trailer: "Byggs upp som en filmtrailer: lugn start, textskyltar, allt snabbare klipp och titeln på slutet.",
+  social: "Trender för Instagram och TikTok: hook-reel, POV, före/efter, topp 5, loop, fotodump och cinematic reel.",
 };
 const svgi = (p, s = 18) => `<svg aria-hidden="true" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
 const ICO = {
@@ -111,7 +113,7 @@ function viewSetup() {
     const plat = pl.platform || ft.platform;
     const len = pl.length || (pfs[plat] || {}).length || 30;
     const count = pl.count || ft.count;
-    const lens = [15, 30, 45, 60, 90, 180, 300].map((s) => `<option value="${s}" ${Number(len) === s ? "selected" : ""}>${s < 60 ? `${s} s` : `${s / 60} min`}</option>`).join("");
+    const lens = [7, 15, 30, 45, 60, 90, 180, 300].map((s) => `<option value="${s}" ${Number(len) === s ? "selected" : ""}>${s < 60 ? `${s} s` : `${s / 60} min`}</option>`).join("");
     return `<div class="ftopt"><b>${esc(ft.label)}</b>
       <label>Gör för<select data-ftplat="${k}">${Object.entries(pfs).map(([pk, pf]) => `<option value="${pk}" ${pk === plat ? "selected" : ""}>${esc(pf.label)} · ${pf.format}</option>`).join("")}</select></label>
       <label>Längd<select data-ftlen="${k}">${lens}</select></label>
@@ -189,6 +191,31 @@ function planProposals() {
   if (!props.some((p) => p.plan)) return null;
   const list = state.planTab === "all" ? props : props.filter((p) => p.plan === state.planTab);
   return list;
+}
+
+function lengthSelect(p) {
+  const cur = Math.round(p.target_length || p.length || 30);
+  const opts = [7, 15, 30, 60, 90];
+  if (!opts.includes(cur)) opts.push(cur);
+  return `<label class="platsel"><span class="sr">Längd</span><select data-proplen="${p.id}" title="Gör om filmen i en annan längd">
+    ${opts.sort((a, b) => a - b).map((s) => `<option value="${s}" ${s === cur ? "selected" : ""}>${s} s</option>`).join("")}</select></label>`;
+}
+
+async function changeLength(propId, length) {
+  const p = propById(propId);
+  const pfs = platforms();
+  const plat = p.platform || Object.keys(pfs).find((k) => pfs[k].format === p.format) || "reels";
+  toast(`Gör om filmen till ${length} sekunder …`, true);
+  try {
+    const r = await api("POST", `/api/p/${state.pid}/proposal/${propId}/platform`, { platform: plat, length: Number(length) });
+    const ps = P().proposals;
+    const i = ps.findIndex((x) => x.id === propId);
+    if (i >= 0) ps[i] = r.proposal;
+    state.ed.shotPrev = {};
+    state.ed.stamp = Date.now();
+    render();
+    requestShotPreview();
+  } catch (e) { fail(e); }
 }
 
 function platformSelect(p) {
@@ -353,6 +380,9 @@ function edInspectorClip(p, s) {
     <div class="stack" style="gap:8px"><span class="flabel">Effekt</span><div class="chips">
       ${chipBtn("data-edfx", "none", "Ingen", effect === "none")}${chipBtn("data-edfx", "zoom", "Långsam zoom", effect === "zoom")}${chipBtn("data-edfx", "punch", "Zoomryck", effect === "punch")}</div></div>`}
     ${fitSection(p, s)}
+    <div class="stack" style="gap:6px"><span class="flabel">Omslagsbild</span>
+      <div class="row" style="gap:8px;align-items:center">${(p.cover || {}).i === state.ed.i ? '<span class="badge" style="position:static">Omslag</span><span class="muted" style="font-size:12px">Den här bilden blir omslag vid export.</span>'
+        : `<button class="btn small" data-act="ed-cover">Använd klippet som omslag</button><span class="muted" style="font-size:12px">${p.cover ? `Nu: klipp ${p.cover.i + 1}` : "Annars väljer AI:n den bästa bilden."}</span>`}</div></div>
     <div class="stack" style="gap:8px"><span class="flabel">Motivet i bilden</span>
       <span class="muted" style="font-size:12px">Klicka i originalbilden till vänster för att flytta utsnittet.</span>
       ${s.manual_center ? `<button class="btn small" data-act="ed-autocenter">${svgi(ICO.target, 14)}Låt AI följa motivet igen</button>` : ""}</div>
@@ -422,8 +452,20 @@ function edInspectorColor(p) {
 }
 
 const TEXT_STYLES = { doc: "Dokumentär – namnskylt", fun: "Humor – pratbubbla", title: "Rubrik", caption: "Undertext",
-  place: "Plats – reseskylt", meme: "Meme", minimal: "Minimal", chapter: "Kapitel" };
-const TONES = { doc: "Dokumentär", fun: "Humor", travel: "Reseberättare", poetic: "Poetisk", short: "Kort och käck" };
+  place: "Plats – reseskylt", meme: "Meme", minimal: "Minimal", chapter: "Kapitel",
+  tiktok: "TikTok – vit ruta", hook: "Krok – stor och fet", pov: "POV", highlight: "Överstruken", neon: "Neon",
+  number: "Nummer (topplista)", quote: "Citat" };
+const TEXT_ANIMS = { "": "Stilens egen", fade: "Tona in", typewriter: "Skrivmaskin", words: "Ord för ord", pop: "Pop",
+  slide_up: "Glid upp", slide_left: "Glid in från sidan", zoom: "Zooma in", glitch: "Glitch", highlight: "Överstrykning",
+  bounce: "Gungar", karaoke: "Karaoke" };
+const TEXT_FONTS = { "": "Stilens egen", sans: "Fet", impact: "Anton", bebas: "Bebas Neue", black: "Archivo Black",
+  marker: "Tuschpenna", script: "Skrivstil", comic: "Serietidning", serif: "Elegant" };
+const TEXT_TEMPLATES = [
+  ["pov", "POV: du hittar …", "pov"], ["hook", "Vänta tills slutet", "hook"], ["number", "1", "number"],
+  ["tiktok", "Det här hände på dyket", "tiktok"], ["highlight", "Bästa dyket hittills", "highlight"],
+  ["quote", "Havet minns allt", "quote"], ["neon", "Gullmarsfjorden", "neon"]];
+const POS9 = [[0.5, 0.16, "↑"], [0.5, 0.5, "•"], [0.5, 0.76, "↓"], [0.24, 0.16, "↖"], [0.76, 0.16, "↗"], [0.24, 0.76, "↙"], [0.76, 0.76, "↘"]];
+const TONES = { doc: "Dokumentär", fun: "Humor", travel: "Reseberättare", poetic: "Poetisk", short: "Kort och käck", social: "Sociala medier – krok och POV" };
 
 function ovBars(p, total) {
   const at = Object.fromEntries(p.shots.map((s, i) => [s.uid, { at: s.at, i }]));
@@ -439,17 +481,34 @@ function freeTextsForm(p) {
   const n = p.shots.length;
   const items = (p.overlays || []).map((o) => {
     const idx = Math.max(0, p.shots.findIndex((s) => s.uid === o.shot_uid));
-    return `<div class="ovitem ${state.ed.ov === o.id ? "sel" : ""}" data-ovid="${o.id}">
+    const sel = state.ed.ov === o.id;
+    const opt = (obj, cur) => Object.entries(obj).map(([k, l]) => `<option value="${k}" ${(cur || "") === k ? "selected" : ""}>${l}</option>`).join("");
+    const more = sel ? `
+      <div class="row" style="flex-wrap:nowrap;gap:6px;font-size:12px">
+        <label class="stack" style="gap:2px;flex:1">Animation<select class="selfield" data-ovf="anim">${opt(TEXT_ANIMS, o.anim)}</select></label>
+        <label class="stack" style="gap:2px;flex:1">Typsnitt<select class="selfield" data-ovf="font">${opt(TEXT_FONTS, o.font)}</select></label></div>
+      <label class="sl" style="font-size:12px"><span>Storlek</span><input type="range" min="0.5" max="2.2" step="0.05" value="${o.size || 1}" data-ovf="size" style="accent-color:var(--accent)"><span class="num">${Math.round((o.size || 1) * 100)} %</span></label>
+      <div class="row" style="gap:10px;font-size:12px;align-items:center">
+        <label class="row" style="gap:6px">Färg<input type="color" data-ovf="color" value="${o.color || "#ffffff"}" style="width:30px;height:24px;border:0;background:none;padding:0"></label>
+        <label class="row" style="gap:6px">Ruta<input type="color" data-ovf="box" value="${o.box && o.box !== "none" ? o.box.slice(0, 7) : "#000000"}" style="width:30px;height:24px;border:0;background:none;padding:0"></label>
+        <button class="btn small" data-ovreset="${o.id}" title="Stilens färger och typsnitt">Återställ</button></div>
+      <div class="stack" style="gap:4px;font-size:12px"><span class="muted">Plats – välj här eller klicka i bilden</span>
+        <div class="row" style="gap:4px;flex-wrap:wrap">${POS9.map(([x, y, l]) => `<button class="btn icon small" data-ovpos="${o.id}" data-x="${x}" data-y="${y}" aria-label="Placera">${l}</button>`).join("")}
+          <button class="btn small" data-ovpos="${o.id}" data-x="" data-y="" ${o.x == null ? 'aria-pressed="true"' : ""}>Stilens plats</button></div></div>` : "";
+    return `<div class="ovitem ${sel ? "sel" : ""}" data-ovid="${o.id}">
       <div class="row" style="flex-wrap:nowrap;gap:6px">
-        <select class="selfield" data-ovf="style" style="flex:1 1 auto">${Object.entries(TEXT_STYLES).map(([k, l]) => `<option value="${k}" ${o.style === k ? "selected" : ""}>${l}</option>`).join("")}</select>
+        <select class="selfield" data-ovf="style" style="flex:1 1 auto">${opt(TEXT_STYLES, o.style)}</select>
+        ${sel ? "" : `<button class="btn small" data-ovsel="${o.id}" data-edshot="${idx}">Effekter</button>`}
         <button class="btn icon small" data-ovdel="${o.id}" aria-label="Ta bort texten">${icon("trash", 14)}</button></div>
-      <input class="field" data-ovf="text" value="${esc(o.text)}" maxlength="90" placeholder="Text">
-      <input class="field" data-ovf="sub" value="${esc(o.sub || "")}" maxlength="90" placeholder="Andra raden (valfri)">
+      <textarea class="field" data-ovf="text" rows="${o.text.length > 40 ? 2 : 1}" maxlength="160" placeholder="Text">${esc(o.text)}</textarea>
+      <input class="field" data-ovf="sub" value="${esc(o.sub || "")}" maxlength="120" placeholder="Andra raden (valfri)">
       <div class="row" style="flex-wrap:nowrap;gap:6px;font-size:12px">
         <label class="stack" style="gap:2px;flex:1">Klipp<select class="selfield" data-ovf="i">${p.shots.map((_, k) => `<option value="${k}" ${k === idx ? "selected" : ""}>${k + 1}</option>`).join("")}</select></label>
         <label class="stack" style="gap:2px;flex:1">Start (s)<input class="field" type="number" step="0.1" min="0" data-ovf="offset" value="${Number(o.offset).toFixed(1)}"></label>
-        <label class="stack" style="gap:2px;flex:1">Längd (s)<input class="field" type="number" step="0.1" min="0.6" max="15" data-ovf="dur" value="${Number(o.dur).toFixed(1)}"></label></div></div>`;
+        <label class="stack" style="gap:2px;flex:1">Längd (s)<input class="field" type="number" step="0.1" min="0.6" max="15" data-ovf="dur" value="${Number(o.dur).toFixed(1)}"></label></div>${more}</div>`;
   }).join("");
+  const tpl = `<div class="stack" style="gap:6px"><span class="muted" style="font-size:12px">Snabbmallar för sociala medier – läggs på klipp ${state.ed.i + 1}</span>
+    <div class="chips">${TEXT_TEMPLATES.map(([k, t, st]) => `<button class="chip" data-ovtpl="${st}" data-text="${esc(t)}">${esc(TEXT_STYLES[st].split(" –")[0])}</button>`).join("")}</div></div>`;
   const tone = state.ed.tone || p.overlay_tone || "doc";
   return `<div class="stack" style="gap:10px;padding-top:14px;border-top:1px solid var(--line)">
     <span class="flabel">Texter i filmen</span>
@@ -457,7 +516,8 @@ function freeTextsForm(p) {
       <button class="btn small primary" data-act="ov-suggest" ${state.ed.suggesting ? "disabled" : ""}>${state.ed.suggesting ? "Skriver …" : `${icon("spark", 14)}Föreslå texter`}</button></div>
     <span class="muted" style="font-size:12px">${state.info && state.info.llm ? "Djupanalysen skriver texter utifrån vad som händer i klippen." : "Förslagen bygger på vad AI:n känt igen i klippen. Med djupanalysen (Mac) skrivs de fritt utifrån vad som händer."} Förslaget ersätter de automatiska texterna – allt går att ändra och ångra.</span>
     ${items || '<span class="muted" style="font-size:13px">Inga egna texter än.</span>'}
-    <button class="btn small" data-act="ov-add">+ Lägg till text på klipp ${state.ed.i + 1}${n ? "" : ""}</button></div>`;
+    <button class="btn small" data-act="ov-add">+ Lägg till text på klipp ${state.ed.i + 1}${n ? "" : ""}</button>
+    ${tpl}</div>`;
 }
 
 function edInspectorText(p) {
@@ -556,7 +616,7 @@ function viewEdit() {
   return `<main class="main wide edmain">
     <div class="spread"><div class="head"><h1>${esc(p.title || p.style_label)}</h1>
       <p class="lead">${esc(p.style_label)} · ${p.platform ? `${esc(platformLabel(p.platform))} · ` : ""}${p.format} · ${fmtDur(p.length)}</p></div>
-      <div class="row">${platformSelect(p)}<button class="btn" data-act="ed-undo" ${(p.history || []).length ? "" : "disabled"}>${svgi(ICO.undo, 16)}Ångra</button>
+      <div class="row">${platformSelect(p)}${lengthSelect(p)}<button class="btn" data-act="ed-undo" ${(p.history || []).length ? "" : "disabled"}>${svgi(ICO.undo, 16)}Ångra</button>
         ${prev ? "" : `<button class="btn" data-preview="${p.id}" ${busyHere ? "disabled" : ""}>${icon("play", 14)}${busyHere ? "Renderar …" : "Förhandsvisa filmen"}</button>`}
         <button class="btn primary" data-export="${p.id}">Exportera</button></div></div>
     <div class="edgrid">
@@ -580,7 +640,14 @@ function edStage(p, i, s, src, cx, cy, tab, prev, busyHere) {
   const seg = `<div class="seg stagemodes" role="tablist">${STAGE_MODES.map(([k, l]) => `<button role="tab" data-edmode="${k}" aria-pressed="${mode === k}" aria-selected="${mode === k}">${l}</button>`).join("")}</div>`;
   const status = busy ? `<span class="stagestat">${icon("spark", 12)}Uppdaterar klippet …</span>` : "";
   let body = "";
-  if (mode === "clip") {
+  if (mode === "clip" && tab === "text") {
+    body = `<figure class="edfig"><div class="edstill placer" style="aspect-ratio:${ar}" data-edplace>
+      <img id="edStill" alt="Klicka för att placera texten" src="${after}">${p.format !== "16:9" ? '<span class="safezone"></span>' : ""}</div>
+      <figcaption>Klicka i bilden för att placera vald text. Streckat: där appens knappar ligger.</figcaption></figure>
+      <figure class="edfig"><div class="edstill" style="aspect-ratio:${ar}">
+      ${fresh ? `<video id="edClipVid" src="${mediaUrl("shots", sp.file)}" poster="${after}" autoplay loop playsinline controls></video>`
+        : `<img alt="" src="${after}">`}${status}</div><figcaption>Med animationen</figcaption></figure>`;
+  } else if (mode === "clip") {
     body = `<figure class="edfig"><div class="edstill" style="aspect-ratio:${ar}">
       ${fresh ? `<video id="edClipVid" src="${mediaUrl("shots", sp.file)}" poster="${after}" autoplay loop playsinline controls></video>`
         : `<img id="edStill" alt="Klippet som det ser ut i filmen" src="${after}">`}${status}</div>
@@ -672,7 +739,7 @@ function stageGrade(g) {
 
 /* ================= händelser ================= */
 document.addEventListener("click", async (ev) => {
-  const t = ev.target.closest("button, [data-edsrc]");
+  const t = ev.target.closest("button, [data-edsrc], [data-edplace]");
   if (!t) return;
   const d = t.dataset;
   if (d.edsrc !== undefined) {
@@ -712,6 +779,7 @@ document.addEventListener("click", async (ev) => {
   }
   if (d.dvoff) return diveOffset(Number(d.dvoff));
   if (d.edit) return openEditor(d.edit);
+  if (d.ovsel && window.__ovDragged && Date.now() - window.__ovDragged < 400) return undefined;
   if (d.ovsel) { state.ed.ov = d.ovsel; state.ed.tab = "text"; }
   if (d.preview && state.view === "edit") state.ed.mode = "film";
   if (d.edshot !== undefined) { state.ed.i = Number(d.edshot); state.ed.alts = null; render(); return requestShotPreview(150); }
@@ -722,6 +790,21 @@ document.addEventListener("click", async (ev) => {
   if (d.edspeed) return edit("speed", { i: state.ed.i, mode: d.edspeed });
   if (d.edfx) return edit("fx", { i: state.ed.i, effect: d.edfx });
   if (d.ovdel) return edit("overlay_delete", { id: d.ovdel });
+  if (d.ovpos) return edit("overlay_update", { id: d.ovpos, x: d.x === "" ? null : Number(d.x), y: d.y === "" ? null : Number(d.y) });
+  if (d.ovreset) return edit("overlay_update", { id: d.ovreset, color: "", box: "", font: "", anim: "", size: 1 });
+  if (d.ovtpl) {
+    await edit("overlay_add", { i: state.ed.i, text: d.text, style: d.ovtpl, offset: 0.2 });
+    const ov = edProp().overlays || [];
+    state.ed.ov = ov.length ? ov[ov.length - 1].id : null;
+    state.ed.tab = "text";
+    return render();
+  }
+  if (d.edplace !== undefined) {
+    const o = (edProp().overlays || []).find((x) => x.id === state.ed.ov);
+    if (!o) return toast("Välj en text först (tryck på Effekter vid texten).");
+    const r = t.getBoundingClientRect();
+    return edit("overlay_update", { id: o.id, x: Math.round(((ev.clientX - r.left) / r.width) * 1000) / 1000, y: Math.round(((ev.clientY - r.top) / r.height) * 1000) / 1000 });
+  }
   if (d.cammode) return edit("cam360", { i: state.ed.i, mode: d.cammode, ...(d.cammode === "ai" ? { yaw: 0, fov: 104 } : {}) });
   if (d.edmove) { const j = state.ed.i + Number(d.edmove); await edit("move", { i: state.ed.i, dir: Number(d.edmove) }); state.ed.i = Math.max(0, Math.min(j, edProp().shots.length - 1)); return render(); }
   if (d.edscope) { state.ed.scope = d.edscope; return render(); }
@@ -775,6 +858,7 @@ document.addEventListener("click", async (ev) => {
     case "ed-text": return edit("text", { i: state.ed.i, kind: $("#edTxtKind").value, text: $("#edTxt").value, sub: $("#edTxtSub").value });
     case "ed-text-clear": return edit("text", { i: state.ed.i, text: "" });
     case "ed-title-clear": return edit("title", { text: "" });
+    case "ed-cover": await edit("cover", { i: state.ed.i, at: 0.45 }); return toast("Omslagsbilden sparas bredvid filmen vid export, med texterna.", true);
     case "ed-fit-auto": return edit("fit", { i: state.ed.i, auto: true });
     case "ed-fit-fill": return edit("fit", { i: state.ed.i, zoom: 1 });
     case "ed-fit-whole": return edit("fit", { i: state.ed.i, zoom: 0 });
@@ -821,10 +905,11 @@ document.addEventListener("change", (ev) => {
   if (d.edlen !== undefined) return edit("trim", { i: state.ed.i, duration: Number(t.value) });
   if (d.edtr !== undefined) return edit("transition", { i: state.ed.i, type: t.value });
   if (d.edfitcolor !== undefined) return edit("fit", { i: state.ed.i, bg: t.value });
+  if (d.proplen) return changeLength(d.proplen, t.value);
   if (d.edtone !== undefined) { state.ed.tone = t.value; return undefined; }
   if (d.ovf) {
     const id = t.closest("[data-ovid]").dataset.ovid;
-    const v = ["offset", "dur", "i"].includes(d.ovf) ? Number(t.value) : t.value;
+    const v = ["offset", "dur", "i", "size"].includes(d.ovf) ? Number(t.value) : t.value;
     state.ed.ov = id;
     return edit("overlay_update", { id, [d.ovf]: v });
   }
@@ -1103,4 +1188,36 @@ document.addEventListener("keydown", async (ev) => {
   else if (ev.altKey && (ev.key === "ArrowLeft" || ev.key === "ArrowRight")) { ev.preventDefault(); const dir = ev.key === "ArrowLeft" ? -1 : 1; const j = state.ed.i + dir; if (j < 0 || j >= p.shots.length) return; await edit("move", { i: state.ed.i, dir }); state.ed.i = j; render(); }
   else if (ev.key === "ArrowLeft" || ev.key === "ArrowRight") { state.ed.i = Math.max(0, Math.min(p.shots.length - 1, state.ed.i + (ev.key === "ArrowLeft" ? -1 : 1))); state.ed.alts = null; render(); }
   else if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "z") { ev.preventDefault(); await edit("undo"); render(); }
+});
+
+/* Dra en text i textraden på tidslinjen för att ändra när den visas */
+let ovDrag = null;
+document.addEventListener("pointerdown", (ev) => {
+  const b = ev.target.closest(".ovbar");
+  if (!b || state.view !== "edit") return;
+  const row = b.parentElement.getBoundingClientRect();
+  ovDrag = { id: b.dataset.ovsel, x: ev.clientX, el: b, w: row.width, left0: parseFloat(b.style.left), moved: false };
+});
+document.addEventListener("pointermove", (ev) => {
+  if (!ovDrag) return;
+  const dx = ev.clientX - ovDrag.x;
+  if (!ovDrag.moved && Math.abs(dx) < 6) return;
+  ovDrag.moved = true;
+  ovDrag.el.classList.add("dragging");
+  ovDrag.el.style.left = `${Math.max(0, Math.min(98, ovDrag.left0 + (dx / ovDrag.w) * 100))}%`;
+});
+document.addEventListener("pointerup", async () => {
+  const d = ovDrag;
+  ovDrag = null;
+  if (!d || !d.moved) return;
+  const p = edProp();
+  const total = p.shots.reduce((a, s) => a + s.duration, 0);
+  const start = (parseFloat(d.el.style.left) / 100) * total;
+  let i = p.shots.findIndex((s) => start >= s.at && start < s.at + s.duration);
+  if (i < 0) i = p.shots.length - 1;
+  const offset = Math.max(0, Math.round((start - p.shots[i].at) * 10) / 10);
+  state.ed.ov = d.id;
+  state.ed.i = i;
+  window.__ovDragged = Date.now();
+  await edit("overlay_update", { id: d.id, i, offset });
 });

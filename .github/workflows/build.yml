@@ -51,6 +51,9 @@ jobs:
           ls -la packaging/llama | head -40
           packaging/llama/llama-server --version
 
+      - name: Hämta typsnitt
+        run: python3 packaging/get_fonts.py
+
       - name: Bygg whisper.cpp (tal till text)
         run: |
           git clone --depth 1 https://github.com/ggml-org/whisper.cpp wcpp
@@ -136,6 +139,10 @@ jobs:
           New-Item -ItemType Directory -Force packaging/ffmpeg | Out-Null
           Get-ChildItem ffx -Recurse -Include ffmpeg.exe,ffprobe.exe | Copy-Item -Destination packaging/ffmpeg
           packaging/ffmpeg/ffmpeg.exe -hide_banner -version | Select-Object -First 1
+
+      - name: Hämta typsnitt
+        shell: bash
+        run: python packaging/get_fonts.py
 
       - name: Bygg whisper.cpp (tal till text)
         shell: bash

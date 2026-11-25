@@ -10,7 +10,7 @@ import uuid
 import numpy as np
 
 from . import generator, story
-from .config import FILM_TYPES, GRADE_KEYS, LOOKS, MV_STYLES, PLATFORMS, PROMO_STYLES, STYLES
+from .config import FILM_TYPES, GRADE_KEYS, LOOKS, MV_STYLES, PLATFORMS, PROMO_STYLES, SOCIAL_STYLES, STYLES
 
 
 class EditError(Exception):
@@ -198,6 +198,9 @@ def apply(project, prop, op, args):
             else:
                 s["fit"] = f
             s["edited"] = True
+    elif op == "cover":
+        i, s = shot_at()
+        prop["cover"] = {"i": i, "at": round(max(0.0, min(0.99, float(args.get("at", 0.45)))), 3)}
     elif op == "auto_center":
         i, s = shot_at()
         if not s.get("auto_path") and not s.get("manual_center"):
@@ -243,15 +246,18 @@ def apply(project, prop, op, args):
             i, s = shot_at()
             ov.append(texts.new_item(s["uid"], args.get("text") or "Ny text", args.get("style", "caption"),
                                      args.get("sub", ""), args.get("offset", 0.3),
-                                     args.get("dur", min(2.6, max(1.0, float(s["duration"]) - 0.3)))))
+                                     args.get("dur", min(2.6, max(1.0, float(s["duration"]) - 0.3))),
+                                     **{k: args[k] for k in ("anim", "x", "y", "size", "color", "font", "box")
+                                        if k in args}))
         elif op == "overlay_update":
             it = next((x for x in ov if x["id"] == args.get("id")), None)
             if not it:
                 raise EditError("Texten finns inte")
             if "text" in args:
-                it["text"] = str(args["text"]).strip()[:90]
+                it["text"] = str(args["text"]).strip()[:160]
             if "sub" in args:
-                it["sub"] = str(args["sub"]).strip()[:90]
+                it["sub"] = str(args["sub"]).strip()[:120]
+            texts.clean_look(it, args)
             if args.get("style") in texts.TEXT_STYLES:
                 it["style"] = args["style"]
             if args.get("offset") is not None:
@@ -483,7 +489,7 @@ def _themes_by_kind(project, fmt):
     return th, by
 
 
-VARIETY_DEFAULT = {"auto": "focus", "reels": "focus", "animal": "focus", "prompt": "variants",
+VARIETY_DEFAULT = {"auto": "focus", "reels": "focus", "social": "variants", "animal": "focus", "prompt": "variants",
                    "dive": "variants", "trip": "variants", "promo": "variants", "trailer": "variants",
                    "musicvideo": "variants"}
 KIND_STYLES = {
@@ -494,6 +500,7 @@ KIND_STYLES = {
     "trip": ["cinematic", "documentary", "vlog", "action"],
     "prompt": ["cinematic", "documentary", "playful"],
     "promo": PROMO_STYLES, "musicvideo": MV_STYLES, "trailer": ["trailer"],
+    "social": SOCIAL_STYLES,
 }
 
 
@@ -563,7 +570,7 @@ def plan_proposals(project, plan, music=None, favorites=(), avoid=()):
     q_theme = generator.search_theme(query, plan.get("title")) if query else None
     styles = [x for x in (plan.get("styles") or []) if x in STYLES]
     sty = styles or KIND_STYLES.get(kind, KIND_STYLES["auto"])
-    if variety == "variants" and kind in ("auto", "reels", "animal", "dive", "trip"):
+    if variety == "variants" and kind in ("auto", "reels", "animal", "dive", "trip", "social"):
         # samma film i flera varianter: ett tema, samma klipp, olika stilar (tempo, färg, musik)
         th, by = _themes_by_kind(project, fmt)
         if q_theme:

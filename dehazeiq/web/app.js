@@ -41,8 +41,22 @@ const STYLE_INFO = {
     long: "Mycket snabba klipp, färgkanaler som glider isär och blixtar på slagen. Kortare klipp där musiken är intensiv." },
   mv_lyrics: { group: "mv", label: "Musikvideo · sångtext", desc: "Din sångtext i takt", color: "#E86BD8",
     long: "Klipp i takt med din egen sångtext, en rad i taget. Skriv in texten under Redigera › Text." },
+  hookreel: { group: "social", label: "Hook-reel", desc: "Krok direkt, snabbt på takten", color: "#FFE14D",
+    long: "En stor krok-text de första sekunderna så att ingen scrollar förbi, snabba klipp på takten och korta texter ord för ord." },
+  pov: { group: "social", label: "POV", desc: "”POV: du hittar …”", color: "#FFFFFF",
+    long: "Berättat som om tittaren är där: POV-text som skrivs fram, lugnare tempo och personliga rader." },
+  beforeafter: { group: "social", label: "Före/efter", desc: "Originalet, sedan AI:ns resultat", color: "#5BD6E8",
+    long: "De bästa undervattensklippen visas först som de filmades och sveps sedan över till färdigt resultat – perfekt för att visa vad färgkorrigeringen gör." },
+  top5: { group: "social", label: "Topp 5", desc: "Nedräkning 5 → 1", color: "#FF8A5B",
+    long: "Fem olika djur eller platser med stora siffror, det bästa sist." },
+  loopreel: { group: "social", label: "Loop", desc: "Går runt utan skarv", color: "#9BE86B",
+    long: "Sista klippet slutar där det första börjar och musiken tonar inte ut, så filmen går runt och runt – bra för tittartid." },
+  photodump: { group: "social", label: "Fotodump", desc: "Massor av korta bilder", color: "#E86BB0",
+    long: "Snabb bildkavalkad från resan eller dyket, en bild per slag i musiken." },
+  cinereel: { group: "social", label: "Cinematic reel", desc: "Filmkanter, lugn rytm", color: "#C9A86B",
+    long: "Stående film med svarta filmkanter, mjuka toningar och filmisk färg." },
 };
-const STYLE_GROUPS = [["story", "Berättande"], ["promo", "Reklam"], ["mv", "Musikvideo"], ["trailer", "Trailer"]];
+const STYLE_GROUPS = [["story", "Berättande"], ["social", "Sociala medier"], ["promo", "Reklam"], ["mv", "Musikvideo"], ["trailer", "Trailer"]];
 STYLE_INFO.musicvideo.group = "mv";
 const isPromo = (p) => /^promo_/.test(p.style || "") || p.style === "trailer";
 const FORMAT_INFO = [
@@ -360,7 +374,7 @@ async function saveSettings(patch) {
 const EFFECT_INFO = { transitions: "Mjuka övergångar", slowmo: "Slowmotion", zoom: "Långsam zoom", title: "Titel",
   vignette: "Vinjett", fast: "Snabbspolning", freeze: "Frysbild", punch: "Zoomryck", labels: "Textskyltar", sfx: "Ljudeffekter",
   enhance: "Bildförbättring", stabilize: "Stabilisering", grain: "Filmkorn", letterbox: "Svarta kanter", flash: "Blixt på takt", divedata: "Dykdata",
-  cam360: "360-effekter", credits: "Musiktack", speech: "Undertexter från tal", voice: "Hör talet" };
+  cam360: "360-effekter", credits: "Musiktack", speech: "Undertexter från tal", voice: "Hör talet", karaoke: "Karaoke på tal", safezone: "Säker zon för appar" };
 const effectsOn = () => Object.assign(Object.fromEntries(Object.keys(EFFECT_INFO).map((k) => [k, true])), settings().effects || {});
 
 async function toggleEffect(key) {
