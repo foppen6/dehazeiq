@@ -270,13 +270,15 @@ MV_STYLES = ["musicvideo", "mv_ballad", "mv_glitch", "mv_lyrics"]
 # Färgutseenden för redigeringen. Värden: exponering, kontrast, mättnad, temperatur, nyans (−1..1),
 # samt svartvitt och sepia (0..1). Styrkan skalar dem.
 LOOKS = {
+    # Färgutseenden. Värdena nedan läggs på reglagen; render.LOOK_RECIPES ger själva karaktären
+    # (färgbalans, kanalblandning, kurvor) så att varje utseende syns tydligt.
     "none": {"label": "Original"},
-    "natural": {"label": "Naturlig", "contrast": 0.08, "saturation": 0.1},
-    "underwater": {"label": "Undervatten", "saturation": 0.3, "temperature": 0.35, "contrast": 0.1, "exposure": 0.05},
-    "warm": {"label": "Varm", "temperature": 0.45, "saturation": 0.1},
-    "cold": {"label": "Kall", "temperature": -0.45, "saturation": 0.05},
-    "vivid": {"label": "Livlig", "saturation": 0.6, "contrast": 0.15},
-    "film": {"label": "Film", "contrast": 0.2, "saturation": -0.25, "sepia": 0.15},
+    "natural": {"label": "Naturlig", "contrast": 0.06},
+    "underwater": {"label": "Undervatten", "contrast": 0.08},
+    "warm": {"label": "Varm"},
+    "cold": {"label": "Kall"},
+    "vivid": {"label": "Livlig", "contrast": 0.12},
+    "film": {"label": "Film", "contrast": 0.1},
     "bw": {"label": "Svartvitt", "bw": 1.0, "contrast": 0.2},
     "bw_soft": {"label": "Svartvitt mjuk", "bw": 1.0, "contrast": -0.12, "exposure": 0.06},
     "sepia": {"label": "Sepia", "bw": 1.0, "sepia": 0.9},

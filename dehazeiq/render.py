@@ -489,8 +489,34 @@ def grade_values(g):
 def grade_active(g):
     if not g:
         return False
+    if (g.get("look") or "none") in LOOK_RECIPES and float(g.get("strength", 1.0)) > 1e-3:
+        return True
     v = grade_values(g)
     return any(abs(x) > 1e-3 for x in v.values())
+
+
+def _cb(k, **kw):
+    """colorbalance med styrka k (värden -1..1)."""
+    return "colorbalance=" + ":".join(f"{n}={max(-1.0, min(1.0, v * k)):.3f}" for n, v in kw.items())
+
+
+LOOK_RECIPES = {
+    # Undervatten: tillbaka rött som vattnet har ätit upp, mindre grönt/blått stick
+    "underwater": lambda k: [f"colorchannelmixer=rr=1:rg={0.2 * k:.3f}:rb={0.07 * k:.3f}:gg={1 - 0.07 * k:.3f}"
+                             f":bb={1 - 0.1 * k:.3f}",
+                             _cb(k, rs=0.04, rm=0.06, bh=-0.05),
+                             f"vibrance=intensity={0.2 * k:.3f}"],
+    "warm": lambda k: [_cb(k, rs=0.08, rm=0.13, rh=0.07, gm=0.02, bs=-0.08, bm=-0.13, bh=-0.07),
+                       f"vibrance=intensity={0.1 * k:.3f}"],
+    "cold": lambda k: [_cb(k, rs=-0.07, rm=-0.11, rh=-0.05, gm=0.01, bs=0.1, bm=0.14, bh=0.08),
+                       f"eq=saturation={1 - 0.12 * k:.3f}"],
+    "vivid": lambda k: [f"vibrance=intensity={0.55 * k:.3f}", f"eq=saturation={1 + 0.15 * k:.3f}"],
+    "natural": lambda k: [f"vibrance=intensity={0.15 * k:.3f}"],
+    # Film: kricka/orange (kalla skuggor, varma högdagrar), lite blekta svärtor
+    "film": lambda k: [_cb(k, rs=-0.08, bs=0.14, gs=0.03, rh=0.12, bh=-0.12),
+                       f"curves=all='0/{0.06 * k:.3f} 0.5/0.5 1/{1 - 0.05 * k:.3f}'",
+                       f"eq=saturation={1 - 0.18 * k:.3f}"],
+}
 
 
 def grade_filter(g):
@@ -500,8 +526,13 @@ def grade_filter(g):
     v = grade_values(g)
     out = []
     t, tint = v["temperature"], v["tint"]
-    if abs(t) > 1e-3 or abs(tint) > 1e-3:
-        out.append(f"colorchannelmixer=rr={1 + 0.14 * t:.3f}:gg={1 - 0.07 * tint:.3f}:bb={1 - 0.14 * t:.3f}")
+    look = (g or {}).get("look") or "none"
+    if look in LOOK_RECIPES:
+        k = max(0.0, min(1.5, float((g or {}).get("strength", 1.0))))
+        if k > 1e-3:
+            out += LOOK_RECIPES[look](k)
+    if abs(t) > 1e-3 or abs(tint) > 1e-3:  # reglagen: tydlig men inte överdriven skillnad
+        out.append(_cb(1.0, rm=0.16 * t, bm=-0.16 * t, rh=0.08 * t, bh=-0.08 * t, gm=-0.12 * tint))
     bw = max(0.0, min(1.0, v["bw"]))
     sat = max(0.0, 1.0 + v["saturation"]) * (1.0 - bw)
     br = 0.22 * v["exposure"]
