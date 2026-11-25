@@ -289,6 +289,7 @@ async function edit(op, args = {}, { quiet = false } = {}) {
     state.ed.i = Math.min(state.ed.i, r.proposal.shots.length - 1);
     state.ed.stamp = Date.now();
     if (op === "swap" || op === "delete" || op === "move" || op === "undo") state.ed.alts = null;
+    if (["swap", "delete", "move", "undo", "trim"].includes(op) && state.ed.matchInfo) loadMatchInfo();
     if (!quiet) { render(); requestShotPreview(); } else refreshStill();
   } catch (e) { fail(e); }
 }
@@ -312,7 +313,7 @@ function edTimeline(p) {
   const total = p.shots.reduce((a, s) => a + s.duration, 0) || 1;
   const blocks = p.shots.map((s, i) => {
     const fx = s.fx || {};
-    const tags = [fx.speed > 1 ? "2×" : "", fx.speed && fx.speed < 1 ? "0,5×" : "", fx.freeze ? "Frys" : "", fx.zoom ? "Zoom" : "", fx.punch ? "Ryck" : "", fx.kenburns ? (fx.kenburns > 0 ? "Foto ↗" : "Foto ↙") : s.photo ? "Foto" : "", s.parent360 ? ({ planet: "Planet", ball: "Kula", whip: "360-svep", view: "360" }[(s.cam360 || {}).mode] || "360") : "", fx.roll ? "Roll" : "", s.grade ? "Färg" : "", s.manual_center ? "Flyttad" : "", s.fit ? ((s.fit.zoom ?? 1) < 1 ? "Utzoom" : "Inzoom") : ""].filter(Boolean);
+    const tags = [fx.speed > 1 ? "2×" : "", fx.speed && fx.speed < 1 ? "0,5×" : "", fx.freeze ? "Frys" : "", fx.zoom ? "Zoom" : "", fx.punch ? "Ryck" : "", fx.kenburns ? (fx.kenburns > 0 ? "Foto ↗" : "Foto ↙") : s.photo ? "Foto" : "", s.parent360 ? ({ planet: "Planet", ball: "Kula", whip: "360-svep", view: "360" }[(s.cam360 || {}).mode] || "360") : "", fx.roll ? "Roll" : "", s.grade ? "Färg" : "", s.manual_center ? "Flyttad" : "", s.fit ? ((s.fit.zoom ?? 1) < 1 ? "Utzoom" : "Inzoom") : "", state.ed.matchInfo && Object.values(state.ed.matchInfo.refs || {}).includes(i) && (p.match || {}).on !== false ? "Färgref" : ""].filter(Boolean);
     return `<button class="tlblock ${i === state.ed.i ? "sel" : ""}" data-edshot="${i}" data-drag="${i}" style="flex:${s.duration} 1 0;touch-action:pan-y" aria-label="Klipp ${i + 1}, ${dec(s.duration)} sekunder. Dra för att flytta.">
       <img alt="" loading="lazy" draggable="false" src="${frameUrl(s.clip_id, s.src_start + Math.min(s.duration, 1.5), 160)}"><span class="tlnum num">${i + 1}</span>${s.edited ? '<span class="tledited" title="Ändrat av dig"></span>' : ""}<span class="tldur num">${dec(s.duration)} s</span>${tags.length ? `<span class="tltags">${tags.join(" · ")}</span>` : ""}</button>`;
   }).join("");
@@ -431,13 +432,41 @@ function encSlider(g, k, label) {
   return `<label class="sl"><span>${label}</span><input type="range" min="0" max="1" step="0.05" value="${auto ? 0.4 : g[k]}" data-edgrade="${k}" style="accent-color:var(--accent)${auto ? ";opacity:.5" : ""}"><span class="num" data-edgv="${k}">${auto ? "AI" : Math.round(g[k] * 100)}</span></label>`;
 }
 
+function matchSection(p) {
+  const mi = state.ed.matchInfo;
+  const s = p.shots[state.ed.i] || {};
+  const m = Object.assign({ on: true, strength: 0.7, ref: null }, p.match || {});
+  if (mi && mi.effect_on === false && !p.match) m.on = false;
+  const refs = mi ? Object.values(mi.refs || {}) : [];
+  const isRef = refs.includes(state.ed.i);
+  const refTxt = !mi ? "Mäter klippen …" : !m.on ? "Av – klippen behåller sina egna färger."
+    : refs.length ? `Referens: ${refs.map((r) => `klipp ${r + 1}`).join(" och ")}${m.ref ? "" : " (vald av AI)"}${refs.length > 1 ? " – under och ovan ytan matchas var för sig" : ""}.` : "För få klipp att matcha.";
+  return `<div class="stack" style="gap:8px"><div class="spread" style="align-items:center"><span class="flabel">Färgmatchning</span>
+      <div class="chips">${chipBtn("data-edmatch", "on", "På", m.on)}${chipBtn("data-edmatch", "off", "Av", !m.on)}</div></div>
+    <span class="muted" style="font-size:12px">${refTxt}</span>
+    ${m.on ? `<div class="row" style="gap:6px;flex-wrap:wrap">${isRef ? `<span class="badge" style="position:static">Klipp ${state.ed.i + 1} är referens</span>`
+        : `<button class="btn small" data-act="ed-match-ref">Matcha mot klipp ${state.ed.i + 1}</button>`}
+      ${m.ref ? '<button class="btn small" data-act="ed-match-auto">Låt AI välja referens</button>' : ""}</div>
+      <label class="sl"><span>Styrka</span><input type="range" min="0" max="1" step="0.05" value="${m.strength}" data-edmatchk style="accent-color:var(--accent)"><span class="num" data-edmatchv>${Math.round(m.strength * 100)}</span></label>
+      <label class="row" style="gap:10px;color:var(--text-2);font-size:13px"><input type="checkbox" data-edmatchskip ${s.nomatch ? "checked" : ""} style="width:18px;height:18px;accent-color:var(--accent)">Matcha inte klipp ${state.ed.i + 1}</label>` : ""}</div>`;
+}
+async function loadMatchInfo() {
+  const p = edProp();
+  if (!p) return;
+  try {
+    state.ed.matchInfo = await api("POST", `/api/p/${state.pid}/proposal/${p.id}/matchinfo`, {});
+    if (state.view === "edit" && state.ed.tab === "color") render();
+  } catch (e) { /* visas inte */ }
+}
+
 function edInspectorColor(p) {
+  if (state.ed.matchInfo === undefined) { state.ed.matchInfo = null; loadMatchInfo(); }
   const g = curGrade(p);
   const looks = (state.info && state.info.looks) || {};
   const s = p.shots[state.ed.i] || {};
   const thumb = frameUrl(s.clip_id, s.src_start + Math.min(s.duration, 1.5), 160);
   const slider = (k, label, lo = -1) => `<label class="sl"><span>${label}</span><input type="range" min="${lo}" max="1" step="0.05" value="${g[k] || 0}" data-edgrade="${k}" style="accent-color:var(--accent)"><span class="num" data-edgv="${k}">${Math.round((g[k] || 0) * 100)}</span></label>`;
-  return `<div class="stack" style="gap:8px"><span class="flabel">Gäller</span><div class="chips">
+  return `${matchSection(p)}<div class="stack" style="gap:8px"><span class="flabel">Gäller</span><div class="chips">
       ${chipBtn("data-edscope", "film", "Hela filmen", state.ed.scope === "film")}${chipBtn("data-edscope", "shot", `Klipp ${state.ed.i + 1}`, state.ed.scope === "shot")}</div>
       ${state.ed.scope === "shot" && s.grade ? `<button class="btn small" data-act="ed-grade-reset">Använd filmens färg för klippet</button>` : ""}
       ${state.ed.scope === "film" && s.grade ? `<span class="muted" style="font-size:12px">Klipp ${state.ed.i + 1} har egen färg. Väljer du ett utseende här gäller det alla klipp.</span>` : ""}</div>
@@ -787,6 +816,7 @@ document.addEventListener("click", async (ev) => {
   if (d.edtab) { state.ed.tab = d.edtab; return render(); }
   if (d.edmode) { state.ed.mode = d.edmode; paintStage(); document.querySelectorAll("[data-edmode]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.edmode === d.edmode))); return requestShotPreview(0); }
   if (d.edfitbg) return edit("fit", { i: state.ed.i, bg: d.edfitbg });
+  if (d.edmatch) { await edit("match", { on: d.edmatch === "on" }); return loadMatchInfo(); }
   if (d.edtrim) { const s = edProp().shots[state.ed.i]; return edit("trim", { i: state.ed.i, duration: s.duration + Number(d.edtrim) }); }
   if (d.edspeed) return edit("speed", { i: state.ed.i, mode: d.edspeed });
   if (d.edfx) return edit("fx", { i: state.ed.i, effect: d.edfx });
@@ -873,6 +903,8 @@ document.addEventListener("click", async (ev) => {
     case "ed-text": return edit("text", { i: state.ed.i, kind: $("#edTxtKind").value, text: $("#edTxt").value, sub: $("#edTxtSub").value });
     case "ed-text-clear": return edit("text", { i: state.ed.i, text: "" });
     case "ed-title-clear": return edit("title", { text: "" });
+    case "ed-match-ref": await edit("match", { ref: state.ed.i }); return loadMatchInfo();
+    case "ed-match-auto": await edit("match", { ref: "auto" }); return loadMatchInfo();
     case "ed-cover": await edit("cover", { i: state.ed.i, at: 0.45 }); return toast("Omslagsbilden sparas bredvid filmen vid export, med texterna.", true);
     case "ed-fit-auto": return edit("fit", { i: state.ed.i, auto: true });
     case "ed-fit-fill": return edit("fit", { i: state.ed.i, zoom: 1 });
@@ -894,6 +926,7 @@ document.addEventListener("input", (ev) => {
   const t = ev.target;
   if (t.dataset.promo && state.ed.promo) { state.ed.promo[t.dataset.promo] = t.type === "checkbox" ? t.checked : t.value; return undefined; }
   if (t.dataset.edgrade) return onGradeInput(t.dataset.edgrade, t.value);
+  if (t.dataset.edmatchk !== undefined) { const v = document.querySelector("[data-edmatchv]"); if (v) v.textContent = Math.round(t.value * 100); return undefined; }
   if (t.dataset.cmpx !== undefined) {
     state.ed.split = Number(t.value);
     const box = t.closest("[data-cmp]");
@@ -920,6 +953,8 @@ document.addEventListener("change", (ev) => {
   if (d.edlen !== undefined) return edit("trim", { i: state.ed.i, duration: Number(t.value) });
   if (d.edtr !== undefined) return edit("transition", { i: state.ed.i, type: t.value });
   if (d.edfitcolor !== undefined) return edit("fit", { i: state.ed.i, bg: t.value });
+  if (d.edmatchskip !== undefined) { edit("match", { i: state.ed.i, skip: t.checked }).then(loadMatchInfo); return undefined; }
+  if (d.edmatchk !== undefined) { edit("match", { strength: Number(t.value) }, { quiet: true }); return undefined; }
   if (d.proplen) return changeLength(d.proplen, t.value);
   if (d.edtone !== undefined) { state.ed.tone = t.value; return undefined; }
   if (d.ovf) {

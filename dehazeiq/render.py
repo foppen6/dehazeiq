@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 
 from .config import COLOR_PROFILES, FORMATS, GRADE_KEYS, LOOKS, OUTPUT_FPS, RESOLUTIONS, STYLES
-from . import divelog, i18n, pano, textfx
+from . import colormatch, divelog, i18n, pano, textfx
 from . import effects as fx_mod
 from .media import MediaError, ffmpeg, run, video_encoder_args
 
@@ -558,7 +558,7 @@ def kb_photo(fx):
 
 def _shot_filter(shot, src_w, src_h, out_w, out_h, style, wb=True, fade_in=0.0, fade_out=0.0,
                  fx=None, pad=0.0, vignette=False, title=None, grade=None, texts=None,
-                 enh=None, levels=None, look_fx=None, flash=False, pre=None):
+                 enh=None, levels=None, look_fx=None, flash=False, pre=None, match=None):
     """fx: {"speed": 0.5} slowmotion, {"zoom": 0.05} långsam inzoomning. pad: extra sekunder i slutet
     (för mjuka övergångar). title: text som visas i början (font.ttf/title.txt i arbetsmappen)."""
     fx = fx or {}
@@ -607,6 +607,7 @@ def _shot_filter(shot, src_w, src_h, out_w, out_h, style, wb=True, fade_in=0.0, 
         r, g, b = shot.get("wb_gains", [1, 1, 1])
         if max(abs(r - 1), abs(g - 1), abs(b - 1)) > 0.02:
             parts.append(f"colorchannelmixer=rr={r:.3f}:gg={g:.3f}:bb={b:.3f}")
+    parts += colormatch.lut(match)  # färgmatchning mot referensklippet
     parts += enhance_filters(enh or {}, levels)
     look_set = bool(grade and (grade.get("look") or "none") != "none")
     color = None if look_set else COLOR_PROFILES.get(style.get("color", ""))
@@ -802,6 +803,12 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
             a = t0 + k * per
             point_cues.append((a, a + min(per, 3.4) - 0.15, ptxt))
 
+    try:  # färgmatchning mellan klippen (mätningarna sparas, så det går fort andra gången)
+        mcorr, _refs = ({}, {}) if all("match_corr" in s_ for s_ in proposal["shots"]) else \
+            colormatch.plan(project, proposal, on.get("colormatch", True))
+    except Exception as e:  # noqa: BLE001
+        print("Färgmatchningen hoppades över:", e)
+        mcorr = {}
     use_fx = textfx.PIL_OK  # egna texter och tal ritas med effekter av textfx (annars drawtext)
 
     def text_layer(i, shot, out_len):
@@ -959,6 +966,7 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
             raw = bool((shot.get("fx") or {}).get("raw"))  # "före"-bilden: originalet utan något gjort
             if raw:
                 enh, levels, lfx = {}, None, {}
+            shot_match = shot["match_corr"] if "match_corr" in shot else mcorr.get(i)
             is_orig = g.get("look") == "original"  # Original: som kameran filmade, bara det användaren själv ställt in
             if is_orig:
                 enh = {k: g[k] for k in ("dehaze", "particles", "stabilize") if g.get(k) is not None}
@@ -975,7 +983,7 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
                                   grade=None if raw else (shot.get("grade") or proposal.get("grade")), texts=texts,
                                   enh=enh if texts is not None else {}, levels=levels,
                                   look_fx=lfx if texts is not None else {}, flash=flash and texts is not None,
-                                  pre=pano_pre)
+                                  pre=pano_pre, match=None if (raw or is_orig) else shot_match)
                 read = (out_len - pad - float(fx.get("freeze") or 0.0)) * fx.get("speed", 1.0) + 0.05
                 cmd = [ffmpeg(), "-hide_banner", "-loglevel", "error", "-y",
                        "-ss", f"{shot['src_start']:.3f}", "-t", f"{read:.3f}", "-i", str(src)]
@@ -1092,7 +1100,12 @@ def shot_preview(project, proposal, idx, out_dir):
     at = float(shot.get("at", 0.0))
     uid = shot.get("uid")
     mini = {k: v for k, v in proposal.items() if k not in ("shots", "history", "renders", "overlays")}
-    mini["shots"] = [dict(shot, at=0.0, tr="cut")]
+    on0 = fx_mod.enabled(project.data.get("settings"))
+    try:
+        corr = colormatch.plan(project, proposal, on0.get("colormatch", True))[0].get(idx)
+    except Exception:  # noqa: BLE001
+        corr = None
+    mini["shots"] = [dict(shot, at=0.0, tr="cut", match_corr=corr)]
     mini["overlays"] = [o for o in proposal.get("overlays") or [] if o.get("shot_uid") == uid]
     mini["music_offset"] = at
     if idx != 0:
@@ -1162,6 +1175,13 @@ def still(project, proposal, idx, at=0.5, width=480, graded=True, effects=None, 
         r, g, b = shot.get("wb_gains", [1, 1, 1])
         if max(abs(r - 1), abs(g - 1), abs(b - 1)) > 0.02 and not orig:
             parts.append(f"colorchannelmixer=rr={r:.3f}:gg={g:.3f}:bb={b:.3f}")
+        if not orig:
+            try:
+                corr = shot["match_corr"] if "match_corr" in shot else \
+                    colormatch.plan(project, proposal, on.get("colormatch", True))[0].get(idx)
+                parts += colormatch.lut(corr)
+            except Exception as e:  # noqa: BLE001
+                print("Färgmatchningen hoppades över:", e)
         enh = {}
         a = clip.get("analysis") or {}
         if on.get("enhance") and (a.get("underwater") or shot.get("underwater")) and not orig:

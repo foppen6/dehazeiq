@@ -30,6 +30,7 @@ EFFECTS = {
     "voice": "Hör talet",
     "karaoke": "Karaoke på tal",
     "safezone": "Säker zon för appar",
+    "colormatch": "Färgmatchning",
 }
 DEFAULT_EFFECTS = {k: True for k in EFFECTS}
 

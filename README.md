@@ -157,6 +157,13 @@ skarv), Fotodump och Cinematic reel. Filmtypen *Sociala medier-trender* gör fyr
 Längden väljs direkt i redigeringen (7, 15, 30, 60 eller 90 s), och vid export sparas en
 **omslagsbild** med texterna bredvid filmen – vald bild eller AI:ns bästa.
 
+**Färgmatchning:** klippen får samma ljushet, kontrast och färgton som ett referensklipp, så att
+filmen ser ut att vara filmad vid ett tillfälle – även med flera kameror. AI:n väljer det bästa
+klippet som referens (under och ovan ytan matchas var för sig); i Färg-fliken kan man välja *Matcha
+mot klipp N*, ändra styrkan, stänga av för ett klipp eller helt. Färgsticket matchas fullt ut,
+ljusheten bara delvis, så att mörka scener inte blir brusiga. Ordning: AI:ns vitbalans →
+matchning → bildförbättring → valt utseende. På som standard (Effekter › Färgmatchning).
+
 **Favoriter och ta bort:** varje förslag har en stjärna och en papperskorg. Favoriter hamnar först,
 gallras aldrig bort och kan visas för sig med *Bara favoriter* – bra när man gör många varianter.
 Ta bort frågar en gång till; exporterade filmer ligger kvar.

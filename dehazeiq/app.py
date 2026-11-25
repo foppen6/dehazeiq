@@ -922,6 +922,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"lang": lg, "texts": i18n.localize(prop, lg, _species_map(), free),
                                    "original": i18n.localize(prop, "sv"),
                                    "missing": [t for t in i18n.free_texts(prop, lg) if t not in free]})
+            if verb == "matchinfo":
+                prop = p.proposal(prop_id)
+                if not prop:
+                    raise ApiError("Förslaget finns inte", HTTPStatus.NOT_FOUND)
+                from . import colormatch, effects as fx_mod
+                on = fx_mod.enabled(p.data.get("settings")).get("colormatch", True)
+                corr, refs = colormatch.plan(p, prop, on)
+                return self._json({"settings": colormatch.settings(prop, on), "refs": refs,
+                                   "matched": sorted(corr), "effect_on": on})
             if verb == "favorite":
                 if not p.proposal(prop_id):
                     raise ApiError("Förslaget finns inte", HTTPStatus.NOT_FOUND)

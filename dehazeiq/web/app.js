@@ -374,7 +374,7 @@ async function saveSettings(patch) {
 const EFFECT_INFO = { transitions: "Mjuka övergångar", slowmo: "Slowmotion", zoom: "Långsam zoom", title: "Titel",
   vignette: "Vinjett", fast: "Snabbspolning", freeze: "Frysbild", punch: "Zoomryck", labels: "Textskyltar", sfx: "Ljudeffekter",
   enhance: "Bildförbättring", stabilize: "Stabilisering", grain: "Filmkorn", letterbox: "Svarta kanter", flash: "Blixt på takt", divedata: "Dykdata",
-  cam360: "360-effekter", credits: "Musiktack", speech: "Undertexter från tal", voice: "Hör talet", karaoke: "Karaoke på tal", safezone: "Säker zon för appar" };
+  cam360: "360-effekter", credits: "Musiktack", speech: "Undertexter från tal", voice: "Hör talet", karaoke: "Karaoke på tal", safezone: "Säker zon för appar", colormatch: "Färgmatchning" };
 const effectsOn = () => Object.assign(Object.fromEntries(Object.keys(EFFECT_INFO).map((k) => [k, true])), settings().effects || {});
 
 async function toggleEffect(key) {

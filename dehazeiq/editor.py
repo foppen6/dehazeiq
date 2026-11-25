@@ -23,7 +23,7 @@ HISTORY = 25
 def _snapshot(prop):
     return {"shots": copy.deepcopy(prop["shots"]), "grade": copy.deepcopy(prop.get("grade")),
             "effects": copy.deepcopy(prop.get("effects")), "title": prop.get("title"),
-            "overlays": copy.deepcopy(prop.get("overlays"))}
+            "overlays": copy.deepcopy(prop.get("overlays")), "match": copy.deepcopy(prop.get("match"))}
 
 
 def _finish(prop):
@@ -105,6 +105,11 @@ def apply(project, prop, op, args):
         prop["title"] = snap["title"]
         if "overlays" in snap:
             prop["overlays"] = snap["overlays"] or []
+        if "match" in snap:
+            if snap["match"] is None:
+                prop.pop("match", None)
+            else:
+                prop["match"] = snap["match"]
         return _finish(prop)
 
     hist = prop.setdefault("history", [])
@@ -198,6 +203,31 @@ def apply(project, prop, op, args):
             else:
                 s["fit"] = f
             s["edited"] = True
+    elif op == "match":
+        # färgmatchning: på/av, referensklipp (index eller "auto"), styrka, hoppa över ett klipp
+        from . import texts
+        texts.ensure_uids(prop)
+        m = dict(prop.get("match") or {"on": True, "ref": None, "strength": 0.7})
+        if "on" in args:
+            m["on"] = bool(args["on"])
+        if "strength" in args:
+            m["strength"] = round(max(0.0, min(1.0, float(args["strength"]))), 2)
+        if args.get("ref") == "auto":
+            m["ref"] = None
+        elif args.get("ref") is not None:
+            r = int(args["ref"])
+            if not 0 <= r < len(shots):
+                raise EditError("Klippet finns inte")
+            m["ref"] = shots[r]["uid"]
+            m["on"] = True
+            shots[r].pop("nomatch", None)
+        if "skip" in args:
+            i, s = shot_at()
+            if args["skip"]:
+                s["nomatch"] = True
+            else:
+                s.pop("nomatch", None)
+        prop["match"] = m
     elif op == "cover":
         i, s = shot_at()
         prop["cover"] = {"i": i, "at": round(max(0.0, min(0.99, float(args.get("at", 0.45)))), 3)}

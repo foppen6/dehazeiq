@@ -98,6 +98,13 @@ def main():
                             {"start": 0.5, "end": 2.5, "item": {"text": "Ord för ord här", "style": "hook"}}],
                            540, 960, 3.0, 30, WORK / "txl", fmt="9:16")
         assert pat and len(list((WORK / "txl").glob("*.png"))) >= 90
+    # v0.20: färgmatchning
+    from dehazeiq import colormatch
+    p.reload()
+    pr = p.data["proposals"][0]
+    corr, refs = colormatch.plan(p, pr)
+    print("Färgmatchning:", refs, len(corr), "klipp korrigerade")
+    assert colormatch.lut([(1.1, 5.0), (1.0, 0.0), (0.9, -3.0)])
     # v0.13: foton, beskrivning med egna ord, reklam, musikvideo och trailer
     from dehazeiq import editor, photo, prompt
     if photo.PIL_OK:
