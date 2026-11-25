@@ -496,3 +496,10 @@ textarea.field { color: var(--text); height: auto; padding: 10px 12px; line-heig
   .edleft .tltrack:nth-last-of-type(1) .tlaudio { padding: 2px 8px; }
 }
 .edstill { height: auto; max-height: var(--stageh); }
+.ovbar { display: flex; align-items: center; padding: 0; user-select: none; -webkit-user-select: none; }
+.ovbar .ovtxt { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 4px; pointer-events: none; }
+.ovbar .ovh { flex: none; width: 7px; height: 100%; cursor: ew-resize; background: rgba(0,0,0,.18); }
+.ovbar .ovh.l { border-radius: 6px 0 0 6px; } .ovbar .ovh.r { border-radius: 0 6px 6px 0; }
+.ovbar:hover .ovh { background: rgba(0,0,0,.35); }
+.ovbar.dragging::after { content: attr(data-tip); position: absolute; left: 0; top: -22px; padding: 2px 6px; border-radius: 4px; background: #000; color: #fff; font-size: 11px; white-space: nowrap; }
+.ovbar.dragging { overflow: visible; z-index: 5; }

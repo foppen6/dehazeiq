@@ -194,6 +194,19 @@ class Block:
         self.pad = int(self.fs * (0.45 if lk.get("box") or lk.get("marker") else 0.25)) + int(self.fs * 0.12)
         maxw = W * (0.78 if lk.get("align") != "left" else 0.7) - 2 * self.pad  # ryms inom säker zon
         self.lines = self._wrap(text, self.font, maxw)
+        # ett långt ord eller för många rader: krymp texten tills den ryms
+        for _ in range(6):
+            widest = max(self._measure(x, self.font) for x in self.lines)
+            tall = len(self.lines) * self.fs * 1.18 > H * 0.5
+            if widest <= maxw * 1.001 and not tall:
+                break
+            k = min(maxw / max(1.0, widest), 0.85 if tall else 1.0)
+            self.fs = max(10, int(self.fs * min(0.95, k)))
+            self.font = _font(font_path(lk["font"]), self.fs)
+            self.sfs = max(9, min(self.sfs, int(self.fs * 0.8)))
+            self.sfont = _font(font_path("sans" if lk["font"] in ("impact", "bebas", "comic") else lk["font"]), self.sfs)
+            self.pad = int(self.fs * (0.45 if lk.get("box") or lk.get("marker") else 0.25)) + int(self.fs * 0.12)
+            self.lines = self._wrap(text, self.font, maxw)
         self.sublines = self._wrap(sub, self.sfont, maxw) if sub else []
         self.lh = int(self.fs * 1.18)
         self.slh = int(self.sfs * 1.25)

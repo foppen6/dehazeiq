@@ -505,7 +505,7 @@ function ovBars(p, total) {
     const s = at[o.shot_uid];
     if (!s) return;
     const a = s.at + Number(o.offset || 0);
-    items.push({ a, b: a + Number(o.dur || 2), html: (l, w, top) => `<button class="ovbar st-${o.style} ${state.ed.ov === o.id ? "sel" : ""}" data-ovsel="${o.id}" data-edshot="${s.i}" style="left:${l}%;width:${w}%;top:${top}px" title="${esc(o.text)}">${o.auto ? "AI · " : ""}${esc(o.text)}</button>` });
+    items.push({ a, b: a + Number(o.dur || 2), html: (l, w, top) => `<div role="button" tabindex="0" class="ovbar st-${o.style} ${state.ed.ov === o.id ? "sel" : ""}" data-ovsel="${o.id}" data-edshot="${s.i}" style="left:${l}%;width:${w}%;top:${top}px" title="${esc(o.text)} – dra för att flytta, dra i kanterna för att ändra längden"><span class="ovh l" data-ovh="l"></span><span class="ovtxt">${o.auto ? "AI · " : ""}${esc(o.text)}</span><span class="ovh r" data-ovh="r"></span></div>` });
   });
   items.sort((x, y) => x.a - y.a);
   const ends = [];
@@ -569,7 +569,7 @@ function freeTextsForm(p) {
       <input class="field" data-ovf="sub" value="${esc(o.sub || "")}" maxlength="120" placeholder="Andra raden (valfri)">
       <div class="row" style="flex-wrap:nowrap;gap:6px;font-size:12px">
         <label class="stack" style="gap:2px;flex:1">Klipp<select class="selfield" data-ovf="i">${p.shots.map((_, k) => `<option value="${k}" ${k === idx ? "selected" : ""}>${k + 1}</option>`).join("")}</select></label>
-        <label class="stack" style="gap:2px;flex:1">Start (s)<input class="field" type="number" step="0.1" min="0" data-ovf="offset" value="${Number(o.offset).toFixed(1)}"></label>
+        <label class="stack" style="gap:2px;flex:1.4">Start (s)<span class="row" style="gap:3px;flex-wrap:nowrap"><button class="btn icon small" data-ovnudge="${o.id}" data-d="-0.5" aria-label="Tidigare">‹</button><input class="field" type="number" step="0.1" min="0" data-ovf="offset" value="${Number(o.offset).toFixed(1)}"><button class="btn icon small" data-ovnudge="${o.id}" data-d="0.5" aria-label="Senare">›</button></span></label>
         <label class="stack" style="gap:2px;flex:1">Längd (s)<input class="field" type="number" step="0.1" min="0.6" max="15" data-ovf="dur" value="${Number(o.dur).toFixed(1)}"></label></div>${more}</div>`;
   }).join("");
   const tpl = `<div class="stack" style="gap:6px"><span class="muted" style="font-size:12px">Snabbmallar för sociala medier – läggs på klipp ${state.ed.i + 1}</span>
@@ -839,7 +839,7 @@ function stageGrade(g) {
 
 /* ================= händelser ================= */
 document.addEventListener("click", async (ev) => {
-  const t = ev.target.closest("button, [data-edsrc], [data-edplace]");
+  const t = ev.target.closest("button, [data-edsrc], [data-edplace], [data-ovsel]");
   if (!t) return;
   const d = t.dataset;
   if (d.edsrc !== undefined) {
@@ -891,6 +891,18 @@ document.addEventListener("click", async (ev) => {
   if (d.edspeed) return edit("speed", { i: state.ed.i, mode: d.edspeed });
   if (d.edfx) return edit("fx", { i: state.ed.i, effect: d.edfx });
   if (d.ovdel) return edit("overlay_delete", { id: d.ovdel });
+  if (d.ovnudge) {
+    const pp = edProp();
+    const o = (pp.overlays || []).find((x) => x.id === d.ovnudge);
+    if (!o) return undefined;
+    const t0 = ovTime(pp, o) + Number(d.d);
+    const tot = ovFilmTotal(pp);
+    const start = Math.max(0, Math.min(tot - 0.3, t0));
+    let i = pp.shots.findIndex((s) => start >= s.at - 0.01 && start < s.at + s.duration);
+    if (i < 0) i = pp.shots.length - 1;
+    state.ed.ov = o.id;
+    return edit("overlay_update", { id: o.id, i, offset: Math.round((start - pp.shots[i].at) * 10) / 10 });
+  }
   if (d.speechdel) return speechEdit(d.speechdel, Number(d.k), "", true);
   if (d.ovpos) return edit("overlay_update", { id: d.ovpos, x: d.x === "" ? null : Number(d.x), y: d.y === "" ? null : Number(d.y) });
   if (d.ovreset) return edit("overlay_update", { id: d.ovreset, color: "", box: "", font: "", anim: "", size: 1 });
@@ -1331,34 +1343,52 @@ async function speechEdit(clipId, k, text, del = false) {
   render();
 }
 
-/* Dra en text i textraden på tidslinjen för att ändra när den visas */
+/* Dra en text i textraden på tidslinjen: mitten flyttar, kanterna ändrar början/längd */
 let ovDrag = null;
+function ovFilmTotal(p) { return p.shots.reduce((a, s) => a + s.duration, 0) || 1; }
 document.addEventListener("pointerdown", (ev) => {
   const b = ev.target.closest(".ovbar");
-  if (!b || state.view !== "edit" || !b.dataset.ovsel) return;
+  if (!b || state.view !== "edit" || !b.dataset.ovsel || ev.button > 0) return;
   const row = b.parentElement.getBoundingClientRect();
-  ovDrag = { id: b.dataset.ovsel, x: ev.clientX, el: b, w: row.width, left0: parseFloat(b.style.left), moved: false };
+  const h = ev.target.closest("[data-ovh]");
+  ovDrag = { id: b.dataset.ovsel, x: ev.clientX, el: b, w: row.width, mode: h ? h.dataset.ovh : "move",
+    left0: parseFloat(b.style.left), width0: parseFloat(b.style.width), moved: false };
+  try { b.setPointerCapture(ev.pointerId); } catch (e) { /* äldre webbläsare */ }
+  ev.preventDefault();
 });
 document.addEventListener("pointermove", (ev) => {
   if (!ovDrag) return;
   const dx = ev.clientX - ovDrag.x;
-  if (!ovDrag.moved && Math.abs(dx) < 6) return;
+  if (!ovDrag.moved && Math.abs(dx) < 4) return;
   ovDrag.moved = true;
-  ovDrag.el.classList.add("dragging");
-  ovDrag.el.style.left = `${Math.max(0, Math.min(98, ovDrag.left0 + (dx / ovDrag.w) * 100))}%`;
+  const d = ovDrag, pct = (dx / d.w) * 100;
+  d.el.classList.add("dragging");
+  if (d.mode === "move") d.el.style.left = `${Math.max(0, Math.min(100 - d.width0, d.left0 + pct))}%`;
+  else if (d.mode === "r") d.el.style.width = `${Math.max(1.5, Math.min(100 - d.left0, d.width0 + pct))}%`;
+  else {
+    const l = Math.max(0, Math.min(d.left0 + d.width0 - 1.5, d.left0 + pct));
+    d.el.style.left = `${l}%`;
+    d.el.style.width = `${d.width0 + (d.left0 - l)}%`;
+  }
+  const p = edProp(), tot = ovFilmTotal(p);
+  d.el.dataset.tip = `${(parseFloat(d.el.style.left) / 100 * tot).toFixed(1)} s · ${(parseFloat(d.el.style.width) / 100 * tot).toFixed(1)} s`;
 });
 document.addEventListener("pointerup", async () => {
   const d = ovDrag;
   ovDrag = null;
-  if (!d || !d.moved) return;
+  if (!d) return;
+  if (!d.moved) return;
   const p = edProp();
-  const total = p.shots.reduce((a, s) => a + s.duration, 0);
-  const start = (parseFloat(d.el.style.left) / 100) * total;
-  let i = p.shots.findIndex((s) => start >= s.at && start < s.at + s.duration);
+  const tot = ovFilmTotal(p);
+  const start = (parseFloat(d.el.style.left) / 100) * tot;
+  const dur = Math.max(0.6, Math.round((parseFloat(d.el.style.width) / 100) * tot * 10) / 10);
+  let i = p.shots.findIndex((s) => start >= s.at - 0.01 && start < s.at + s.duration);
   if (i < 0) i = p.shots.length - 1;
   const offset = Math.max(0, Math.round((start - p.shots[i].at) * 10) / 10);
   state.ed.ov = d.id;
   state.ed.i = i;
   window.__ovDragged = Date.now();
-  await edit("overlay_update", { id: d.id, i, offset });
+  const args = { id: d.id, i, offset };
+  if (d.mode !== "move") args.dur = dur;
+  await edit("overlay_update", args);
 });

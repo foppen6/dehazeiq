@@ -1100,13 +1100,14 @@ def shot_preview(project, proposal, idx, out_dir):
     shot = dict(shots[idx])
     at = float(shot.get("at", 0.0))
     uid = shot.get("uid")
-    mini = {k: v for k, v in proposal.items() if k not in ("shots", "history", "renders", "overlays")}
+    volatile = ("shots", "history", "renders", "overlays", "edited", "favorite", "cover", "overlay_how", "short")
+    mini = {k: v for k, v in proposal.items() if k not in volatile}
     on0 = fx_mod.enabled(project.data.get("settings"))
     try:
         corr = colormatch.plan(project, proposal, on0.get("colormatch", True))[0].get(idx)
     except Exception:  # noqa: BLE001
         corr = None
-    mini["shots"] = [dict(shot, at=0.0, tr="cut", match_corr=corr)]
+    mini["shots"] = [dict({k: v for k, v in shot.items() if k != "edited"}, at=0.0, tr="cut", match_corr=corr)]
     mini["overlays"] = [o for o in proposal.get("overlays") or [] if o.get("shot_uid") == uid]
     mini["music_offset"] = at
     if idx != 0:
@@ -1118,16 +1119,51 @@ def shot_preview(project, proposal, idx, out_dir):
             mini["promo"]["hook"] = ""
     mini["music_credit"] = ""
     on = fx_mod.enabled(project.data.get("settings"))
-    key = hashlib.sha1(_json.dumps([mini, on, project.data["clips"][shot["clip_id"]].get("speech")],
+    ovs = mini["overlays"]
+    # Två steg: bilden (dyr) sparas utan egna texter, texterna läggs ovanpå på någon sekund.
+    # Då går det snabbt att ändra text, stil, animation och plats.
+    base_mini = dict(mini, overlays=[])
+    speech = project.data["clips"][shot["clip_id"]].get("speech")
+    bkey = hashlib.sha1(_json.dumps([base_mini, on, speech], sort_keys=True, default=str).encode()).hexdigest()[:16]
+    key = hashlib.sha1(_json.dumps([bkey, ovs, on.get("labels", True), on.get("safezone", True)],
                                    sort_keys=True, default=str).encode()).hexdigest()[:16]
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    out = out_dir / f"shot_{key}.mp4"
-    if not out.exists():
-        old = sorted(out_dir.glob("shot_*.mp4"), key=lambda p: p.stat().st_mtime)
-        for p in old[:-40]:  # håll mappen liten
+    base = out_dir / f"base_{bkey}.mp4"
+    out = out_dir / (f"shot_{key}.mp4" if ovs else base.name)
+    if out.exists():
+        return out
+    for pat in ("shot_*.mp4", "base_*.mp4"):  # håll mappen liten
+        old = sorted(out_dir.glob(pat), key=lambda p: p.stat().st_mtime)
+        for p in old[:-30]:
             p.unlink(missing_ok=True)
-        render(project, mini, "preview", out, effects=on)
+    if not base.exists():
+        render(project, base_mini, "preview", base, effects=on)
+    if not ovs:
+        return base
+    from . import texts as texts_mod
+    cues = [{"start": a, "end": b, "item": it} for a, b, it in texts_mod.timeline(mini)
+            if not (it.get("auto") and not on.get("labels", True))]
+    out_w, out_h = target_size(proposal["format"], "preview")
+    import subprocess
+    import tempfile
+
+    from .media import subprocess_kwargs
+    with tempfile.TemporaryDirectory(prefix="dhq_tx_", dir=str(out_dir)) as td:
+        lay = textfx.layer(cues, out_w, out_h, float(shot["duration"]) + 0.2, OUTPUT_FPS, Path(td),
+                           fmt=proposal["format"] if on.get("safezone", True) else None) if cues else None
+        if not lay:
+            return base
+        tmp_out = out.with_suffix(".tmp.mp4")
+        cmd = [ffmpeg(), "-hide_banner", "-loglevel", "error", "-y", "-i", str(base),
+               "-framerate", str(OUTPUT_FPS), "-i", lay,
+               "-filter_complex", "[0:v][1:v]overlay=x=0:y=0:eof_action=pass:format=auto,format=yuv420p[v]",
+               "-map", "[v]", "-map", "0:a?", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
+               "-c:a", "copy", "-movflags", "+faststart", str(tmp_out)]
+        r = subprocess.run(cmd, capture_output=True, timeout=300, **subprocess_kwargs())
+        if r.returncode != 0:
+            raise MediaError(r.stderr.decode("utf-8", "replace")[-400:])
+        tmp_out.replace(out)
     return out
 
 
