@@ -35,7 +35,7 @@ const ICO = {
 const platforms = () => (state.info && state.info.platforms) || {};
 const filmTypes = () => (state.info && state.info.film_types) || {};
 const LOOK_CSS = {
-  none: "none", natural: "saturate(1.1) contrast(1.05)", underwater: "saturate(1.3) sepia(.12) brightness(1.05)",
+  none: "saturate(1.15) contrast(1.06)", original: "none", natural: "saturate(1.1) contrast(1.05)", underwater: "saturate(1.3) sepia(.12) brightness(1.05)",
   warm: "sepia(.3) saturate(1.2)", cold: "hue-rotate(12deg) saturate(1.05) brightness(1.02)", vivid: "saturate(1.6) contrast(1.1)",
   film: "contrast(1.15) saturate(.75) sepia(.15)", bw: "grayscale(1) contrast(1.15)", bw_soft: "grayscale(1) contrast(.9) brightness(1.06)",
   sepia: "sepia(.9)",
@@ -439,7 +439,8 @@ function edInspectorColor(p) {
   const slider = (k, label, lo = -1) => `<label class="sl"><span>${label}</span><input type="range" min="${lo}" max="1" step="0.05" value="${g[k] || 0}" data-edgrade="${k}" style="accent-color:var(--accent)"><span class="num" data-edgv="${k}">${Math.round((g[k] || 0) * 100)}</span></label>`;
   return `<div class="stack" style="gap:8px"><span class="flabel">Gäller</span><div class="chips">
       ${chipBtn("data-edscope", "film", "Hela filmen", state.ed.scope === "film")}${chipBtn("data-edscope", "shot", `Klipp ${state.ed.i + 1}`, state.ed.scope === "shot")}</div>
-      ${state.ed.scope === "shot" && s.grade ? `<button class="btn small" data-act="ed-grade-reset">Använd filmens färg för klippet</button>` : ""}</div>
+      ${state.ed.scope === "shot" && s.grade ? `<button class="btn small" data-act="ed-grade-reset">Använd filmens färg för klippet</button>` : ""}
+      ${state.ed.scope === "film" && s.grade ? `<span class="muted" style="font-size:12px">Klipp ${state.ed.i + 1} har egen färg. Väljer du ett utseende här gäller det alla klipp.</span>` : ""}</div>
     <div class="stack" style="gap:8px"><span class="flabel">Utseende</span><div class="lookgrid">
       ${Object.entries(looks).map(([k, l]) => `<button class="lookbtn" data-edlook="${k}" aria-pressed="${g.look === k}"><img alt="" src="${thumb}" style="filter:${LOOK_CSS[k] || "none"}"><span>${esc(l)}</span></button>`).join("")}</div>
       ${slider("strength", "Styrka", 0)}</div>
@@ -448,7 +449,7 @@ function edInspectorColor(p) {
     <div class="stack" style="gap:6px"><div class="spread" style="align-items:center"><span class="flabel">Bildförbättring</span><button class="btn small" data-act="ed-enh-auto">Låt AI välja</button></div>
       ${encSlider(g, "dehaze", "Ta bort dis")}${encSlider(g, "particles", "Partiklar")}
       <label class="row" style="gap:10px;color:var(--text-2);font-size:13px"><input type="checkbox" data-edstab ${g.stabilize ? "checked" : ""} style="width:18px;height:18px;accent-color:var(--accent)">Stabilisera skakig bild${g.stabilize == null ? ' <span class="muted">(AI: automatiskt)</span>' : ""}</label></div>
-    <p class="muted" style="margin:0;font-size:12px">AI:ns vitbalans för undervatten ligger kvar under din färgsättning. Håll in "Före" för att jämföra. Bildförbättring syns i förhandsvisningen av filmen.</p>`;
+    <p class="muted" style="margin:0;font-size:12px"><b>Original</b> = ingen färgsättning alls, <b>Stilens färg</b> = filmstilens egen. AI:ns vitbalans för undervatten ligger kvar under; stäng av den med Bildförbättring under Effekter. Jämför med Före/efter överst.</p>`;
 }
 
 const TEXT_STYLES = { doc: "Dokumentär – namnskylt", fun: "Humor – pratbubbla", title: "Rubrik", caption: "Undertext",
@@ -808,7 +809,21 @@ document.addEventListener("click", async (ev) => {
   if (d.cammode) return edit("cam360", { i: state.ed.i, mode: d.cammode, ...(d.cammode === "ai" ? { yaw: 0, fov: 104 } : {}) });
   if (d.edmove) { const j = state.ed.i + Number(d.edmove); await edit("move", { i: state.ed.i, dir: Number(d.edmove) }); state.ed.i = Math.max(0, Math.min(j, edProp().shots.length - 1)); return render(); }
   if (d.edscope) { state.ed.scope = d.edscope; return render(); }
-  if (d.edlook) { const g = curGrade(edProp()); g.look = d.edlook; stageGrade(g); return render(); }
+  if (d.edlook) {
+    const p = edProp();
+    const g = curGrade(p);
+    g.look = d.edlook;
+    if (state.ed.scope === "film") {
+      // hela filmen: utseendet gäller alla klipp, även de som hade fått en egen färg
+      const own = p.shots.filter((x) => x.grade).length;
+      p.grade = g;
+      p.shots.forEach((x) => { delete x.grade; });
+      clearTimeout(gradeTimer);
+      gradeTimer = setTimeout(() => edit("grade", { scope: "film", i: state.ed.i, grade: g, all_shots: true }, { quiet: true }), 150);
+      if (own) toast(`${own} klipp hade egen färg – nu gäller ${(state.info.looks || {})[d.edlook] || "utseendet"} för hela filmen.`, true);
+    } else stageGrade(g);
+    return render();
+  }
   if (d.edalt !== undefined) {
     const a = state.ed.alts[Number(d.edalt)];
     return edit("swap", { i: state.ed.i, alt: { clip_id: a.clip_id, start: a.start } });

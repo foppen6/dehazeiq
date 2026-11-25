@@ -272,7 +272,8 @@ MV_STYLES = ["musicvideo", "mv_ballad", "mv_glitch", "mv_lyrics"]
 LOOKS = {
     # Färgutseenden. Värdena nedan läggs på reglagen; render.LOOK_RECIPES ger själva karaktären
     # (färgbalans, kanalblandning, kurvor) så att varje utseende syns tydligt.
-    "none": {"label": "Original"},
+    "none": {"label": "Stilens färg"},
+    "original": {"label": "Original"},
     "natural": {"label": "Naturlig", "contrast": 0.06},
     "underwater": {"label": "Undervatten", "contrast": 0.08},
     "warm": {"label": "Varm"},
