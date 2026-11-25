@@ -959,12 +959,16 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
             raw = bool((shot.get("fx") or {}).get("raw"))  # "före"-bilden: originalet utan något gjort
             if raw:
                 enh, levels, lfx = {}, None, {}
+            is_orig = g.get("look") == "original"  # Original: som kameran filmade, bara det användaren själv ställt in
+            if is_orig:
+                enh = {k: g[k] for k in ("dehaze", "particles", "stabilize") if g.get(k) is not None}
+                levels = haze_levels(src, clip["id"]) if float(enh.get("dehaze") or 0) > 0.01 else None
 
             def encode(fx, vignette, title, texts):
                 lay = layer if texts is not None else None
                 if lay:
                     texts = list(texts) + ["@OVL@"]
-                vf = _shot_filter(fshot, sw, sh, out_w, out_h, dict(style, color="") if raw else style, wb=wb and not raw,
+                vf = _shot_filter(fshot, sw, sh, out_w, out_h, dict(style, color="") if raw else style, wb=wb and not raw and not is_orig,
                                   fade_in=style["fade"] if i == 0 else 0.0,
                                   fade_out=style["fade"] if i == len(shots) - 1 and not endcard else 0.0,
                                   fx=fx, pad=pad, vignette=vignette, title=title,
@@ -1152,14 +1156,15 @@ def still(project, proposal, idx, at=0.5, width=480, graded=True, effects=None, 
     parts = place_filters(shot, sw, sh, out_w, out_h, cx, cy) + [f"scale={out_w}:{out_h}:flags=bicubic", "setsar=1"]
     if graded and not (shot.get("fx") or {}).get("raw"):
         on = effects if effects is not None else fx_mod.enabled(project.data.get("settings"))
-        r, g, b = shot.get("wb_gains", [1, 1, 1])
-        if max(abs(r - 1), abs(g - 1), abs(b - 1)) > 0.02:
-            parts.append(f"colorchannelmixer=rr={r:.3f}:gg={g:.3f}:bb={b:.3f}")
         grade = shot.get("grade") or proposal.get("grade")
         gg = grade or {}
+        orig = gg.get("look") == "original"
+        r, g, b = shot.get("wb_gains", [1, 1, 1])
+        if max(abs(r - 1), abs(g - 1), abs(b - 1)) > 0.02 and not orig:
+            parts.append(f"colorchannelmixer=rr={r:.3f}:gg={g:.3f}:bb={b:.3f}")
         enh = {}
         a = clip.get("analysis") or {}
-        if on.get("enhance") and (a.get("underwater") or shot.get("underwater")):
+        if on.get("enhance") and (a.get("underwater") or shot.get("underwater")) and not orig:
             lv = haze_levels(src, clip["id"])
             enh["dehaze"] = round(min(0.8, max(0.25, ((lv or {}).get("haze", 0.1) - 0.03) * 6)), 2)
             enh["particles"] = 0.35

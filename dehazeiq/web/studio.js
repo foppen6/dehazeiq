@@ -449,7 +449,7 @@ function edInspectorColor(p) {
     <div class="stack" style="gap:6px"><div class="spread" style="align-items:center"><span class="flabel">Bildförbättring</span><button class="btn small" data-act="ed-enh-auto">Låt AI välja</button></div>
       ${encSlider(g, "dehaze", "Ta bort dis")}${encSlider(g, "particles", "Partiklar")}
       <label class="row" style="gap:10px;color:var(--text-2);font-size:13px"><input type="checkbox" data-edstab ${g.stabilize ? "checked" : ""} style="width:18px;height:18px;accent-color:var(--accent)">Stabilisera skakig bild${g.stabilize == null ? ' <span class="muted">(AI: automatiskt)</span>' : ""}</label></div>
-    <p class="muted" style="margin:0;font-size:12px"><b>Original</b> = ingen färgsättning alls, <b>Stilens färg</b> = filmstilens egen. AI:ns vitbalans för undervatten ligger kvar under; stäng av den med Bildförbättring under Effekter. Jämför med Före/efter överst.</p>`;
+    <p class="muted" style="margin:0;font-size:12px"><b>Original</b> = som kameran filmade (ingen AI-vitbalans, disborttagning eller färgsättning). <b>Stilens färg</b> = AI:ns korrigering plus filmstilens färg. Jämför med Före/efter överst.</p>`;
 }
 
 const TEXT_STYLES = { doc: "Dokumentär – namnskylt", fun: "Humor – pratbubbla", title: "Rubrik", caption: "Undertext",
