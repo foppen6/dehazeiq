@@ -424,3 +424,20 @@ textarea.field { color: var(--text); height: auto; padding: 10px 12px; line-heig
 .modelpick button { height: auto; min-height: 52px; text-align: left; display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 10px 12px; }
 .modelpick button small { grid-column: 1 / -1; opacity: .75; font-weight: 400; }
 .modelpick button[disabled] { opacity: .45; }
+
+/* redigering: klippförhandsvisning, före/efter */
+.stagemodes { grid-template-columns: repeat(4, minmax(0, 1fr)); max-width: 560px; margin: 0 auto 14px; }
+.edstill video { width: 100%; height: 100%; object-fit: cover; display: block; background: #000; }
+.stagestat { position: absolute; left: 10px; top: 10px; display: inline-flex; gap: 6px; align-items: center; padding: 5px 10px; border-radius: 999px; background: rgba(6,12,16,.78); color: #fff; font-size: 12px; font-weight: 600; animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .55; } }
+.edstill.cmp img { position: absolute; inset: 0; }
+.edstill.cmp .after { z-index: 1; }
+.cmpline { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #fff; box-shadow: 0 0 8px rgba(0,0,0,.6); z-index: 2; pointer-events: none; }
+.cmpline::after { content: "⟷"; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 34px; height: 34px; border-radius: 50%; background: #fff; color: #0b1720; display: grid; place-items: center; font-size: 16px; font-weight: 700; }
+.cmptag { position: absolute; top: 10px; z-index: 3; padding: 3px 9px; border-radius: 6px; background: rgba(6,12,16,.72); color: #fff; font-size: 12px; font-weight: 600; pointer-events: none; }
+.cmptag.l { left: 10px; } .cmptag.r { right: 10px; }
+.edstill.cmp input[type=range] { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: ew-resize; z-index: 4; }
+.sidebyside { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; align-items: flex-start; }
+.edorig { width: min(460px, 100%); border-radius: 12px; overflow: hidden; border: 1px solid #22303D; background: #000; }
+.edorig video, .edorig img { width: 100%; display: block; }
+.tledited { position: absolute; right: 5px; top: 5px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px rgba(0,0,0,.5); }

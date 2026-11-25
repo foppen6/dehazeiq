@@ -66,6 +66,22 @@ def main():
     print("Förhandsvisning:", r["file"])
     r = pipeline.render_proposal(prog, p.id, props[1]["id"], "720p")
     print("Export:", r["file"], "+", r["otio"])
+    from dehazeiq import editor, render
+    # v0.18: inpassning (zooma ut med suddig/färgad bakgrund) och förhandsvisning av ett klipp
+    p.reload()
+    pr = p.proposal(props[0]["id"])
+    pr = editor.apply(p, pr, "fit", {"i": 0, "zoom": 0.0, "bg": "blur"})
+    if len(pr["shots"]) > 1:
+        pr = editor.apply(p, pr, "fit", {"i": 1, "zoom": 0.5, "bg": "#204060"})
+    assert pr["shots"][0]["fit"]["zoom"] == 0.0 and pr["shots"][0]["edited"]
+    p.replace_proposal(pr)
+    assert render.still(p, pr, 0, 0.5, 240)[:2] == b"\xff\xd8"
+    sp = render.shot_preview(p, pr, 0, p.dir / "shots")
+    print("Klippförhandsvisning:", sp.name, sp.stat().st_size)
+    assert sp.stat().st_size > 1000
+    assert render.shot_preview(p, pr, 0, p.dir / "shots") == sp  # oförändrat: återanvänds
+    r = pipeline.render_proposal(prog, p.id, pr["id"], "preview")
+    print("Film med inpassning:", r["file"])
     # v0.13: foton, beskrivning med egna ord, reklam, musikvideo och trailer
     from dehazeiq import editor, photo, prompt
     if photo.PIL_OK:

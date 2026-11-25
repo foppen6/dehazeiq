@@ -130,6 +130,17 @@ djupanalysen finns, annars med mallar utifrån vad AI:n känt igen. Allt kan ån
 På tidslinjen dras klippen till ny plats, och verktygsraden ovanför flyttar och tar bort det valda
 klippet (även Delete, Alt+←/→ och Ctrl/Cmd+Z).
 
+**Se ändringen direkt:** varje ändring visas på någon sekund som en kort video av just det klippet,
+precis som i filmen (effekter, färg, inpassning, texter och musiken på rätt ställe). Överst väljer man
+*Klippet*, *Före/efter* (dra en linje över bilden: original till vänster, resultat till höger),
+*Sida vid sida* (originalklippet bredvid resultatet) eller *Hela filmen*. Ändrade klipp får en prick i
+tidslinjen.
+
+**Inpassning – zooma ut, inte bara beskära:** ett reglage per klipp från *hela bilden* till tajtare
+än vanligt. Det som inte fyller formatet får suddig bakgrund eller en kant (svart, vit, sand, havsblå
+eller valfri färg). AI:n gör det själv när motivet – en manta, ett stim, en dykgrupp – inte ryms i en
+stående beskärning; *Låt AI välja* och *Samma på alla klipp* finns i redigeringen.
+
 **Olika filmer eller varianter:** när förslag skapas väljer man om de ska vara *olika filmer med
 olika fokus* (ett djur, detaljerna, ett dyk, rörelse …) eller *varianter av samma film* (samma
 berättelse och i stort sett samma klipp, med olika stil, tempo, färg och musik). Varje förslag har

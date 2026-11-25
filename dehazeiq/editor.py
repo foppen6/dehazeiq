@@ -3,6 +3,7 @@ ta bort, byta klipp mot ett liknande, flytta motivet i bilden, färg och titel �
 Dessutom: byta plattform (format och längd) och göra filmer efter vald filmtyp."""
 
 import copy
+import re
 import time
 import uuid
 
@@ -21,7 +22,8 @@ HISTORY = 25
 
 def _snapshot(prop):
     return {"shots": copy.deepcopy(prop["shots"]), "grade": copy.deepcopy(prop.get("grade")),
-            "effects": copy.deepcopy(prop.get("effects")), "title": prop.get("title")}
+            "effects": copy.deepcopy(prop.get("effects")), "title": prop.get("title"),
+            "overlays": copy.deepcopy(prop.get("overlays"))}
 
 
 def _finish(prop):
@@ -101,6 +103,8 @@ def apply(project, prop, op, args):
         snap = hist.pop()
         prop["shots"], prop["grade"], prop["effects"] = snap["shots"], snap["grade"], snap["effects"]
         prop["title"] = snap["title"]
+        if "overlays" in snap:
+            prop["overlays"] = snap["overlays"] or []
         return _finish(prop)
 
     hist = prop.setdefault("history", [])
@@ -167,6 +171,33 @@ def apply(project, prop, op, args):
             s["auto_path"] = s.get("path") or []
         s["path"] = []
         s["manual_center"] = True
+    elif op == "fit":
+        # inpassning: zoom 1 = fyller bilden (beskärning), lägre = zooma ut med bakgrund, högre = tajtare
+        from .render import FIT_BG
+        targets = shots if args.get("all") else [shot_at()[1]]
+        for s in targets:
+            if args.get("auto"):
+                s.pop("fit", None)
+                c = next((x for x in _cands(project, prop) if x["clip"]["id"] == s["clip_id"]
+                          and x["start"] - 0.5 <= s["src_start"] <= x["end"]), None)
+                f = generator.auto_fit(c, s["src_start"], s["duration"], prop["format"]) if c else None
+                if f:
+                    s["fit"] = f
+                continue
+            f = dict(s.get("fit") or {"zoom": 1.0, "bg": "blur"})
+            if args.get("zoom") is not None:
+                f["zoom"] = round(max(0.0, min(1.8, float(args["zoom"]))), 3)
+            if args.get("bg") is not None:
+                bg = str(args["bg"])
+                if bg not in FIT_BG and not re.fullmatch(r"#?[0-9A-Fa-f]{6}", bg):
+                    raise EditError("Okänd bakgrund")
+                f["bg"] = bg if bg in FIT_BG else "0x" + bg.lstrip("#")
+            f.pop("auto", None)
+            if abs(f["zoom"] - 1.0) < 0.01:
+                s.pop("fit", None)
+            else:
+                s["fit"] = f
+            s["edited"] = True
     elif op == "auto_center":
         i, s = shot_at()
         if not s.get("auto_path") and not s.get("manual_center"):
@@ -311,7 +342,15 @@ def apply(project, prop, op, args):
     else:
         hist.pop()
         raise EditError(f"Okänd redigering: {op}")
+    # markera ändrade klipp i tidslinjen
+    if op in SHOT_OPS and args.get("i") is not None and 0 <= int(args["i"]) < len(shots):
+        if not (op == "grade" and args.get("scope") != "shot"):
+            shots[int(args["i"])]["edited"] = True
     return _finish(prop)
+
+
+SHOT_OPS = {"trim", "speed", "fx", "center", "auto_center", "swap", "grade", "grade_reset_shot", "transition",
+            "text", "cam360", "fit", "overlay_add"}
 
 
 # ---------- byt mot liknande ----------
@@ -387,6 +426,11 @@ def _shot_from_alternative(project, prop, old, alt):
         "species": (c.get("species") or [None])[0] if c.get("species_p", 0) >= 0.35 else None,
         "desc": c.get("desc") or "", "fx": {},
     }
+    f = generator.auto_fit(c, start, dur, prop["format"])
+    if old.get("fit") and not old["fit"].get("auto"):
+        new["fit"] = dict(old["fit"])  # användarens egen inpassning följer med
+    elif f:
+        new["fit"] = f
     if old.get("grade"):
         new["grade"] = old["grade"]
     _fit_source(project, new)

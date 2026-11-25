@@ -909,7 +909,7 @@ function propCard(p, idx) {
   const poster = shots.length ? frameUrl(shots[0].clip_id, shots[0].src_start + shots[0].duration / 2, 480) : "";
   let phone;
   if (prev) {
-    phone = `<video controls playsinline preload="metadata" poster="${poster}" src="${mediaUrl("renders", prev)}"></video>`;
+    phone = `<video controls playsinline preload="metadata" poster="${poster}" src="${mediaUrl("renders", prev)}?v=${p.renders.v || 0}"></video>`;
   } else {
     const fr = shots.slice(0, 4).map((s) => `<img alt="" loading="lazy" src="${frameUrl(s.clip_id, s.src_start + s.duration / 2, 320)}">`).join("");
     phone = `<div class="frames">${fr}</div>`;

@@ -28,7 +28,7 @@ from .config import FILM_TYPES, FORMATS, HOME, LOOKS, PLATFORMS, PROJECTS_DIR, S
 from .project import JOBS, Project, auto_name, save_default_settings
 
 WEB = Path(__file__).parent / "web"
-MEDIA_DIRS = {"proxies", "renders"}
+MEDIA_DIRS = {"proxies", "renders", "shots"}
 
 
 class ApiError(Exception):
@@ -347,8 +347,15 @@ class Handler(BaseHTTPRequestHandler):
     def _file(self, path: Path):
         if not path.is_file():
             return self._json({"error": "Hittades inte"}, HTTPStatus.NOT_FOUND)
-        size = path.stat().st_size
+        st_ = path.stat()
+        size = st_.st_size
         ctype = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        etag = f'"{st_.st_mtime_ns:x}-{size:x}"'
+        if self.headers.get("If-None-Match") == etag and not self.headers.get("Range"):
+            self.send_response(HTTPStatus.NOT_MODIFIED)
+            self.send_header("ETag", etag)
+            self.end_headers()
+            return
         rng = self.headers.get("Range")
         start, end = 0, size - 1
         status = HTTPStatus.OK
@@ -372,6 +379,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Accept-Ranges", "bytes")
         self.send_header("Content-Length", str(length))
+        # en ny förhandsvisning har samma filnamn: webbläsaren ska alltid fråga om filen har ändrats
+        self.send_header("ETag", etag)
+        self.send_header("Cache-Control", "no-cache")
         if status == HTTPStatus.PARTIAL_CONTENT:
             self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
         if path.suffix in (".mp4", ".otio"):
@@ -912,6 +922,18 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"lang": lg, "texts": i18n.localize(prop, lg, _species_map(), free),
                                    "original": i18n.localize(prop, "sv"),
                                    "missing": [t for t in i18n.free_texts(prop, lg) if t not in free]})
+            if verb == "shotpreview":
+                # ett klipp som i filmen, på några sekunder – visas direkt efter varje ändring
+                prop = p.proposal(prop_id)
+                if not prop:
+                    raise ApiError("Förslaget finns inte", HTTPStatus.NOT_FOUND)
+                i = int(body.get("i", 0))
+                with _SHOT_LOCK:
+                    try:
+                        out = render.shot_preview(p, prop, i, p.dir / "shots")
+                    except Exception as e:  # noqa: BLE001
+                        raise ApiError(f"Förhandsvisningen av klippet misslyckades: {e}")
+                return self._json({"file": out.name, "i": i, "proxy": _proxy_name(p, prop["shots"][i])})
             if verb == "alternatives":
                 try:
                     return self._json({"alternatives": editor.alternatives(p, p.proposal(prop_id),
@@ -926,6 +948,15 @@ class Handler(BaseHTTPRequestHandler):
                 reveal(f)
                 return self._json({"ok": True})
         raise ApiError("Hittades inte", HTTPStatus.NOT_FOUND)
+
+
+_SHOT_LOCK = threading.Lock()
+
+
+def _proxy_name(p, shot):
+    """Proxyfilen för före-bilden (originalet utan något gjort)."""
+    f = p.proxy_path(shot["clip_id"])
+    return f.name if f.exists() and f.parent == p.dir / "proxies" else None
 
 
 def _quote(s):

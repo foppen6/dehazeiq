@@ -1,6 +1,7 @@
 """Rendering med FFmpeg: varje klipp beskärs, färgjusteras och kodas,
 sätts ihop och mixas med musik."""
 
+import re
 import shutil
 import tempfile
 from pathlib import Path
@@ -43,6 +44,67 @@ def crop_box(src_w, src_h, out_w, out_h, cx=0.5, cy=0.5):
         x = 0
         y = int(min(max(cy * src_h - ch / 2, 0), src_h - ch))
     return cw, ch, x, y
+
+
+FIT_BG = {"blur": "Suddig bakgrund", "black": "Svart", "white": "Vit", "sand": "Sand", "ocean": "Havsblå"}
+_BG_COLORS = {"black": "0x000000", "white": "0xF4F4F2", "sand": "0xE8DCC4", "ocean": "0x0B3A53"}
+
+
+def fit_box(src_w, src_h, out_w, out_h, zoom):
+    """Hur stor del av källan som syns vid en viss zoom (1 = fyller bilden, som vanlig beskärning;
+    0 = hela bilden syns, med bakgrund runt; över 1 = tajtare). Returnerar (rw, rh) i källans pixlar
+    – kan vara större än källan, då blir det kant/bakgrund."""
+    cw, ch, _, _ = crop_box(src_w, src_h, out_w, out_h)
+    target = out_w / out_h
+    z = max(0.0, min(2.0, float(zoom)))
+    if z >= 1.0:
+        rw = cw / z
+    elif cw < src_w - 1:  # beskärs i sidled: zooma ut mot hela bredden
+        rw = src_w * (cw / src_w) ** z
+    else:
+        rw = (src_h * (ch / src_h) ** z) * target
+    return rw, rw / target
+
+
+def place_filters(shot, src_w, src_h, out_w, out_h, cx=None, cy=None, uid="p"):
+    """Utsnitt ur källan till målformatet. Beskär (vanligt) eller – med shot["fit"] – zoomar ut och
+    lägger bilden på en suddig eller färgad bakgrund. Följer motivets bana om den finns.
+    cx/cy: fast punkt (stillbild) i stället för banan. Ger bilden i out_w×out_h (eller beskärningen,
+    som skalas senare)."""
+    fit = shot.get("fit") or {}
+    zoom = float(fit.get("zoom", 1.0))
+    path = [] if cx is not None else (shot.get("path") or [])
+    cx = shot.get("cx", 0.5) if cx is None else cx
+    cy = shot.get("cy", 0.5) if cy is None else cy
+    if abs(zoom - 1.0) < 0.01:
+        cw, ch, x, y = crop_box(src_w, src_h, out_w, out_h, cx, cy)
+        if path and cw < src_w - 1:
+            return [f"crop={cw}:{ch}:x='{_path_expr(path, src_w, cw, 1)}':y={y}"]
+        if path and ch < src_h - 1:
+            return [f"crop={cw}:{ch}:x={x}:y='{_path_expr(path, src_h, ch, 2)}'"]
+        return [f"crop={cw}:{ch}:{x}:{y}"]
+    rw, rh = fit_box(src_w, src_h, out_w, out_h, zoom)
+    vw, vh = _even(min(rw, src_w)), _even(min(rh, src_h))
+
+    def pos(size, crop, c, idx):
+        if path and crop < size - 1:
+            return f"'{_path_expr(path, size, crop, idx)}'"
+        return str(int(min(max(c * size - crop / 2, 0), size - crop)))
+    crop = f"crop={vw}:{vh}:x={pos(src_w, vw, cx, 1)}:y={pos(src_h, vh, cy, 2)}"
+    if rw <= src_w + 1 and rh <= src_h + 1:
+        return [crop]  # tajtare än vanligt eller ryms ändå: bara beskärning
+    fw, fh = _even(out_w * vw / rw), _even(out_h * vh / rh)
+    bg = fit.get("bg", "blur")
+    if bg == "blur":
+        cw, ch, x, y = crop_box(src_w, src_h, out_w, out_h, cx, cy)
+        sw_, sh_ = max(16, _even(out_w / 10)), max(16, _even(out_h / 10))
+        back = (f"crop={cw}:{ch}:{x}:{y},scale={sw_}:{sh_},gblur=sigma=3,scale={out_w}:{out_h}:flags=bicubic,"
+                f"eq=brightness=-0.06:saturation=0.85")
+    else:
+        col = _BG_COLORS.get(bg) or (bg if re.fullmatch(r"0x[0-9A-Fa-f]{6}", str(bg)) else "0x000000")
+        back = f"scale={out_w}:{out_h},drawbox=x=0:y=0:w=iw:h=ih:color={col}:t=fill"
+    return [f"split[{uid}a][{uid}b];[{uid}b]{back}[{uid}g];[{uid}a]{crop},scale={fw}:{fh}:flags=bicubic,setsar=1[{uid}f];"
+            f"[{uid}g][{uid}f]overlay=x=(W-w)/2:y=(H-h)/2"]
 
 
 def _path_expr(keys, size, crop, idx):
@@ -469,14 +531,7 @@ def _shot_filter(shot, src_w, src_h, out_w, out_h, style, wb=True, fade_in=0.0, 
     """fx: {"speed": 0.5} slowmotion, {"zoom": 0.05} långsam inzoomning. pad: extra sekunder i slutet
     (för mjuka övergångar). title: text som visas i början (font.ttf/title.txt i arbetsmappen)."""
     fx = fx or {}
-    cw, ch, x, y = crop_box(src_w, src_h, out_w, out_h, shot.get("cx", 0.5), shot.get("cy", 0.5))
-    path = shot.get("path") or []
-    if path and cw < src_w - 1:
-        crop = f"crop={cw}:{ch}:x='{_path_expr(path, src_w, cw, 1)}':y={y}"
-    elif path and ch < src_h - 1:
-        crop = f"crop={cw}:{ch}:x={x}:y='{_path_expr(path, src_h, ch, 2)}'"
-    else:
-        crop = f"crop={cw}:{ch}:{x}:{y}"
+    crop = ",".join(place_filters(shot, src_w, src_h, out_w, out_h))
     dur = shot["duration"]
     parts = list(pre or [])  # t.ex. 360-vy ur källan (då är bilden redan out_w×out_h)
     if (enh or {}).get("stabilize") and not kb_photo(fx) and not pre:
@@ -926,9 +981,10 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
                                for a, b in _merge_ranges(voice)[:60])
                 ovol = f"'{orig:.3f}+({1.0 - orig:.3f})*min(1,{win})':eval=frame"
                 mvol = f"'1-0.75*min(1,{win})':eval=frame"
-            fc = (f"[1:a]atrim=0:{total:.3f},asetpts=PTS-STARTPTS,"
-                  f"aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
-                  f"afade=t=in:st=0:d=0.6,afade=t=out:st={max(0.0, total - fo):.3f}:d={fo:.3f},"
+            moff = float(proposal.get("music_offset") or 0.0)  # förhandsvisning av ett klipp mitt i filmen
+            fades = ("" if moff else f"afade=t=in:st=0:d=0.6,afade=t=out:st={max(0.0, total - fo):.3f}:d={fo:.3f},")
+            fc = (f"[1:a]atrim={moff:.3f}:{moff + total:.3f},asetpts=PTS-STARTPTS,"
+                  f"aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,{fades}"
                   f"volume={mvol}[m];"
                   f"[0:a]volume={ovol}[o];[o][m]amix=inputs=2:duration=first:normalize=0[a]")
             run([ffmpeg(), "-hide_banner", "-loglevel", "error", "-y",
@@ -947,6 +1003,43 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def shot_preview(project, proposal, idx, out_dir):
+    """Snabb förhandsvisning av ett enda klipp, exakt som i filmen (utsnitt, inpassning, effekter,
+    färg, texter, musik på rätt ställe). Sparas efter innehåll, så en oförändrad ändring återanvänds."""
+    import hashlib
+    import json as _json
+    shots = proposal["shots"]
+    if not 0 <= idx < len(shots):
+        raise RuntimeError("Klippet finns inte")
+    shot = dict(shots[idx])
+    at = float(shot.get("at", 0.0))
+    uid = shot.get("uid")
+    mini = {k: v for k, v in proposal.items() if k not in ("shots", "history", "renders", "overlays")}
+    mini["shots"] = [dict(shot, at=0.0, tr="cut")]
+    mini["overlays"] = [o for o in proposal.get("overlays") or [] if o.get("shot_uid") == uid]
+    mini["music_offset"] = at
+    if idx != 0:
+        mini["effects"] = dict(proposal.get("effects") or {}, title="")
+        mini["title"] = ""
+    if mini.get("promo"):
+        mini["promo"] = dict(mini["promo"], endcard=False)
+        if idx != 0:
+            mini["promo"]["hook"] = ""
+    mini["music_credit"] = ""
+    on = fx_mod.enabled(project.data.get("settings"))
+    key = hashlib.sha1(_json.dumps([mini, on, project.data["clips"][shot["clip_id"]].get("speech")],
+                                   sort_keys=True, default=str).encode()).hexdigest()[:16]
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / f"shot_{key}.mp4"
+    if not out.exists():
+        old = sorted(out_dir.glob("shot_*.mp4"), key=lambda p: p.stat().st_mtime)
+        for p in old[:-40]:  # håll mappen liten
+            p.unlink(missing_ok=True)
+        render(project, mini, "preview", out, effects=on)
+    return out
+
+
 def _merge_ranges(rs, gap=0.6):
     out = []
     for a, b in sorted(rs):
@@ -957,8 +1050,9 @@ def _merge_ranges(rs, gap=0.6):
     return out
 
 
-def still(project, proposal, idx, at=0.5, width=480, graded=True):
-    """En bild ur ett klipp i förslaget, beskuren och färgsatt som i filmen (för redigeringen).
+def still(project, proposal, idx, at=0.5, width=480, graded=True, effects=None):
+    """En bild ur ett klipp i förslaget, utsnitt, inpassning, bildförbättring och färg som i filmen
+    (för redigeringen). graded=False: originalbilden i samma utsnitt (för före/efter).
     at: andel av klippets längd (0..1). Returnerar JPEG-bytes."""
     import subprocess
 
@@ -981,23 +1075,43 @@ def still(project, proposal, idx, at=0.5, width=480, graded=True):
         ts = [k[0] for k in path]
         cx = float(np.interp(rel, ts, [k[1] for k in path]))
         cy = float(np.interp(rel, ts, [k[2] for k in path]))
-    cw, ch, x, y = crop_box(sw, sh, out_w, out_h, cx, cy)
     style = STYLES[proposal["style"]]
-    parts = [f"crop={cw}:{ch}:{x}:{y}", f"scale={out_w}:{out_h}:flags=bicubic", "setsar=1"]
+    parts = place_filters(shot, sw, sh, out_w, out_h, cx, cy) + [f"scale={out_w}:{out_h}:flags=bicubic", "setsar=1"]
     if graded:
+        on = effects if effects is not None else fx_mod.enabled(project.data.get("settings"))
         r, g, b = shot.get("wb_gains", [1, 1, 1])
         if max(abs(r - 1), abs(g - 1), abs(b - 1)) > 0.02:
             parts.append(f"colorchannelmixer=rr={r:.3f}:gg={g:.3f}:bb={b:.3f}")
         grade = shot.get("grade") or proposal.get("grade")
+        gg = grade or {}
+        enh = {}
+        a = clip.get("analysis") or {}
+        if on.get("enhance") and (a.get("underwater") or shot.get("underwater")):
+            lv = haze_levels(src, clip["id"])
+            enh["dehaze"] = round(min(0.8, max(0.25, ((lv or {}).get("haze", 0.1) - 0.03) * 6)), 2)
+            enh["particles"] = 0.35
+        for k in ("dehaze", "particles"):
+            if gg.get(k) is not None:
+                enh[k] = gg[k]
+        levels = haze_levels(src, clip["id"]) if float(enh.get("dehaze") or 0) > 0.01 else None
+        parts += enhance_filters(enh, levels)
         look_set = bool(grade and (grade.get("look") or "none") != "none")
         color = None if look_set else COLOR_PROFILES.get(style.get("color", ""))
         if color:
             parts.append(color)
         parts += grade_filter(grade)
+        lfx = dict(style.get("look_fx") or {})
+        for k in ("grain", "weave", "flash"):
+            lfx.pop(k, None)
+        if not on.get("letterbox"):
+            lfx.pop("letterbox", None)
+        parts += style_filters(lfx, out_w, out_h, False)
     cmd = [ffmpeg(), "-hide_banner", "-loglevel", "error", "-ss", f"{t:.3f}", "-i", str(src),
            "-frames:v", "1", "-vf", ",".join(parts), "-f", "image2", "-c:v", "mjpeg", "-q:v", "4", "pipe:1"]
     r = subprocess.run(cmd, capture_output=True, timeout=60, **subprocess_kwargs())
     if r.returncode != 0 or not r.stdout:
+        if graded:  # något filter fungerar inte på den här bilden: visa åtminstone utsnittet
+            return still(project, proposal, idx, at, width, False)
         raise MediaError(r.stderr.decode("utf-8", "replace")[-400:])
     return r.stdout
 

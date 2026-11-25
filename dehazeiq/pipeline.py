@@ -354,6 +354,7 @@ def render_proposal(progress, pid, prop_id, resolution="preview", lang="sv"):
     renders = dict(prop.get("renders") or {})
     key = resolution if lang == "sv" else f"{resolution}:{lang}"
     renders[key] = out.name
+    renders["v"] = int(time.time())  # versionsnummer i adressen: alltid den nya videon, aldrig en gammal ur cachen
     result = {"file": out.name, "path": str(out)}
     if resolution != "preview":
         otio = out.with_suffix(".otio")

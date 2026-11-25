@@ -372,6 +372,30 @@ def _hit_drop(seq, durs, music):
     return seq, durs
 
 
+def auto_fit(c, start, dur, fmt):
+    """AI-inpassning: ryms inte motivet i beskärningen (t.ex. en manta, ett stim eller en dykgrupp i en
+    stående film) zoomar vi ut precis så mycket som behövs och lägger en suddig bakgrund runt.
+    Returnerar {"zoom", "bg", "auto"} eller None (vanlig beskärning räcker)."""
+    d, clip = c["data"], c["clip"]
+    fw, fh = _crop_fraction(clip, fmt)
+    if fw >= 0.999 and fh >= 0.999:
+        return None
+    key, frac = ("spx", fw) if fw < 0.999 else ("spy", fh)
+    if key not in d or "sstr" not in d:
+        return None
+    t = d["t"]
+    m = (t >= start) & (t < start + dur)
+    if not m.any() or float(np.median(d["sstr"][m])) < 0.08:
+        return None  # inget tydligt motiv: vanlig beskärning
+    spread = float(np.percentile(d[key][m], 70))
+    need = min(1.0, 4.4 * spread)  # motivet ±2 standardavvikelser och lite luft
+    if need <= frac * 1.12:
+        return None
+    z = float(np.log(need) / np.log(frac))
+    z = max(0.45, round(z, 2))  # aldrig mer än ungefär halva vägen mot hela bilden automatiskt
+    return None if z >= 0.95 else {"zoom": z, "bg": "blur", "auto": True}
+
+
 def _place(c, dur, fmt):
     """Välj bästa delen av kandidatfönstret och en beskärningsbana som följer motivet."""
     d = c["data"]
@@ -589,6 +613,7 @@ def generate(project, style_key="cinematic", fmt="9:16", length=30.0, seed=None,
             "src_start": round(start, 3), "src_end": round(start + float(dur), 3),
             "duration": round(float(dur), 3), "at": round(pos, 3),
             "cx": round(cx, 3), "cy": round(cy, 3), "path": path, "wb_gains": a.get("wb_gains", [1, 1, 1]),
+            **({"fit": f} if (f := auto_fit(c, start, float(dur), fmt)) and not clip.get("photo") else {}),
             "underwater": a.get("underwater", False), "tags": a.get("tags", []),
             "label": c.get("label"), "shot": c.get("shot"), "context": c.get("context"),
             "session": c.get("session"), "time": c.get("time"),

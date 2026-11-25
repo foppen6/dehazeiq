@@ -245,9 +245,10 @@ const edProp = () => propById(state.ed.prop);
 const stillUrl = (p, i, graded = true, w = 540) => `/api/p/${state.pid}/proposal/${p.id}/still?i=${i}&at=0.45&w=${w}&graded=${graded ? 1 : 0}&s=${state.ed.stamp}`;
 
 function openEditor(propId) {
-  state.ed = { prop: propId, i: 0, tab: "clip", scope: "film", alts: null, before: false, stamp: Date.now() };
+  state.ed = { prop: propId, i: 0, tab: "clip", scope: "film", alts: null, mode: "clip", stamp: Date.now() };
   state.view = "edit";
   render();
+  requestShotPreview(100);
 }
 
 async function edit(op, args = {}, { quiet = false } = {}) {
@@ -261,17 +262,17 @@ async function edit(op, args = {}, { quiet = false } = {}) {
     state.ed.i = Math.min(state.ed.i, r.proposal.shots.length - 1);
     state.ed.stamp = Date.now();
     if (op === "swap" || op === "delete" || op === "move" || op === "undo") state.ed.alts = null;
-    if (!quiet) render(); else refreshStill();
+    if (!quiet) { render(); requestShotPreview(); } else refreshStill();
   } catch (e) { fail(e); }
 }
 
 function refreshStill() {
   const p = edProp();
   if (!p) return;
-  const img = $("#edStill");
-  if (img) img.src = stillUrl(p, state.ed.i, !state.ed.before);
+  paintStage();
   const tl = $("#edTimeline");
   if (tl) tl.outerHTML = edTimeline(p);
+  requestShotPreview();
 }
 
 function curGrade(p) {
@@ -284,9 +285,9 @@ function edTimeline(p) {
   const total = p.shots.reduce((a, s) => a + s.duration, 0) || 1;
   const blocks = p.shots.map((s, i) => {
     const fx = s.fx || {};
-    const tags = [fx.speed > 1 ? "2×" : "", fx.speed && fx.speed < 1 ? "0,5×" : "", fx.freeze ? "Frys" : "", fx.zoom ? "Zoom" : "", fx.punch ? "Ryck" : "", fx.kenburns ? (fx.kenburns > 0 ? "Foto ↗" : "Foto ↙") : s.photo ? "Foto" : "", s.parent360 ? ({ planet: "Planet", ball: "Kula", whip: "360-svep", view: "360" }[(s.cam360 || {}).mode] || "360") : "", fx.roll ? "Roll" : "", s.grade ? "Färg" : "", s.manual_center ? "Flyttad" : ""].filter(Boolean);
+    const tags = [fx.speed > 1 ? "2×" : "", fx.speed && fx.speed < 1 ? "0,5×" : "", fx.freeze ? "Frys" : "", fx.zoom ? "Zoom" : "", fx.punch ? "Ryck" : "", fx.kenburns ? (fx.kenburns > 0 ? "Foto ↗" : "Foto ↙") : s.photo ? "Foto" : "", s.parent360 ? ({ planet: "Planet", ball: "Kula", whip: "360-svep", view: "360" }[(s.cam360 || {}).mode] || "360") : "", fx.roll ? "Roll" : "", s.grade ? "Färg" : "", s.manual_center ? "Flyttad" : "", s.fit ? ((s.fit.zoom ?? 1) < 1 ? "Utzoom" : "Inzoom") : ""].filter(Boolean);
     return `<button class="tlblock ${i === state.ed.i ? "sel" : ""}" data-edshot="${i}" data-drag="${i}" style="flex:${s.duration} 1 0;touch-action:pan-y" aria-label="Klipp ${i + 1}, ${dec(s.duration)} sekunder. Dra för att flytta.">
-      <img alt="" loading="lazy" draggable="false" src="${frameUrl(s.clip_id, s.src_start + Math.min(s.duration, 1.5), 160)}"><span class="tlnum num">${i + 1}</span><span class="tldur num">${dec(s.duration)} s</span>${tags.length ? `<span class="tltags">${tags.join(" · ")}</span>` : ""}</button>`;
+      <img alt="" loading="lazy" draggable="false" src="${frameUrl(s.clip_id, s.src_start + Math.min(s.duration, 1.5), 160)}"><span class="tlnum num">${i + 1}</span>${s.edited ? '<span class="tledited" title="Ändrat av dig"></span>' : ""}<span class="tldur num">${dec(s.duration)} s</span>${tags.length ? `<span class="tltags">${tags.join(" · ")}</span>` : ""}</button>`;
   }).join("");
   const title = (p.effects || {}).title;
   const trLabel = (state.info && state.info.transitions) || {};
@@ -351,6 +352,7 @@ function edInspectorClip(p, s) {
       ${chipBtn("data-edspeed", "fast", "Snabbspola 2×", speedMode === "fast")}${chipBtn("data-edspeed", "freeze", "Frys slutet", speedMode === "freeze")}</div></div>
     <div class="stack" style="gap:8px"><span class="flabel">Effekt</span><div class="chips">
       ${chipBtn("data-edfx", "none", "Ingen", effect === "none")}${chipBtn("data-edfx", "zoom", "Långsam zoom", effect === "zoom")}${chipBtn("data-edfx", "punch", "Zoomryck", effect === "punch")}</div></div>`}
+    ${fitSection(p, s)}
     <div class="stack" style="gap:8px"><span class="flabel">Motivet i bilden</span>
       <span class="muted" style="font-size:12px">Klicka i originalbilden till vänster för att flytta utsnittet.</span>
       ${s.manual_center ? `<button class="btn small" data-act="ed-autocenter">${svgi(ICO.target, 14)}Låt AI följa motivet igen</button>` : ""}</div>
@@ -368,6 +370,30 @@ function edInspectorClip(p, s) {
       <input class="field" id="edTxtSub" value="${esc((s.text || {}).sub || "")}" maxlength="60" placeholder="Andra raden, t.ex. latinskt namn">
       <div class="row"><button class="btn small" data-act="ed-text">Spara text</button>${s.text ? '<button class="btn small" data-act="ed-text-clear">Ta bort</button>' : ""}</div></div>
 `;
+}
+
+const FIT_BG = [["blur", "Suddig"], ["black", "Svart"], ["white", "Vit"], ["sand", "Sand"], ["ocean", "Havsblå"]];
+function fitLabel(z) {
+  if (Math.abs(z - 1) < 0.01) return "Fyller bilden";
+  if (z <= 0.01) return "Hela bilden";
+  return z < 1 ? `Utzoomat ${Math.round((1 - z) * 100)} %` : `Inzoomat ${Math.round((z - 1) * 100)} %`;
+}
+function fitSection(p, s) {
+  const f = s.fit || {};
+  const z = f.zoom ?? 1;
+  const bg = f.bg || "blur";
+  const custom = bg.startsWith("0x") ? `#${bg.slice(2)}` : "#000000";
+  return `<div class="stack" style="gap:8px"><div class="spread" style="align-items:center"><span class="flabel">Inpassning${f.auto ? ' <span class="badge" style="position:static">AI</span>' : ""}</span>
+      <button class="btn small" data-act="ed-fit-auto" title="AI zoomar ut om motivet inte ryms">Låt AI välja</button></div>
+    <div class="row" style="flex-wrap:nowrap;gap:8px"><span class="muted" style="font-size:12px">Hela</span>
+      <input type="range" min="0" max="1.8" step="0.02" value="${z}" data-edfit aria-label="Zooma ut eller in" list="fitTicks" style="flex:1 1 auto;accent-color:var(--accent)">
+      <datalist id="fitTicks"><option value="1"></option></datalist>
+      <span class="muted" style="font-size:12px">Tajt</span></div>
+    <span class="muted num" style="font-size:12px" data-edfitval>${fitLabel(z)}</span>
+    ${z < 0.99 ? `<div class="chips">${FIT_BG.map(([k, l]) => chipBtn("data-edfitbg", k, l, bg === k)).join("")}
+      <label class="chip" style="gap:6px;cursor:pointer">Färg<input type="color" data-edfitcolor value="${custom}" style="width:22px;height:18px;border:0;padding:0;background:none"></label></div>` : ""}
+    <div class="row" style="gap:6px"><button class="btn small" data-act="ed-fit-fill">Fyll bilden</button><button class="btn small" data-act="ed-fit-whole">Hela bilden</button>
+      <button class="btn small" data-act="ed-fit-all">Samma på alla klipp</button></div></div>`;
 }
 
 function encSlider(g, k, label) {
@@ -535,16 +561,7 @@ function viewEdit() {
         <button class="btn primary" data-export="${p.id}">Exportera</button></div></div>
     <div class="edgrid">
       <section class="edstage">
-        <div class="edviews">
-          <figure class="edfig"><figcaption>I filmen</figcaption>
-            <div class="edstill" style="aspect-ratio:${p.format.replace(":", "/")}">
-              <img id="edStill" alt="Klippet som det ser ut i filmen" src="${stillUrl(p, i, !state.ed.before)}">
-              <button class="beforebtn" data-act="ed-before" aria-pressed="${state.ed.before}">Före</button></div></figure>
-          ${tab === "clip" ? `<figure class="edfig"><figcaption>Originalbild – klicka för att flytta utsnittet</figcaption>
-            <div class="edsrc" data-edsrc><img alt="Originalbilden" src="${src}"><span class="edring" style="left:${cx * 100}%;top:${cy * 100}%"></span></div></figure>` : ""}
-        </div>
-        ${prev && !busyHere ? `<video class="edvideo" controls playsinline preload="metadata" src="${mediaUrl("renders", prev)}"></video>`
-          : busyHere ? `<div class="progress"><div class="spread" style="font-size:13px"><span class="muted" data-live-text>${esc(job().message || "")}</span><span class="num muted" data-live-pct></span></div><div class="bar"><div data-live-fill style="width:0%"></div></div></div>` : ""}
+        ${edStage(p, i, s, src, cx, cy, tab, prev, busyHere)}
       </section>
       <aside class="edinsp"><div class="seg" role="tablist" style="grid-template-columns:repeat(3,minmax(0,1fr))">${tabs}</div>${inspector}</aside>
     </div>
@@ -552,7 +569,90 @@ function viewEdit() {
   </main>`;
 }
 
-let gradeTimer = null;
+const STAGE_MODES = [["clip", "Klippet"], ["compare", "Före/efter"], ["side", "Sida vid sida"], ["film", "Hela filmen"]];
+function edStage(p, i, s, src, cx, cy, tab, prev, busyHere) {
+  const mode = state.ed.mode || "clip";
+  const ar = p.format.replace(":", "/");
+  const sp = (state.ed.shotPrev || {})[i];
+  const fresh = sp && sp.stamp === state.ed.stamp;
+  const after = stillUrl(p, i, true), before = stillUrl(p, i, false);
+  const busy = state.ed.shotBusy === i;
+  const seg = `<div class="seg stagemodes" role="tablist">${STAGE_MODES.map(([k, l]) => `<button role="tab" data-edmode="${k}" aria-pressed="${mode === k}" aria-selected="${mode === k}">${l}</button>`).join("")}</div>`;
+  const status = busy ? `<span class="stagestat">${icon("spark", 12)}Uppdaterar klippet …</span>` : "";
+  let body = "";
+  if (mode === "clip") {
+    body = `<figure class="edfig"><div class="edstill" style="aspect-ratio:${ar}">
+      ${fresh ? `<video id="edClipVid" src="${mediaUrl("shots", sp.file)}" poster="${after}" autoplay loop playsinline controls></video>`
+        : `<img id="edStill" alt="Klippet som det ser ut i filmen" src="${after}">`}${status}</div>
+      <figcaption>Klipp ${i + 1} som i filmen – effekter, färg, texter och musik. Uppdateras efter varje ändring.</figcaption></figure>`;
+  } else if (mode === "compare") {
+    const x = state.ed.split ?? 50;
+    body = `<figure class="edfig"><div class="edstill cmp" style="aspect-ratio:${ar}" data-cmp>
+      <img alt="Före" src="${before}"><img id="edStill" class="after" alt="Efter" src="${after}" style="clip-path:inset(0 0 0 ${x}%)">
+      <span class="cmpline" style="left:${x}%"></span><span class="cmptag l">Före</span><span class="cmptag r">Efter</span>
+      <input type="range" min="0" max="100" value="${x}" data-cmpx aria-label="Dra för att jämföra före och efter"></div>
+      <figcaption>Dra över bilden: vänster om linjen är originalet, höger är resultatet.</figcaption></figure>`;
+  } else if (mode === "side") {
+    const proxy = sp && sp.proxy;
+    const t0 = s.src_start, t1 = s.src_start + s.duration * ((s.fx || {}).speed || 1);
+    body = `<div class="sidebyside">
+      <figure class="edfig"><figcaption>Original</figcaption><div class="edorig">
+        ${proxy ? `<video id="edOrigVid" src="${mediaUrl("proxies", proxy)}#t=${t0.toFixed(2)},${t1.toFixed(2)}" muted playsinline autoplay data-loop="${t0},${t1}"></video>` : `<img alt="" src="${src}">`}</div></figure>
+      <figure class="edfig"><figcaption>I filmen</figcaption><div class="edstill" style="aspect-ratio:${ar}">
+        ${fresh ? `<video id="edClipVid" src="${mediaUrl("shots", sp.file)}" poster="${after}" autoplay loop playsinline muted></video>` : `<img id="edStill" alt="" src="${after}">`}${status}</div></figure></div>`;
+  } else {
+    body = prev && !busyHere ? `<video class="edvideo" controls playsinline preload="metadata" src="${mediaUrl("renders", prev)}?v=${p.renders.v || 0}"></video>`
+      : busyHere ? `<div class="progress"><div class="spread" style="font-size:13px"><span class="muted" data-live-text>${esc(job().message || "")}</span><span class="num muted" data-live-pct></span></div><div class="bar"><div data-live-fill style="width:0%"></div></div></div>`
+      : `<div class="empty" style="padding:28px">Filmen har ändrats sedan den senaste förhandsvisningen.<br><button class="btn primary" data-preview="${p.id}" style="margin-top:12px">${icon("play", 14)}Förhandsvisa hela filmen</button></div>`;
+  }
+  if (mode === "side") setTimeout(wireOrigLoop, 0);
+  const source = tab === "clip" && mode !== "side" && mode !== "film" ? `<figure class="edfig"><figcaption>Originalbild – klicka för att flytta utsnittet</figcaption>
+      <div class="edsrc" data-edsrc><img alt="Originalbilden" src="${src}"><span class="edring" style="left:${cx * 100}%;top:${cy * 100}%"></span></div></figure>` : "";
+  return `${seg}<div class="edviews">${body}${source}</div>`;
+}
+
+/* Förhandsvisning av det valda klippet: görs automatiskt efter varje ändring (bara den senaste räknas) */
+let shotTimer = null, shotToken = 0;
+function requestShotPreview(delay = 350) {
+  clearTimeout(shotTimer);
+  shotTimer = setTimeout(runShotPreview, delay);
+}
+async function runShotPreview() {
+  const p = edProp();
+  if (!p || state.view !== "edit") return;
+  const i = state.ed.i, stamp = state.ed.stamp, token = ++shotToken;
+  const have = (state.ed.shotPrev || {})[i];
+  if (have && have.stamp === stamp) return;
+  state.ed.shotBusy = i;
+  paintStage();
+  try {
+    const r = await api("POST", `/api/p/${state.pid}/proposal/${p.id}/shotpreview`, { i });
+    if (token !== shotToken || state.ed.stamp !== stamp) return;
+    state.ed.shotPrev = Object.assign({}, state.ed.shotPrev, { [i]: { file: r.file, proxy: r.proxy, stamp } });
+  } catch (e) {
+    if (token === shotToken) toast(e.message || String(e));
+  } finally {
+    if (token === shotToken) { state.ed.shotBusy = null; paintStage(); }
+  }
+}
+function paintStage() {
+  const p = edProp();
+  const st = document.querySelector(".edstage");
+  if (!p || !st || state.view !== "edit") return;
+  const i = Math.min(state.ed.i, p.shots.length - 1);
+  const s = p.shots[i];
+  const src = frameUrl(s.clip_id, s.src_start + Math.min(s.duration, 1.5) * ((s.fx || {}).speed || 1), 640);
+  st.innerHTML = edStage(p, i, s, src, s.cx ?? 0.5, s.cy ?? 0.5, state.ed.tab, p.renders && p.renders.preview, running(`render:preview:${p.id}`));
+  wireOrigLoop();
+}
+function wireOrigLoop() {
+  const v = document.getElementById("edOrigVid");
+  if (!v || !v.dataset.loop) return;
+  const [a, b] = v.dataset.loop.split(",").map(Number);
+  v.addEventListener("timeupdate", () => { if (v.currentTime >= b - 0.05) { v.currentTime = a; v.play().catch(() => {}); } });
+}
+
+let gradeTimer = null, fitTimer = null;
 function onGradeInput(key, value) {
   const p = edProp();
   if (!p) return;
@@ -613,8 +713,11 @@ document.addEventListener("click", async (ev) => {
   if (d.dvoff) return diveOffset(Number(d.dvoff));
   if (d.edit) return openEditor(d.edit);
   if (d.ovsel) { state.ed.ov = d.ovsel; state.ed.tab = "text"; }
-  if (d.edshot !== undefined) { state.ed.i = Number(d.edshot); state.ed.alts = null; return render(); }
+  if (d.preview && state.view === "edit") state.ed.mode = "film";
+  if (d.edshot !== undefined) { state.ed.i = Number(d.edshot); state.ed.alts = null; render(); return requestShotPreview(150); }
   if (d.edtab) { state.ed.tab = d.edtab; return render(); }
+  if (d.edmode) { state.ed.mode = d.edmode; paintStage(); document.querySelectorAll("[data-edmode]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.edmode === d.edmode))); return requestShotPreview(0); }
+  if (d.edfitbg) return edit("fit", { i: state.ed.i, bg: d.edfitbg });
   if (d.edtrim) { const s = edProp().shots[state.ed.i]; return edit("trim", { i: state.ed.i, duration: s.duration + Number(d.edtrim) }); }
   if (d.edspeed) return edit("speed", { i: state.ed.i, mode: d.edspeed });
   if (d.edfx) return edit("fx", { i: state.ed.i, effect: d.edfx });
@@ -672,7 +775,14 @@ document.addEventListener("click", async (ev) => {
     case "ed-text": return edit("text", { i: state.ed.i, kind: $("#edTxtKind").value, text: $("#edTxt").value, sub: $("#edTxtSub").value });
     case "ed-text-clear": return edit("text", { i: state.ed.i, text: "" });
     case "ed-title-clear": return edit("title", { text: "" });
-    case "ed-before": return undefined;  // hålls in, se pointerdown/pointerup
+    case "ed-fit-auto": return edit("fit", { i: state.ed.i, auto: true });
+    case "ed-fit-fill": return edit("fit", { i: state.ed.i, zoom: 1 });
+    case "ed-fit-whole": return edit("fit", { i: state.ed.i, zoom: 0 });
+    case "ed-fit-all": {
+      const f = edProp().shots[state.ed.i].fit || { zoom: 1, bg: "blur" };
+      await edit("fit", { all: true, zoom: f.zoom ?? 1, bg: f.bg || "blur" });
+      return toast("Samma inpassning på alla klipp.", true);
+    }
     case "ed-alts":
       state.ed.alts = "loading"; render();
       try { state.ed.alts = (await api("POST", `/api/p/${state.pid}/proposal/${state.ed.prop}/alternatives`, { i: state.ed.i })).alternatives; } catch (e) { state.ed.alts = null; fail(e); }
@@ -685,6 +795,21 @@ document.addEventListener("input", (ev) => {
   const t = ev.target;
   if (t.dataset.promo && state.ed.promo) { state.ed.promo[t.dataset.promo] = t.type === "checkbox" ? t.checked : t.value; return undefined; }
   if (t.dataset.edgrade) return onGradeInput(t.dataset.edgrade, t.value);
+  if (t.dataset.cmpx !== undefined) {
+    state.ed.split = Number(t.value);
+    const box = t.closest("[data-cmp]");
+    box.querySelector(".after").style.clipPath = `inset(0 0 0 ${t.value}%)`;
+    box.querySelector(".cmpline").style.left = `${t.value}%`;
+    return undefined;
+  }
+  if (t.dataset.edfit !== undefined) {
+    const z = Number(t.value);
+    const v = document.querySelector("[data-edfitval]");
+    if (v) v.textContent = fitLabel(z);
+    clearTimeout(fitTimer);
+    fitTimer = setTimeout(() => edit("fit", { i: state.ed.i, zoom: z }, { quiet: Math.abs(z - 1) > 0.01 && !!(edProp().shots[state.ed.i].fit) }), 300);
+    return undefined;
+  }
   if (t.dataset.edlen !== undefined) { const v = document.querySelector("[data-edlenval]"); if (v) v.textContent = `${dec(Number(t.value))} s`; }
   if (t.dataset.cam) { const v = document.querySelector(`[data-camval="${t.dataset.cam}"]`); if (v) v.textContent = `${t.value}°`; }
   return undefined;
@@ -695,6 +820,7 @@ document.addEventListener("change", (ev) => {
   const d = t.dataset;
   if (d.edlen !== undefined) return edit("trim", { i: state.ed.i, duration: Number(t.value) });
   if (d.edtr !== undefined) return edit("transition", { i: state.ed.i, type: t.value });
+  if (d.edfitcolor !== undefined) return edit("fit", { i: state.ed.i, bg: t.value });
   if (d.edtone !== undefined) { state.ed.tone = t.value; return undefined; }
   if (d.ovf) {
     const id = t.closest("[data-ovid]").dataset.ovid;
@@ -714,13 +840,6 @@ document.addEventListener("change", (ev) => {
   return undefined;
 });
 
-/* "Före": håll in för att jämföra */
-document.addEventListener("pointerdown", (ev) => {
-  if (ev.target.closest(".beforebtn")) { state.ed.before = true; refreshStill(); }
-});
-document.addEventListener("pointerup", () => {
-  if (state.ed.before && state.view === "edit") { state.ed.before = false; refreshStill(); }
-});
 
 loadQueue();
 
