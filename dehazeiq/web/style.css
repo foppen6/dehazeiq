@@ -452,3 +452,10 @@ textarea.field { color: var(--text); height: auto; padding: 10px 12px; line-heig
 .edfig { align-items: center; max-width: 100%; }
 .edfig figcaption { max-width: 340px; text-align: center; }
 .edfig > .edstill { flex: none; }
+
+/* förslag: favorit och ta bort */
+.pcard { position: relative; }
+.pcard-tools { position: absolute; top: 12px; right: 12px; display: flex; gap: 6px; z-index: 2; }
+.favbtn[aria-pressed="true"] { color: #FFD84A; border-color: #FFD84A66; background: #FFD84A14; }
+.favbtn[aria-pressed="true"] svg { fill: #FFD84A; }
+.pcard.fav { box-shadow: 0 0 0 1.5px #FFD84A88; }

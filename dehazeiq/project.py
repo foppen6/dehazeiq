@@ -163,7 +163,7 @@ class Project:
             allp = props + self.data.get("proposals", [])
             out, n = [], 0
             for p in allp:
-                if p.get("edited") or n < keep:
+                if p.get("edited") or p.get("favorite") or n < keep:
                     out.append(p)
                     n += 0 if p.get("edited") else 1
             self.data["proposals"] = out
@@ -180,6 +180,20 @@ class Project:
             else:
                 ps.insert(0, prop)
             self.save()
+
+    def delete_proposal(self, prop_id):
+        """Tar bort ett förslag och dess förhandsvisning (exporterade filmer lämnas kvar)."""
+        with _LOCK:
+            self.reload()
+            ps = self.data.get("proposals", [])
+            gone = [p for p in ps if p["id"] == prop_id]
+            self.data["proposals"] = [p for p in ps if p["id"] != prop_id]
+            self.save()
+        for p in gone:
+            prev = (p.get("renders") or {}).get("preview")
+            if prev:
+                (self.dir / "renders" / prev).unlink(missing_ok=True)
+        return bool(gone)
 
     def update_proposal(self, prop_id, **fields):
         with _LOCK:

@@ -157,6 +157,10 @@ skarv), Fotodump och Cinematic reel. Filmtypen *Sociala medier-trender* gör fyr
 Längden väljs direkt i redigeringen (7, 15, 30, 60 eller 90 s), och vid export sparas en
 **omslagsbild** med texterna bredvid filmen – vald bild eller AI:ns bästa.
 
+**Favoriter och ta bort:** varje förslag har en stjärna och en papperskorg. Favoriter hamnar först,
+gallras aldrig bort och kan visas för sig med *Bara favoriter* – bra när man gör många varianter.
+Ta bort frågar en gång till; exporterade filmer ligger kvar.
+
 **Olika filmer eller varianter:** när förslag skapas väljer man om de ska vara *olika filmer med
 olika fokus* (ett djur, detaljerna, ett dyk, rörelse …) eller *varianter av samma film* (samma
 berättelse och i stort sett samma klipp, med olika stil, tempo, färg och musik). Varje förslag har

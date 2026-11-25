@@ -922,6 +922,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"lang": lg, "texts": i18n.localize(prop, lg, _species_map(), free),
                                    "original": i18n.localize(prop, "sv"),
                                    "missing": [t for t in i18n.free_texts(prop, lg) if t not in free]})
+            if verb == "favorite":
+                if not p.proposal(prop_id):
+                    raise ApiError("Förslaget finns inte", HTTPStatus.NOT_FOUND)
+                p.update_proposal(prop_id, favorite=bool(body.get("on", True)))
+                return self._json({"proposal": p.proposal(prop_id)})
+            if verb == "delete":
+                if not p.delete_proposal(prop_id):
+                    raise ApiError("Förslaget finns inte", HTTPStatus.NOT_FOUND)
+                return self._json({"ok": True})
             if verb == "shotpreview":
                 # ett klipp som i filmen, på några sekunder – visas direkt efter varje ändring
                 prop = p.proposal(prop_id)

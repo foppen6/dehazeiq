@@ -933,7 +933,12 @@ function propCard(p, idx) {
   }
   const strip = shots.map((s) => `<img alt="" loading="lazy" style="flex:${s.duration} 1 0" src="${frameUrl(s.clip_id, s.src_start + s.duration / 2, 120)}">`).join("");
   const wide = p.format === "16:9";
-  return `<article class="pcard ${idx === 0 ? "sel" : ""}">
+  const delAsk = state.delAsk === p.id;
+  return `<article class="pcard ${idx === 0 ? "sel" : ""} ${p.favorite ? "fav" : ""}">
+    <div class="pcard-tools">
+      <button class="btn small favbtn" data-propfav="${p.id}" aria-pressed="${!!p.favorite}" title="${p.favorite ? "Ta bort från favoriter" : "Markera som favorit"}">${icon("star", 15)}${p.favorite ? "Favorit" : ""}</button>
+      ${remote() ? "" : `<button class="btn small ${delAsk ? "danger" : "icon"}" data-propdel="${p.id}" aria-label="Ta bort förslaget" title="Ta bort förslaget">${icon("trash", 15)}${delAsk ? "Ta bort?" : ""}</button>`}
+    </div>
     <div class="top" style="${wide ? "flex-direction:column" : ""}">
       <div class="phone" style="width:${w}px;height:${h}px">${phone}</div>
       <div class="info">
@@ -989,8 +994,12 @@ function viewProposals() {
   const s = settings();
   const props = P().proposals || [];
   const planList = planProposals();
-  const shown = planList || state.shown.map(propById).filter(Boolean);
-  const older = planList ? [] : props.filter((p) => !state.shown.includes(p.id));
+  const nFav = props.filter((p) => p.favorite).length;
+  if (!nFav) state.favOnly = false;
+  let shown = state.favOnly ? props.filter((p) => p.favorite) : (planList || state.shown.map(propById).filter(Boolean));
+  const older = planList || state.favOnly ? [] : props.filter((p) => !state.shown.includes(p.id));
+  if (!state.favOnly) shown = shown.filter((p) => p.favorite).concat(shown.filter((p) => !p.favorite));  // favoriter först
+  const favBar = nFav ? `<div class="chips"><button class="chip" data-favonly="1" aria-pressed="${!!state.favOnly}">${icon("star", 13)} Bara favoriter · ${nFav}</button></div>` : "";
   const favs = clips().filter((c) => c.favorite).length;
   const fmt = FORMAT_INFO.find((f) => f.id === s.format);
   const styleSel = STYLE_GROUPS.map(([g, gl]) => {
@@ -1007,12 +1016,12 @@ function viewProposals() {
       <div class="head"><h1>${shown.length ? "Filmförslag" : "Inga förslag ännu"}</h1>
         <p class="lead">${esc(fmt ? fmt.name : s.format)} · ${fmtLong(s.length)} · samma material, olika urval, tempo och rytm.</p></div>
       <div class="row">
-        ${favs ? `<span class="chip-status" style="height:40px;padding:0 14px;border-radius:10px;background:var(--panel-2);border:1px solid var(--line)">${icon("star", 15)} ${favs === 1 ? "1 favorit är låst" : `${favs} favoriter är låsta`}</span>` : ""}
+        ${favs ? `<span class="chip-status" style="height:40px;padding:0 14px;border-radius:10px;background:var(--panel-2);border:1px solid var(--line)">${icon("star", 15)} ${favs === 1 ? "1 favoritklipp är låst" : `${favs} favoritklipp är låsta`}</span>` : ""}
         <button class="btn" data-act="generate" ${generating || running() ? "disabled" : ""}>${icon("redo", 16)}${generating ? "Skapar …" : "Generera nya förslag"}</button>
       </div>
     </div>
     ${promptBar()}
-    ${planTabs() || `<div class="chips"><button class="chip" data-act="setup-project">+ Välj filmtyper: dykfilm, reklam, musikvideo, trailer …</button></div>`}
+    <div class="row" style="gap:10px;align-items:center;flex-wrap:wrap">${planTabs() || `<div class="chips"><button class="chip" data-act="setup-project">+ Välj filmtyper: dykfilm, reklam, musikvideo, trailer …</button></div>`}${favBar}</div>
     <div class="props">${shown.map(propCard).join("") || '<div class="empty">Beskriv filmen ovan, välj filmtyper eller klicka på "Generera nya förslag".</div>'}</div>
     <details class="more" ${state.moreOpen !== false ? "open" : ""} data-more>
       <summary>Stilar, berättelse och effekter för "Generera nya förslag"</summary>
@@ -1168,6 +1177,31 @@ document.addEventListener("click", async (ev) => {
   if (d.ex) return toggleClip(d.ex, "excluded");
   if (d.preview) return renderProp(d.preview, "preview");
   if (d.regen) return regenerate(d.regen);
+  if (d.favonly) { state.favOnly = !state.favOnly; return render(); }
+  if (d.propfav) {
+    const pr = propById(d.propfav);
+    try {
+      const r = await api("POST", `/api/p/${state.pid}/proposal/${d.propfav}/favorite`, { on: !pr.favorite });
+      Object.assign(pr, r.proposal);
+    } catch (e) { fail(e); }
+    return render();
+  }
+  if (d.propdel) {
+    if (state.delAsk !== d.propdel) {  // första trycket frågar, andra tar bort
+      state.delAsk = d.propdel;
+      clearTimeout(state.delTimer);
+      state.delTimer = setTimeout(() => { state.delAsk = null; render(); }, 3500);
+      return render();
+    }
+    state.delAsk = null;
+    try {
+      await api("POST", `/api/p/${state.pid}/proposal/${d.propdel}/delete`, {});
+      P().proposals = (P().proposals || []).filter((x) => x.id !== d.propdel);
+      state.shown = (state.shown || []).filter((x) => x !== d.propdel);
+      toast("Förslaget togs bort.", true);
+    } catch (e) { fail(e); }
+    return render();
+  }
   if (d.export) { state.exportProp = d.export; state.view = "export"; return render(); }
   if (d.pick) { state.exportProp = d.pick; return render(); }
   if (d.res) { state.exportRes = d.res; return render(); }
