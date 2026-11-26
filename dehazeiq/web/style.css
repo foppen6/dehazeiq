@@ -534,3 +534,19 @@ textarea.field { color: var(--text); height: auto; padding: 10px 12px; line-heig
 .updbar span { flex: 1 1 auto; }
 .updbar .btn { flex: none; white-space: nowrap; }
 .drow .btn { white-space: nowrap; flex: none; }
+
+/* tidslinjemarkör */
+.tl { position: relative; }
+.tlruler { position: relative; height: 22px; border-radius: 6px; background: var(--raised); cursor: ew-resize; touch-action: none;
+  user-select: none; overflow: hidden; }
+.tlruler:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tltick { position: absolute; top: 0; bottom: 0; padding-left: 4px; border-left: 1px solid var(--line-2); font-size: 10px;
+  line-height: 22px; color: var(--text-2); white-space: nowrap; pointer-events: none; font-variant-numeric: tabular-nums; }
+.tlcut { position: absolute; bottom: 0; width: 3px; height: 6px; border-radius: 2px; background: var(--dim); pointer-events: none; }
+.tlplayhead { position: absolute; left: 0; top: 0; width: 2px; margin-left: -1px; background: #FF4D5E; z-index: 5; pointer-events: none;
+  box-shadow: 0 0 0 1px rgba(0,0,0,.35); }
+.tlplayhead::after { content: ""; position: absolute; left: -9px; right: -9px; top: 0; bottom: 0; pointer-events: auto; cursor: ew-resize; touch-action: none; }
+.tlphead { position: absolute; top: -2px; left: -7px; width: 16px; height: 14px; background: #FF4D5E; pointer-events: auto; cursor: ew-resize;
+  clip-path: polygon(0 0, 100% 0, 100% 60%, 50% 100%, 0 60%); touch-action: none; }
+#tlTime { font-variant-numeric: tabular-nums; color: var(--text); }
+body.scrubbing, body.scrubbing * { cursor: ew-resize !important; user-select: none; }

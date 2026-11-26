@@ -138,6 +138,11 @@ djupanalysen finns, annars med mallar utifrån vad AI:n känt igen. Allt kan ån
 På tidslinjen dras klippen till ny plats, och verktygsraden ovanför flyttar och tar bort det valda
 klippet (även Delete, Alt+←/→ och Ctrl/Cmd+Z).
 
+**Tidslinjemarkör:** den röda markören visar var i filmen du är. Dra i tidslinjalen ovanför klippen
+(eller i markören) för att spola – bilden följer med, och klippet under markören väljs. Klicka i ett
+klipp för att ställa markören där. Med linjalen markerad: ←/→ flyttar en tiondel, Skift+←/→ en
+sekund, Home/End till början och slutet. Markören följer med när filmen eller klippet spelas.
+
 **Se ändringen direkt:** varje ändring visas på någon sekund som en kort video av just det klippet,
 precis som i filmen (effekter, färg, inpassning, texter och musiken på rätt ställe). Överst väljer man
 *Klippet*, *Före/efter* (dra en linje över bilden: original till vänster, resultat till höger),

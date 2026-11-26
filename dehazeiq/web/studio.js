@@ -300,7 +300,13 @@ async function exportQueued() {
 /* ================= redigering ================= */
 state.ed = { prop: null, i: 0, tab: "clip", scope: "film", alts: null, before: false, stamp: Date.now() };
 const edProp = () => propById(state.ed.prop);
-const stillUrl = (p, i, graded = true, w = 540) => `/api/p/${state.pid}/proposal/${p.id}/still?i=${i}&at=0.45&w=${w}&graded=${graded ? 1 : 0}&s=${state.ed.stamp}`;
+function stillAt(p, i) {
+  if (state.ed.t == null || state.ed.tProp !== p.id || i !== state.ed.i) return 0.45;
+  const st = shotStarts(p), s = p.shots[i];
+  const f = (state.ed.t - st[i]) / (s.duration || 1);
+  return f >= 0 && f <= 1 ? Math.max(0.02, Math.min(0.98, f)) : 0.45;
+}
+const stillUrl = (p, i, graded = true, w = 540) => `/api/p/${state.pid}/proposal/${p.id}/still?i=${i}&at=${stillAt(p, i).toFixed(2)}&w=${w}&graded=${graded ? 1 : 0}&s=${state.ed.stamp}`;
 
 function openEditor(propId) {
   state.ed = { prop: propId, i: 0, tab: "clip", scope: "film", alts: null, mode: "clip", stamp: Date.now() };
@@ -362,12 +368,210 @@ function edTimeline(p) {
       <button class="btn small" data-edmove="1" ${i >= n - 1 ? "disabled" : ""} title="Flytta åt höger (Alt+→)">Flytta${svgi(ICO.right, 14)}</button>
       <button class="btn small danger" data-act="ed-delete" ${n <= 1 ? "disabled" : ""} title="Ta bort klippet (Delete)">${icon("trash", 14)}Ta bort klipp</button>
       <button class="btn small" data-act="ed-undo" title="Ångra (Ctrl/Cmd+Z)">Ångra</button></div>
+    <div class="tltrack"><span class="tllab num" id="tlTime">${fmtTC(curT(p))}</span><div class="tlruler" id="tlRuler" data-scrub tabindex="0" role="slider" aria-label="Tidslinjemarkör – dra för att spola" aria-valuemin="0" aria-valuemax="${total.toFixed(1)}" aria-valuenow="${curT(p).toFixed(1)}"></div></div>
     ${(() => { const ob = ovBars(p, total); return `<div class="tltrack"><span class="tllab">Text</span><div class="tlrow" style="position:relative;height:${ob.lanes * 24}px">${ob.html || '<button class="ovbar empty" data-act="ov-add" style="left:0;width:100%;top:0">+ Lägg till text</button>'}</div></div>`; })()}
     <div class="tltrack"><span class="tllab">Video</span><div class="tlrow">${blocks}</div></div>
     <div class="tltrack"><span class="tllab">Byte</span><div class="tlrow">${trRow}</div></div>
     <div class="tltrack"><span class="tllab">Ljud</span><div class="tlrow"><span class="tlaudio">${p.music_name ? `${esc(p.music_name)} · ${dec(p.bpm, 0)} BPM` : "Originalljud"}</span></div></div>
-    <div class="muted num" style="font-size:12px;text-align:right">${p.shots.length} klipp · ${fmtDur(total)}</div></section>`;
+    <div class="muted num" style="font-size:12px;text-align:right">${p.shots.length} klipp · ${fmtDur(total)}</div>
+    <div class="tlplayhead" id="tlPlayhead" data-scrub aria-hidden="true"><span class="tlphead"></span></div></section>`;
 }
+
+/* ---------- tidslinjemarkör och scrubbing ---------- */
+function shotStarts(p) {
+  let pos = 0;
+  return p.shots.map((s) => { const a = pos; pos += Number(s.duration) || 0; return a; });
+}
+function filmLen(p) { return p.shots.reduce((a, s) => a + (Number(s.duration) || 0), 0); }
+function shotIndexAt(p, t) {
+  const st = shotStarts(p);
+  for (let k = st.length - 1; k >= 0; k--) if (t >= st[k] - 1e-6) return k;
+  return 0;
+}
+// markörens tid: sparad position om den ligger i valt klipp, annars en bit in i valt klipp
+function curT(p) {
+  const st = shotStarts(p), i = Math.min(state.ed.i, p.shots.length - 1), s = p.shots[i];
+  const t = state.ed.t;
+  if (t != null && t >= st[i] - 1e-6 && t <= st[i] + s.duration + 1e-6 && state.ed.tProp === p.id) return t;
+  return st[i] + Math.min(s.duration * 0.45, s.duration);
+}
+function fmtTC(t) {
+  const m = Math.floor(t / 60), sec = t - m * 60;
+  return `${m}:${sec < 10 ? "0" : ""}${sec.toFixed(1).replace(".", ",")}`;
+}
+function tlGeom() {
+  const tl = document.getElementById("edTimeline");
+  const blocks = tl ? [...tl.querySelectorAll(".tlblock")] : [];
+  return { tl, blocks, rects: blocks.map((b) => b.getBoundingClientRect()), box: tl && tl.getBoundingClientRect() };
+}
+function timeToX(p, t, g) {
+  const st = shotStarts(p), k = shotIndexAt(p, t), r = g.rects[k];
+  if (!r) return null;
+  const f = Math.max(0, Math.min(1, (t - st[k]) / (p.shots[k].duration || 1)));
+  return r.left + f * r.width;
+}
+function xToTime(p, x, g) {
+  const st = shotStarts(p), n = g.rects.length;
+  if (!n) return 0;
+  if (x <= g.rects[0].left) return 0;
+  for (let k = 0; k < n; k++) {
+    const r = g.rects[k], next = g.rects[k + 1];
+    const end = next ? next.left : r.right;
+    if (x < end || k === n - 1) {
+      const f = Math.max(0, Math.min(1, (x - r.left) / (r.width || 1)));
+      return Math.min(filmLen(p), st[k] + f * p.shots[k].duration);
+    }
+  }
+  return filmLen(p);
+}
+function drawRuler() {
+  const p = edProp(), ruler = document.getElementById("tlRuler");
+  if (!p || !ruler) return;
+  const g = tlGeom(), rb = ruler.getBoundingClientRect(), total = filmLen(p);
+  const pxPerS = (rb.width || 1) / (total || 1);
+  const step = [0.5, 1, 2, 5, 10, 15, 30, 60].find((x) => x * pxPerS >= 42) || 60;
+  let html = "";
+  for (let t = 0; t <= total + 1e-6; t += step) {
+    const x = timeToX(p, Math.min(t, total - 1e-3), g);
+    if (x == null) continue;
+    html += `<span class="tltick" style="left:${(x - rb.left).toFixed(1)}px">${t >= 60 ? fmtTC(t).replace(/,0$/, "") : (Number.isInteger(t) ? t : t.toFixed(1).replace(".", ","))}${t < 60 ? " s" : ""}</span>`;
+  }
+  shotStarts(p).slice(1).forEach((a) => { const x = timeToX(p, a, g); if (x != null) html += `<span class="tlcut" style="left:${(x - rb.left - 1.5).toFixed(1)}px"></span>`; });
+  ruler.innerHTML = html;
+  placePlayhead(curT(p));
+}
+function placePlayhead(t) {
+  const p = edProp(), ph = document.getElementById("tlPlayhead");
+  if (!p || !ph) return;
+  const g = tlGeom(), x = timeToX(p, t, g), ruler = document.getElementById("tlRuler");
+  if (x == null || !g.box) return;
+  const top = ruler ? ruler.getBoundingClientRect().top - g.box.top : 0;
+  const tracks = g.tl.querySelectorAll(".tltrack");
+  const vid = tracks.length ? tracks[tracks.length - 1].getBoundingClientRect() : null;  // ända ner genom ljudspåret
+  const bottom = vid ? vid.bottom - g.box.top : g.box.height - 30;
+  ph.style.left = `${(x - g.box.left).toFixed(1)}px`;
+  ph.style.top = `${top.toFixed(1)}px`;
+  ph.style.height = `${Math.max(20, bottom - top + 4).toFixed(1)}px`;
+  const lab = document.getElementById("tlTime");
+  if (lab) lab.textContent = fmtTC(t);
+  if (ruler) ruler.setAttribute("aria-valuenow", t.toFixed(1));
+}
+
+// bilden i scenen följer markören (senaste vinner, ingen kö av bilder)
+let scrubImgBusy = false, scrubImgWant = null;
+function scrubStage(p, t, final) {
+  const k = shotIndexAt(p, t), st = shotStarts(p), s = p.shots[k];
+  const local = t - st[k];
+  const film = document.querySelector(".edvideo");
+  if (film) { try { film.pause(); film.currentTime = Math.min(t, (film.duration || t)); } catch (_) { /* */ } return; }
+  const vid = document.getElementById("edClipVid");
+  if (vid && Number(vid.dataset.i) === k && vid.readyState >= 1) {
+    try { vid.pause(); vid.currentTime = Math.min(local, Math.max(0, (vid.duration || local) - 0.04)); } catch (_) { /* */ }
+    return;
+  }
+  if (vid) {  // videon gäller ett annat klipp: visa stillbilder medan man spolar
+    const im = document.createElement("img");
+    im.id = "edStill"; im.alt = ""; im.src = vid.poster || "";
+    vid.replaceWith(im);
+  }
+  const img = document.getElementById("edStill");
+  if (!img) return;
+  const at = Math.max(0.02, Math.min(0.98, local / (s.duration || 1)));
+  const url = `/api/p/${state.pid}/proposal/${p.id}/still?i=${k}&at=${at.toFixed(2)}&w=${final ? 540 : 360}&graded=1&s=${state.ed.stamp}`;
+  scrubImgWant = url;
+  if (scrubImgBusy) return;
+  const load = (u) => {
+    scrubImgBusy = true;
+    const im = new Image();
+    im.onload = im.onerror = () => {
+      scrubImgBusy = false;
+      const cur = document.getElementById("edStill");
+      if (cur && im.complete && im.naturalWidth) cur.src = u;
+      if (scrubImgWant && scrubImgWant !== u) load(scrubImgWant);
+    };
+    im.src = u;
+  };
+  load(url);
+}
+
+function setPlayhead(t, { final = false } = {}) {
+  const p = edProp();
+  if (!p) return;
+  t = Math.max(0, Math.min(filmLen(p) - 0.01, t));
+  state.ed.t = t; state.ed.tProp = p.id;
+  placePlayhead(t);
+  const k = shotIndexAt(p, t);
+  if (k !== state.ed.i) {
+    state.ed.i = k; state.ed.alts = null;
+    document.querySelectorAll("#edTimeline .tlblock").forEach((b, j) => b.classList.toggle("sel", j === k));
+    state.ed.scrubMoved = true;
+  }
+  scrubStage(p, t, final);
+}
+
+let scrubbing = null;
+document.addEventListener("pointerdown", (ev) => {
+  const el = ev.target.closest && ev.target.closest("[data-scrub]");
+  if (!el || state.view !== "edit" || ev.button > 0) return;
+  ev.preventDefault();
+  const p = edProp();
+  if (!p) return;
+  scrubbing = { id: ev.pointerId, el };
+  state.ed.scrubMoved = false;
+  try { el.setPointerCapture(ev.pointerId); } catch (_) { /* */ }
+  document.body.classList.add("scrubbing");
+  setPlayhead(xToTime(p, ev.clientX, tlGeom()));
+});
+document.addEventListener("pointermove", (ev) => {
+  if (!scrubbing || ev.pointerId !== scrubbing.id) return;
+  const p = edProp();
+  if (p) setPlayhead(xToTime(p, ev.clientX, tlGeom()));
+});
+function endScrub(ev) {
+  if (!scrubbing || (ev && ev.pointerId !== scrubbing.id)) return;
+  scrubbing = null;
+  document.body.classList.remove("scrubbing");
+  if (state.ed.scrubMoved) { state.ed.scrubMoved = false; render(); requestShotPreview(150); }
+  else { const p = edProp(); if (p) scrubStage(p, state.ed.t, true); }
+}
+document.addEventListener("pointerup", endScrub);
+document.addEventListener("pointercancel", endScrub);
+document.addEventListener("keydown", (ev) => {
+  if (!ev.target.closest || !ev.target.closest("#tlRuler")) return;
+  const p = edProp();
+  if (!p) return;
+  const fps = 1 / 30, d = ev.shiftKey ? 1 : ev.altKey ? fps : 0.1;
+  let t = curT(p);
+  if (ev.key === "ArrowLeft") t -= d; else if (ev.key === "ArrowRight") t += d;
+  else if (ev.key === "Home") t = 0; else if (ev.key === "End") t = filmLen(p);
+  else return;
+  ev.preventDefault(); ev.stopPropagation();
+  const before = state.ed.i;
+  setPlayhead(t, { final: true });
+  if (state.ed.i !== before) { state.ed.scrubMoved = false; render(); requestShotPreview(150); setTimeout(() => { const r = document.getElementById("tlRuler"); if (r) r.focus(); }, 0); }
+}, true);
+window.addEventListener("resize", () => { if (state.view === "edit") drawRuler(); });
+document.addEventListener("scroll", (ev) => { if (state.view === "edit" && ev.target.closest && ev.target.closest("#edTimeline")) requestAnimationFrame(drawRuler); }, true);
+
+// klippets förhandsvisning börjar där markören står
+document.addEventListener("loadedmetadata", (ev) => {
+  const v = ev.target, p = edProp();
+  if (!p || v.id !== "edClipVid" || state.ed.t == null || state.ed.tProp !== p.id) return;
+  const st = shotStarts(p), s = p.shots[state.ed.i];
+  const local = state.ed.t - st[state.ed.i];
+  if (s && local > 0.05 && local < s.duration) { try { v.currentTime = local; } catch (_) { /* */ } }
+}, true);
+
+// markören följer uppspelningen (hela filmen eller valt klipp)
+document.addEventListener("timeupdate", (ev) => {
+  const v = ev.target, p = edProp();
+  if (!p || scrubbing || state.view !== "edit") return;
+  if (v.classList && v.classList.contains("edvideo")) placePlayhead(Math.min(v.currentTime, filmLen(p)));
+  else if (v.id === "edClipVid") {
+    const st = shotStarts(p), s = p.shots[state.ed.i];
+    if (s) placePlayhead(st[state.ed.i] + Math.min(v.currentTime, s.duration));
+  }
+}, true);
 
 function cam360Section(s) {
   const cam = s.cam360 || {};
@@ -758,12 +962,12 @@ function edStage(p, i, s, src, cx, cy, tab, prev, busyHere) {
   let body = "";
   if (mode === "clip" && tab === "text") {
     body = `<figure class="edfig"><div class="edstill placer" style="aspect-ratio:${ar}" data-edplace>
-      ${fresh ? `<video id="edClipVid" src="${mediaUrl("shots", sp.file)}" poster="${after}" autoplay loop muted playsinline></video>`
+      ${fresh ? `<video id="edClipVid" data-i="${i}" src="${mediaUrl("shots", sp.file)}" poster="${after}" autoplay loop muted playsinline></video>`
         : `<img id="edStill" alt="Klicka för att placera texten" src="${after}">`}${status}${p.format !== "16:9" ? '<span class="safezone"></span>' : ""}</div>
       <figcaption>Klicka i bilden för att flytta vald text dit.${p.format !== "16:9" ? " Streckat: där appens knappar inte täcker." : ""}</figcaption></figure>`;
   } else if (mode === "clip") {
     body = `<figure class="edfig"><div class="edstill" style="aspect-ratio:${ar}">
-      ${fresh ? `<video id="edClipVid" src="${mediaUrl("shots", sp.file)}" poster="${after}" autoplay loop playsinline controls></video>`
+      ${fresh ? `<video id="edClipVid" data-i="${i}" src="${mediaUrl("shots", sp.file)}" poster="${after}" autoplay loop playsinline controls></video>`
         : `<img id="edStill" alt="Klippet som det ser ut i filmen" src="${after}">`}${status}</div>
       <figcaption>Klipp ${i + 1} som i filmen – effekter, färg, texter och musik. Uppdateras efter varje ändring.</figcaption></figure>`;
   } else if (mode === "compare") {
@@ -780,7 +984,7 @@ function edStage(p, i, s, src, cx, cy, tab, prev, busyHere) {
       <figure class="edfig"><figcaption>Original</figcaption><div class="edorig">
         ${proxy ? `<video id="edOrigVid" src="${mediaUrl("proxies", proxy)}#t=${t0.toFixed(2)},${t1.toFixed(2)}" muted playsinline autoplay data-loop="${t0},${t1}"></video>` : `<img alt="" src="${src}">`}</div></figure>
       <figure class="edfig"><figcaption>I filmen</figcaption><div class="edstill" style="aspect-ratio:${ar}">
-        ${fresh ? `<video id="edClipVid" src="${mediaUrl("shots", sp.file)}" poster="${after}" autoplay loop playsinline muted></video>` : `<img id="edStill" alt="" src="${after}">`}${status}</div></figure></div>`;
+        ${fresh ? `<video id="edClipVid" data-i="${i}" src="${mediaUrl("shots", sp.file)}" poster="${after}" autoplay loop playsinline muted></video>` : `<img id="edStill" alt="" src="${after}">`}${status}</div></figure></div>`;
   } else {
     body = prev && !busyHere ? `<video class="edvideo" controls playsinline preload="metadata" src="${mediaUrl("renders", prev)}?v=${p.renders.v || 0}"></video>`
       : busyHere ? `<div class="progress"><div class="spread" style="font-size:13px"><span class="muted" data-live-text>${esc(job().message || "")}</span><span class="num muted" data-live-pct></span></div><div class="bar"><div data-live-fill style="width:0%"></div></div></div>`
@@ -843,6 +1047,8 @@ function fitStage() {
   main.style.setProperty("--stageh", `${Math.round(h)}px`);
 }
 window.addEventListener("resize", () => { if (state.view === "edit") fitStage(); });
+const tlObserver = new MutationObserver(() => { if (state.view === "edit" && !scrubbing && document.getElementById("tlRuler") && !document.getElementById("tlRuler").childElementCount) requestAnimationFrame(drawRuler); });
+tlObserver.observe(document.body, { childList: true, subtree: true });
 
 function wireOrigLoop() {
   const v = document.getElementById("edOrigVid");
@@ -916,7 +1122,12 @@ document.addEventListener("click", async (ev) => {
   if (d.ovsel && window.__ovDragged && Date.now() - window.__ovDragged < 400) return undefined;
   if (d.ovsel) { state.ed.ov = d.ovsel; state.ed.tab = "text"; }
   if (d.preview && state.view === "edit") state.ed.mode = "film";
-  if (d.edshot !== undefined) { state.ed.i = Number(d.edshot); state.ed.alts = null; render(); return requestShotPreview(150); }
+  if (d.edshot !== undefined) {
+    state.ed.i = Number(d.edshot); state.ed.alts = null;
+    const p = edProp();
+    if (p && t.classList.contains("tlblock")) { state.ed.t = xToTime(p, ev.clientX, tlGeom()); state.ed.tProp = p.id; }
+    render(); return requestShotPreview(150);
+  }
   if (d.edtab) { state.ed.tab = d.edtab; return render(); }
   if (d.edmode) { state.ed.mode = d.edmode; paintStage(); document.querySelectorAll("[data-edmode]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.edmode === d.edmode))); return requestShotPreview(0); }
   if (d.edfitbg) return edit("fit", { i: state.ed.i, bg: d.edfitbg });
