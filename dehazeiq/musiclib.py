@@ -57,6 +57,59 @@ STYLE_MUSIC = {
 }
 
 
+# Musikgenrer (grova familjer) och vilka som passar varje stil, bäst först
+GENRES = {
+    "ambient": "Ambient", "cinematic": "Filmisk", "piano": "Piano", "acoustic": "Akustisk",
+    "chill": "Chill / lo-fi", "electronic": "Elektronisk", "world": "Världsmusik", "funk": "Funk / soul",
+    "rock": "Rock", "hiphop": "Hiphop", "jazz": "Jazz",
+}
+_GENRE_WORDS = [  # (genre, nyckelord i genretagg, titel, artist eller mapp) – första träffen vinner
+    ("hiphop", r"hip.?hop|rap\b|trap\b|boom.?bap"),
+    ("chill", r"lo.?fi|chill|downtempo|lounge|chillhop"),
+    ("jazz", r"jazz|swing|bossa|blues"),
+    ("funk", r"funk|soul|disco|groove|motown"),
+    ("rock", r"rock|punk|metal|indie|guitar riff|surf"),
+    ("world", r"tropical|reggae|latin|afro|world|ethnic|samba|caribbean|island|ukulele|hawai"),
+    ("piano", r"piano"),
+    ("acoustic", r"acoustic|folk|guitar|country|akustisk|singer.?songwriter"),
+    ("cinematic", r"cinematic|orchestr|epic|trailer|score|soundtrack|film|classical|strings|symphon"),
+    ("ambient", r"ambient|atmospher|drone|meditat|relax|calm|ocean|underwater|space|new.?age"),
+    ("electronic", r"electr|edm|house|techno|synth|dance|dubstep|trance|electro|future bass|beat"),
+]
+STYLE_GENRES = {
+    "calm": ("ambient", "piano", "acoustic", "chill"), "documentary": ("cinematic", "ambient", "piano"),
+    "ambient": ("ambient", "chill", "piano"), "mv_ballad": ("piano", "acoustic", "cinematic"),
+    "promo_premium": ("cinematic", "piano", "chill"), "widescreen": ("cinematic", "ambient", "electronic"),
+    "cinematic": ("cinematic", "ambient", "electronic"), "vintage": ("jazz", "funk", "acoustic"),
+    "minimal": ("chill", "electronic", "piano"), "promo_info": ("acoustic", "chill", "electronic"),
+    "mv_lyrics": ("acoustic", "rock", "funk"), "trailer": ("cinematic", "electronic", "rock"),
+    "vlog": ("acoustic", "chill", "world", "funk"), "playful": ("world", "funk", "acoustic", "electronic"),
+    "promo_experience": ("world", "acoustic", "electronic"), "action": ("electronic", "rock", "hiphop"),
+    "musicvideo": ("electronic", "hiphop", "rock", "funk"), "mv_glitch": ("electronic", "hiphop"),
+    "promo_energy": ("electronic", "rock", "funk"),
+}
+
+
+def genre_of(title="", artist="", tag="", path="", hint=""):
+    """Grov genre ur genretagg, sidecar, titel, artist och mappnamn. '' om okänd."""
+    if hint in GENRES:
+        return hint
+    for text in (tag, f"{title} {artist}", str(path)):
+        t = (text or "").lower()
+        if not t.strip():
+            continue
+        for g, rx in _GENRE_WORDS:
+            if re.search(rx, t):
+                return g
+    return ""
+
+
+def _genre(t):
+    if "genre" in t:
+        return t.get("genre") or ""
+    return genre_of(t.get("title", ""), t.get("artist", ""), "", Path(t.get("path", "")).parent.name)
+
+
 # ---------- licenser ----------
 
 def license_from_code(code, attribution="", url="", source=""):
@@ -126,11 +179,11 @@ def public(lib=None):
         if not Path(t["path"]).exists():
             continue
         tracks.append({k: v for k, v in t.items() if k not in ("beats", "energy", "drops")}
-                      | {"id": tid, "character": character(t)})
+                      | {"id": tid, "character": character(t), "genre": _genre(t), "genre_label": GENRES.get(_genre(t), "")})
     tracks.sort(key=lambda t: (t.get("title") or t["name"]).lower())
     return {"dirs": lib["dirs"], "auto": lib.get("auto", True), "tracks": tracks,
             "starter": lib.get("starter") or {},
-            "license_kinds": LICENSE_KINDS, "sources": [s["name"] for s in custom_sources()]}
+            "license_kinds": LICENSE_KINDS, "genres": GENRES, "sources": [s["name"] for s in custom_sources()]}
 
 
 def track_id(path):
@@ -205,6 +258,10 @@ def scan(progress=None):
         st = f.stat()
         old = known.get(tid)
         if old and old.get("mtime") == st.st_mtime and old.get("size") == st.st_size:
+            if "genre" not in old:  # äldre bibliotek: sätt genre utan att lyssna om
+                side = _sidecar(f)
+                old["genre"] = genre_of(old.get("title", ""), old.get("artist", ""), _tags(f).get("genre", ""),
+                                        f.parent.name, side.get("genre", ""))
             continue
         if progress:
             progress(i / max(1, len(files)), f"Lyssnar på {f.name}")
@@ -227,6 +284,8 @@ def scan(progress=None):
             "duration": info["duration"], "bpm": info["bpm"], "beats": info["beats"], "energy": e,
             "drops": info.get("drops") or [], "mean_energy": round(float(np.mean(e)) if e else 0.5, 3),
             "intensity": intensity(info.get("bpm") or 100, info.get("activity") or 0.0),
+            "genre": genre_of(side.get("title") or tags.get("title") or f.stem, side.get("artist") or tags.get("artist") or "",
+                              tags.get("genre", ""), f.parent.name, side.get("genre", "")),
             "license": lic, "mtime": st.st_mtime, "size": st.st_size, "added": time.time(),
         }
         added += 1
@@ -241,6 +300,35 @@ def scan(progress=None):
     return {"tracks": len(known), "new": added}
 
 
+# ---------- variation: kom ihåg vad AI:n valt på sistone (alla projekt) ----------
+RECENT_MAX = 40
+
+
+def record_use(tid, genre=""):
+    """Sparar att låten valdes, så att nästa film (även i samma omgång) får en annan."""
+    if not tid:
+        return
+    with _lock:
+        lib = _load()
+        rec = [r for r in (lib.get("recent") or []) if isinstance(r, list) and r and r[0] != tid]
+        lib["recent"] = ([[tid, round(time.time(), 1), genre or ""]] + rec)[:RECENT_MAX]
+        _save(lib)
+
+
+def _variety(lib, now=None):
+    """(straff per låt, straff per genre) – senast använda får störst straff."""
+    now = now or time.time()
+    per_track, per_genre = {}, {}
+    for k, r in enumerate(lib.get("recent") or []):
+        if not isinstance(r, list) or not r:
+            continue
+        tid, ts, g = r[0], (r[1] if len(r) > 1 else 0), (r[2] if len(r) > 2 else "")
+        per_track[tid] = max(per_track.get(tid, 0.0), 1.1 * float(np.exp(-k / 8.0)))
+        if g and now - ts < 900:  # samma omgång förslag: sprid ut genrerna
+            per_genre[g] = min(0.6, per_genre.get(g, 0.0) + 0.3)
+    return per_track, per_genre
+
+
 def intensity(bpm, activity):
     """0..1: hur intensiv musiken känns (tempo och hur tätt det händer saker)."""
     a = min(1.0, activity * 5.0)
@@ -253,38 +341,70 @@ def character(t):
     return "Lugn" if i < 0.38 else "Energisk" if i > 0.62 else "Mellan"
 
 
-def pick(style_key, length, commercial=False, avoid=(), seed=None):
-    """Bästa låten i biblioteket för stilen (tempo, energi, längd och licens). None om inget passar."""
+def _fit(style_key, length, t, commercial):
+    """Hur bra låten passar stilen (tempo, energi, längd, genre). None om den inte får användas."""
+    if commercial and not commercial_ok(t.get("license")):
+        return None
+    if (t.get("license") or {}).get("kind") == "unknown" and commercial:
+        return None
+    lo, hi, energy = STYLE_MUSIC.get(style_key, (80, 130, 0.55))
+    bpm = t.get("bpm") or 100
+    # halv/dubbel takt räknas också (60 BPM-ballad passar 120-stil i halvtakt)
+    mid = (lo + hi) / 2
+    d = min(abs(bpm - mid), abs(bpm * 2 - mid) + 12, abs(bpm / 2 - mid) + 12)
+    tempo = max(0.0, 1 - d / 40.0)
+    en = 1 - abs(t.get("intensity", 0.5) - energy) * 1.6
+    dur = 1.0 if t["duration"] >= length else max(0.0, t["duration"] / max(1.0, length)) - 0.3
+    wanted = STYLE_GENRES.get(style_key) or ()
+    g = _genre(t)
+    genre = (0.45 if wanted and g == wanted[0] else 0.32 if g in wanted else 0.12 if not g else 0.0) if wanted else 0.15
+    return tempo + en + dur + genre
+
+
+def ranked(style_key, length=30.0, commercial=False, avoid=(), lib=None):
+    """Alla låtar som får användas, bäst först: (poäng, id, låt). Variation räknas in."""
+    lib = lib or library()
+    per_track, per_genre = _variety(lib)
+    avoid = set(avoid or ())
+    out = []
+    for tid, t in lib["tracks"].items():
+        if not Path(t["path"]).exists():
+            continue
+        f = _fit(style_key, length, t, commercial)
+        if f is None:
+            continue
+        f -= per_track.get(tid, 0.0) + per_genre.get(_genre(t), 0.0)
+        if tid in avoid:  # nyss använd i projektet: helst inte, men hellre den än ingen musik
+            f -= 0.8
+        out.append((round(f, 3), tid, t))
+    out.sort(key=lambda x: -x[0])
+    return out
+
+
+def _music_info(tid, t, auto=True):
+    out = {k: t[k] for k in ("path", "duration", "bpm", "beats", "energy", "drops")}
+    out.update(name=t.get("title") or t["name"], track_id=tid, artist=t.get("artist", ""),
+               license=t.get("license"), credit=credit_line(t), auto=auto, genre=_genre(t))
+    return out
+
+
+def pick(style_key, length, commercial=False, avoid=(), seed=None, record=True):
+    """AI:ns låt för stilen. Väljer slumpvis (viktat) bland låtar som passar och undviker det som
+    nyss använts – i alla projekt och i samma omgång – så att filmerna inte får samma låt."""
     lib = library()
     if not lib.get("auto", True):
         return None
-    lo, hi, energy = STYLE_MUSIC.get(style_key, (80, 130, 0.55))
-    cands = []
-    for tid, t in lib["tracks"].items():
-        if not Path(t["path"]).exists() or tid in avoid:
-            continue
-        if commercial and not commercial_ok(t.get("license")):
-            continue
-        if (t.get("license") or {}).get("kind") == "unknown" and commercial:
-            continue
-        bpm = t.get("bpm") or 100
-        # halv/dubbel takt räknas också (60 BPM-ballad passar 120-stil i halvtakt)
-        mid = (lo + hi) / 2
-        d = min(abs(bpm - mid), abs(bpm * 2 - mid) + 12, abs(bpm / 2 - mid) + 12)
-        tempo = max(0.0, 1 - d / 40.0)
-        en = 1 - abs(t.get("intensity", 0.5) - energy) * 1.6
-        dur = 1.0 if t["duration"] >= length else max(0.0, t["duration"] / max(1.0, length)) - 0.3
-        cands.append((tempo + en + dur, tid, t))
+    cands = ranked(style_key, length, commercial, avoid, lib)
     if not cands:
         return None
-    cands.sort(key=lambda x: -x[0])
+    best = cands[0][0]
+    pool = [c for c in cands if c[0] >= best - 0.7][:12]
+    w = np.exp((np.array([c[0] for c in pool]) - best) / 0.2)
     rng = random.Random(seed)
-    good = [c for c in cands if c[0] >= cands[0][0] - 0.12][:3]  # variation bara mellan låtar som passar
-    _, tid, t = rng.choice(good)
-    out = {k: t[k] for k in ("path", "duration", "bpm", "beats", "energy", "drops")}
-    out.update(name=t.get("title") or t["name"], track_id=tid, artist=t.get("artist", ""),
-               license=t.get("license"), credit=credit_line(t), auto=True)
-    return out
+    _, tid, t = rng.choices(pool, weights=list(w))[0]
+    if record:
+        record_use(tid, _genre(t))
+    return _music_info(tid, t)
 
 
 def track_music(tid):
@@ -292,10 +412,7 @@ def track_music(tid):
     t = library()["tracks"].get(tid)
     if not t or not Path(t["path"]).exists():
         return None
-    out = {k: t[k] for k in ("path", "duration", "bpm", "beats", "energy", "drops")}
-    out.update(name=t.get("title") or t["name"], track_id=tid, artist=t.get("artist", ""),
-               license=t.get("license"), credit=credit_line(t), auto=True)
-    return out
+    return _music_info(tid, t)
 
 
 # ---------- Openverse (gratis, ingen nyckel) ----------
@@ -485,7 +602,7 @@ def download(item):
     tmp.replace(dst)
     Path(str(dst) + ".json").write_text(json.dumps({
         "title": item.get("title"), "artist": item.get("artist"), "license": item.get("license"),
-        "page": item.get("page"), "downloaded": time.time()}, ensure_ascii=False), "utf-8")
+        "genre": item.get("genre") or "", "page": item.get("page"), "downloaded": time.time()}, ensure_ascii=False), "utf-8")
     with _lock:
         lib = _load()
         if str(DOWNLOAD_DIR) not in lib["dirs"]:
@@ -496,19 +613,31 @@ def download(item):
 
 # ---------- startpaket: gratis musik direkt från början ----------
 
-STARTER = [  # (sökord, karaktär) – några låtar av varje sort så att AI:n har något att välja mellan
-    ("Kevin MacLeod calm", "lugn"), ("ambient music relaxing", "lugn"), ("acoustic guitar instrumental", "mellan"),
-    ("cinematic orchestral", "mellan"), ("Kevin MacLeod upbeat", "energisk"), ("electronic dance instrumental", "energisk"),
+STARTER = [  # (sökord, genre) – flera sorters musik så att filmerna inte låter likadant
+    ("Kevin MacLeod calm", "ambient"), ("ambient music relaxing", "ambient"), ("acoustic guitar instrumental", "acoustic"),
+    ("cinematic orchestral", "cinematic"), ("Kevin MacLeod upbeat", "funk"), ("electronic dance instrumental", "electronic"),
 ]
+STARTER_V2 = [  # påfyllning (version 2): fler genrer
+    ("piano solo", "piano"), ("lofi hip hop", "chill"), ("chillout lounge", "chill"), ("tropical", "world"),
+    ("reggae instrumental", "world"), ("jazz instrumental", "jazz"), ("funk", "funk"), ("rock instrumental", "rock"),
+    ("hip hop beat", "hiphop"), ("synthwave", "electronic"), ("epic trailer music", "cinematic"),
+    ("folk acoustic", "acoustic"), ("underwater ambient", "ambient"), ("house music", "electronic"),
+]
+STARTER_VERSION = 2
 
 
-def starter_pack(progress=None, per_query=2):
-    """Hämtar en liten uppsättning gratis musik (CC0 och CC BY, får användas även i reklam)
-    från Openverse till biblioteket och läser in den. Körs automatiskt när biblioteket är tomt."""
+def starter_pack(progress=None, per_query=2, queries=None):
+    """Hämtar en uppsättning gratis musik (CC0 och CC BY, får användas även i reklam)
+    från Wikimedia Commons/Openverse till biblioteket och läser in den. Körs automatiskt när
+    biblioteket är tomt, och fyller på med fler genrer när startpaketet uppdateras."""
+    lib0 = library()
+    first = not (lib0.get("starter") or {}).get("done")
+    queries = queries or ((STARTER + STARTER_V2) if first else STARTER_V2)
+    have = {Path(t["path"]).stem.lower() for t in lib0["tracks"].values()}
     got, errors, seen = [], [], set()
-    for k, (q, _) in enumerate(STARTER):
+    for k, (q, genre) in enumerate(queries):
         if progress:
-            progress(k / len(STARTER) * 0.6, f"Hämtar gratis musik: {q}")
+            progress(k / len(queries) * 0.6, f"Hämtar gratis musik: {q}")
         res = []
         for fn in (commons_search, openverse_search):  # Commons först (stabil), Openverse som reserv
             try:
@@ -525,21 +654,26 @@ def starter_pack(progress=None, per_query=2):
                 continue
             if r["duration"] and not (45 <= r["duration"] <= 360):
                 continue
+            if re.sub(r"[^\w\- ]", "", r.get("title") or "").strip().lower() in have:
+                continue
             try:
-                got.append(download(dict(r, source="Gratis startpaket")))
+                got.append(download(dict(r, source="Gratis startpaket", genre=genre)))
                 seen.add(r["id"])
                 n += 1
             except Exception as e:  # noqa: BLE001
                 errors.append(f"{r['title']}: {e.__class__.__name__}")
     with _lock:
         lib = _load()
-        lib["starter"] = {"done": bool(got), "count": len(got), "errors": errors[:5], "time": time.time()}
+        old = lib.get("starter") or {}
+        lib["starter"] = {"done": bool(got) or bool(old.get("done")), "count": int(old.get("count") or 0) + len(got),
+                          "errors": errors[:5], "time": time.time(),
+                          "v": STARTER_VERSION if got else old.get("v", 1)}
         if str(DOWNLOAD_DIR) not in lib["dirs"]:
             lib["dirs"].append(str(DOWNLOAD_DIR))
         _save(lib)
     if got:
         scan(lambda f, m: progress(0.6 + 0.4 * f, m) if progress else None)
-    if not got:
+    if not got and first:
         why = f" ({errors[0]})" if errors else ""
         raise RuntimeError(f"Kunde inte hämta gratis musik{why}. Kontrollera internetanslutningen och försök igen under Musik.")
     return {"downloaded": len(got)}
@@ -549,4 +683,9 @@ def needs_starter():
     lib = library()
     real = [t for t in lib["tracks"].values() if Path(t["path"]).exists()]
     st = lib.get("starter") or {}
-    return not real and not st.get("done") and time.time() - st.get("time", 0) > 3600
+    if time.time() - st.get("time", 0) < 3600:
+        return False
+    if not real and not st.get("done"):
+        return True
+    # tidigare startpaket (få låtar, samma sort): fyll på med fler genrer en gång
+    return bool(st.get("done")) and st.get("v", 1) < STARTER_VERSION and len(real) < 40

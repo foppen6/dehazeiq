@@ -531,6 +531,9 @@ function renderTop() {
 }
 
 /* ---------- vy: importera ---------- */
+const GENRE_SV = { ambient: "Ambient", cinematic: "Filmisk", piano: "Piano", acoustic: "Akustisk", chill: "Chill / lo-fi",
+  electronic: "Elektronisk", world: "Världsmusik", funk: "Funk / soul", rock: "Rock", hiphop: "Hiphop", jazz: "Jazz" };
+
 function statusCell(c) {
   if (c.offline && !remote()) return `<span class="row" style="gap:6px;flex-wrap:nowrap"><span class="st-bad" title="${esc(c.path || "")}">Original saknas</span><button class="btn small" data-relink="${esc(c.id)}" title="Leta upp originalfilen – övriga i samma mapp hittas automatiskt">Hitta filen</button></span>`;
   if (c.offline) return '<span class="st-bad">Original saknas</span>';
@@ -966,7 +969,7 @@ function propCard(p, idx) {
           <div><dt>Klipp</dt><dd class="num">${p.n_shots}</dd></div>
           <div><dt>Snittlängd</dt><dd class="num">${dec(p.avg_shot)} s</dd></div>
           <div><dt>Längd</dt><dd class="num">${fmtDur(p.length)}</dd></div>
-          <div><dt>Musik</dt><dd>${p.music_name ? `${esc(p.music_name)} · ${dec(p.bpm, 0)} BPM${p.music_auto ? " · vald av AI" : ""}` : "Originalljud"}${p.music_license && p.music_license.kind === "private" && isPromo(p) ? '<br><span style="color:var(--warn)">Licensen gäller bara privat bruk</span>' : ""}</dd></div>
+          <div><dt>Musik</dt><dd>${p.music_name ? `${esc(p.music_name)} · ${dec(p.bpm, 0)} BPM${GENRE_SV[p.music_genre] ? ` · ${GENRE_SV[p.music_genre]}` : ""}${p.music_auto ? " · vald av AI" : ""}` : "Originalljud"}${p.music_license && p.music_license.kind === "private" && isPromo(p) ? '<br><span style="color:var(--warn)">Licensen gäller bara privat bruk</span>' : ""}</dd></div>
           <div style="grid-column:1/-1"><dt>Effekter</dt><dd>${esc(effectList(p).join(" · ") || (p.effects ? "Raka klipp" : "–"))}</dd></div>
         </dl>
       </div>

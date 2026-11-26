@@ -275,11 +275,16 @@ ett 360-svep och en barrel roll (slås av under Effekter › 360-effekter).
 
 ## Musik
 
-AI:n väljer en låt ur **musikbiblioteket** som passar varje film (tempo, intensitet och längd) när
-projektet inte har en vald låt. Biblioteket är en eller flera mappar på datorn – egen musik eller
+AI:n väljer en låt ur **musikbiblioteket** som passar varje film (genre, tempo, intensitet och längd) när
+projektet inte har en vald låt. Den **växlar mellan låtar och genrer**: senast använda låtar (i alla
+projekt) får lägre prioritet, förslag i samma omgång får olika genrer, och valet slumpas bland
+låtarna som passar. I redigeraren finns **Musik**-menyn: välj en egen låt ur biblioteket eller
+*Annan låt (AI väljer)* – klippen behålls och flyttas till den nya låtens takt (går att ångra). Biblioteket är en eller flera mappar på datorn – egen musik eller
 nedladdat från valfri tjänst (Epidemic Sound, Artlist, Pixabay, YouTube Audio Library …).
-Första gången programmet startar hämtas ett **gratis startpaket** från Wikimedia Commons (ett
-tiotal låtar, lugna till energiska, CC0 och CC BY – får användas även i reklam) så att AI:n har musik att välja direkt.
+Första gången programmet startar hämtas ett **gratis startpaket** från Wikimedia Commons (runt 40
+låtar i många genrer – ambient, filmiskt, piano, akustiskt, lo-fi, tropiskt, jazz, funk, rock, hiphop,
+elektroniskt – CC0 och CC BY, får användas även i reklam). Har du det gamla, mindre startpaketet
+fylls det på automatiskt en gång; knappen **Fler genrer** under Musik gör samma sak.
 Under **Musik** går det också att söka och hämta gratis musik med öppen licens via Openverse
 (Jamendo, Freesound, Wikimedia Commons m.fl.), med filter för musik som får användas i reklam.
 

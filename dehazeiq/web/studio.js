@@ -209,6 +209,29 @@ function lengthSelect(p) {
     ${opts.sort((a, b) => a - b).map((s) => `<option value="${s}" ${s === cur ? "selected" : ""}>${s} s</option>`).join("")}</select></label>`;
 }
 
+function musicSelect(p) {
+  if (p.style === "ambient" && !p.music) return "";  // stilen använder originalljudet
+  const lib = (state.music && state.music.tracks) || [];
+  if (!state.music && !state.musicLoading) { state.musicLoading = true; loadMusic().then(() => { if (state.view === "edit") render(); }); }
+  const cur = p.music_track || "";
+  const byGenre = {};
+  lib.forEach((t) => { (byGenre[t.genre_label || "Övrigt"] = byGenre[t.genre_label || "Övrigt"] || []).push(t); });
+  const groups = Object.keys(byGenre).sort().map((g) => `<optgroup label="${esc(g)}">${byGenre[g].map((t) => `<option value="${esc(t.id)}" ${t.id === cur ? "selected" : ""}>${esc(t.title || t.name)} · ${dec(t.bpm, 0)} BPM</option>`).join("")}</optgroup>`).join("");
+  const other = p.music && !cur ? `<option value="" selected>${esc(p.music_name || "Egen låt")}</option>` : "";
+  return `<label class="platsel"><span class="sr">Musik</span><select data-propmusic="${p.id}" title="Byt låt – klippen behålls och flyttas till takten">
+    ${other}${!p.music ? '<option value="" selected>Ingen musik</option>' : ""}
+    <option value="auto">🎲 Annan låt (AI väljer)</option>${groups}
+    ${p.music ? '<option value="none">Ingen musik</option>' : ""}</select></label>`;
+}
+
+async function changeMusic(propId, track) {
+  if (!track) return;
+  state.ed.prop = propId;
+  await edit("music", { track });
+  const p = propById(propId);
+  toast(p && p.music_name ? `Musik: ${p.music_name}${p.music_genre && state.music && state.music.genres ? ` (${state.music.genres[p.music_genre] || ""})` : ""}` : "Ingen musik", true);
+}
+
 async function changeLength(propId, length) {
   const p = propById(propId);
   const pfs = platforms();
@@ -706,7 +729,7 @@ function viewEdit() {
   return `<main class="main wide edmain">
     <div class="spread edhead"><div class="head"><h1>${esc(p.title || p.style_label)}</h1>
       <p class="lead">${esc(p.style_label)} · ${p.platform ? `${esc(platformLabel(p.platform))} · ` : ""}${p.format} · ${fmtDur(p.length)}</p></div>
-      <div class="row">${platformSelect(p)}${lengthSelect(p)}<button class="btn" data-act="ed-undo" ${(p.undo_n || (p.history || []).length) ? "" : "disabled"}>${svgi(ICO.undo, 16)}Ångra</button>
+      <div class="row">${platformSelect(p)}${lengthSelect(p)}${musicSelect(p)}<button class="btn" data-act="ed-undo" ${(p.undo_n || (p.history || []).length) ? "" : "disabled"}>${svgi(ICO.undo, 16)}Ångra</button>
         ${prev ? "" : `<button class="btn" data-preview="${p.id}" ${busyHere ? "disabled" : ""}>${icon("play", 14)}${busyHere ? "Renderar …" : "Förhandsvisa filmen"}</button>`}
         <button class="btn primary" data-export="${p.id}">Exportera</button></div></div>
     <div class="edgrid">
@@ -1072,6 +1095,7 @@ document.addEventListener("change", (ev) => {
   if (d.edstab !== undefined) { const g = curGrade(edProp()); g.stabilize = t.checked; stageGrade(g); return render(); }
   if (d.edlang !== undefined) { state.ed.lang = t.value; state.ed.texts = null; return render(); }
   if (d.platform) return changePlatform(d.platform, t.value);
+  if (d.propmusic) return changeMusic(d.propmusic, t.value);
   if (d.ftplat) { const pl = state.setup.plans[d.ftplat]; pl.platform = t.value; pl.length = null; return render(); }
   if (d.ftlen) { state.setup.plans[d.ftlen].length = Number(t.value); return undefined; }
   if (d.ftcount) { state.setup.plans[d.ftcount].count = Number(t.value); return undefined; }
@@ -1197,7 +1221,7 @@ function viewMusic() {
   const busy = (state.queue.tasks || []).some((t) => t.pid === "_music");
   const tracks = m.tracks.map((t) => `<div class="mrow">
       <button class="btn icon small" data-mplay="/api/music/file?id=${t.id}" aria-label="Spela">${playing(`/api/music/file?id=${t.id}`) ? svgi(ICO.pause, 14) : icon("play", 13)}</button>
-      <div class="stack" style="gap:2px;min-width:0;flex:1 1 220px"><b class="ell">${esc(t.title || t.name)}</b><span class="muted ell" style="font-size:12px">${esc(t.artist || "")}${t.artist ? " · " : ""}${fmtDur(t.duration)} · ${dec(t.bpm, 0)} BPM · ${esc(t.character || "")}</span></div>
+      <div class="stack" style="gap:2px;min-width:0;flex:1 1 220px"><b class="ell">${esc(t.title || t.name)}</b><span class="muted ell" style="font-size:12px">${esc(t.artist || "")}${t.artist ? " · " : ""}${fmtDur(t.duration)} · ${dec(t.bpm, 0)} BPM · ${esc(t.character || "")}${t.genre_label ? ` · ${esc(t.genre_label)}` : ""}</span></div>
       <select class="selfield" data-mlic="${t.id}" aria-label="Licens" style="width:auto;max-width:210px">${Object.entries(kinds).map(([k, l]) => `<option value="${k}" ${((t.license || {}).kind || "own") === k ? "selected" : ""} title="${esc(l)}">${esc(LIC_SHORT[k])}</option>`).join("")}</select>
       ${P() ? `<button class="btn small" data-muse="${t.id}">${pm && pm.track_id === t.id ? "Används" : "Använd i projektet"}</button>` : ""}</div>`).join("");
   const sr = state.msearch;
@@ -1206,18 +1230,19 @@ function viewMusic() {
       <div class="stack" style="gap:2px;min-width:0;flex:1 1 220px"><b class="ell">${esc(r.title)}</b><span class="muted ell" style="font-size:12px">${esc(r.artist)}${r.duration ? ` · ${fmtDur(r.duration)}` : ""} · ${esc((r.license || {}).source || r.source || "")}</span></div>
       ${licBadge(r.license)}<button class="btn small primary" data-mget="${k}" ${r.got ? "disabled" : ""}>${r.got ? "Hämtad" : "Hämta"}</button></div>`).join("") : "";
   return `<main class="main wide" style="max-width:1100px">
-    <div class="head"><h1>Musik</h1><p class="lead">AI:n väljer en låt som passar varje film (tempo, energi och längd) ur ditt bibliotek. Licensen följer med: namn på upphovspersonen läggs till när det krävs, och reklamfilmer använder bara musik som får användas kommersiellt.</p></div>
+    <div class="head"><h1>Musik</h1><p class="lead">AI:n väljer en låt som passar varje film (genre, tempo, energi och längd) ur ditt bibliotek och växlar mellan låtar och genrer så att filmerna inte låter likadant. Licensen följer med: namn på upphovspersonen läggs till när det krävs, och reklamfilmer använder bara musik som får användas kommersiellt.</p></div>
     <section class="box" style="flex-direction:row;flex-wrap:wrap;align-items:center;gap:14px">
       <label class="row" style="gap:10px;font-size:15px;flex:1 1 300px"><input type="checkbox" data-mauto ${m.auto ? "checked" : ""} style="width:20px;height:20px;accent-color:var(--accent)"><b>AI väljer musik automatiskt</b></label>
       ${P() ? `<span class="muted" style="font-size:13px">${esc(P().name)}: ${pm ? `${esc(pm.name)}${pm.auto === false ? " (vald av dig)" : ""}` : "AI väljer"}</span>
         ${pm ? '<button class="btn small" data-act="music-remove">Låt AI välja</button>' : ""}` : ""}
     </section>
     <section class="stack" style="gap:12px"><div class="spread"><h2>Ditt bibliotek <span class="muted" style="font-weight:400">· ${m.tracks.length} låtar</span></h2>
-      <div class="row">${remote() ? "" : '<button class="btn small" data-act="music-adddir">+ Lägg till mapp</button>'}<button class="btn small" data-act="music-scan" ${busy ? "disabled" : ""}>${busy ? "Läser in …" : "Läs in igen"}</button></div></div>
+      <div class="row">${remote() ? "" : '<button class="btn small" data-act="music-adddir">+ Lägg till mapp</button>'}<button class="btn small" data-act="music-scan" ${busy ? "disabled" : ""}>${busy ? "Läser in …" : "Läs in igen"}</button>${m.tracks.length ? `<button class="btn small" data-act="music-starter" ${busy ? "disabled" : ""} title="Hämtar gratis musik i fler genrer: piano, lo-fi, tropiskt, jazz, funk, rock, hiphop, synthwave …">Fler genrer</button>` : ""}</div></div>
+      ${m.tracks.length ? musicGenreChips(m) : ""}
       <div class="chips">${m.dirs.map((d, k) => `<span class="tag" title="${esc(d)}">${esc(d.split(/[\\\\/]/).filter(Boolean).pop() || d)}${remote() ? "" : ` <button class="linkbtn" data-mdirdel="${k}" aria-label="Ta bort mappen">✕</button>`}</span>`).join("") || '<span class="muted" style="font-size:13px">Inga mappar än. Lägg till mappen där du har din musik – även nedladdat från Epidemic, Artlist, Pixabay eller YouTube Audio Library.</span>'}</div>
       <div class="mlist">${tracks || `<div class="empty" style="padding:22px;display:flex;flex-direction:column;gap:12px;align-items:center">
         <b>Inga låtar i biblioteket än</b>
-        <span class="muted" style="font-size:13px">Hämta ett gratis startpaket med lugn, mellan och energisk musik (CC0 och CC BY – får användas även i reklam), eller lägg till en egen mapp.</span>
+        <span class="muted" style="font-size:13px">Hämta ett gratis startpaket med musik i många genrer – ambient, filmiskt, piano, akustiskt, lo-fi, tropiskt, jazz, funk, rock, hiphop och elektroniskt (CC0 och CC BY – får användas även i reklam), eller lägg till en egen mapp.</span>
         ${m.starter && m.starter.errors && m.starter.errors.length && !m.starter.done ? `<span style="color:var(--warn);font-size:13px">Förra försöket misslyckades: ${esc(m.starter.errors[0])}. Kontrollera internetanslutningen.</span>` : ""}
         <button class="btn primary" data-act="music-starter" ${busy ? "disabled" : ""}>${busy ? "Hämtar …" : "Hämta gratis musik"}</button></div>`}</div></section>
     <section class="stack" style="gap:12px"><h2>Hämta gratis musik</h2>
@@ -1231,6 +1256,14 @@ function viewMusic() {
       <p class="muted" style="margin:0;font-size:12px">Wikimedia Commons och Openverse (Jamendo, Freesound m.fl.) har musik med öppen licens. Sök gärna på engelska, t.ex. "Kevin MacLeod". Musik med CC BY kräver att upphovspersonen namnges – det gör programmet automatiskt i slutet av filmen och i en textfil vid export.</p></section>
     <section class="box"><h2 style="font-size:14px">Andra musiktjänster</h2><p style="margin:0">Har du Epidemic Sound, Artlist eller någon annan tjänst: ladda ner låtarna till en av mapparna ovan så används de som allt annat. Tjänster med eget API kan läggas till med en liten beskrivningsfil (adress och nyckel) i mappen <code>music_sources</code> i DeHazeIQ:s datamapp – se exempelfilen där.</p></section>
   </main>`;
+}
+
+function musicGenreChips(m) {
+  const n = {};
+  m.tracks.forEach((t) => { const g = t.genre_label || "Okänd genre"; n[g] = (n[g] || 0) + 1; });
+  const chips = Object.entries(n).sort((a, b) => b[1] - a[1]).map(([g, c]) => `<span class="tag">${esc(g)} · ${c}</span>`).join("");
+  const few = m.tracks.length < 15 || Object.keys(n).length < 4;
+  return `<div class="chips">${chips}</div>${few ? '<p class="muted" style="margin:0;font-size:13px">AI:n byter låt mellan filmerna, men med få låtar och genrer blir det ändå ofta likt. Tryck <b>Fler genrer</b> eller lägg till en egen mapp.</p>' : ""}`;
 }
 
 async function musicPost(verb, body) {

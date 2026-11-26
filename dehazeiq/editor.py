@@ -20,10 +20,44 @@ class EditError(Exception):
 HISTORY = 25
 
 
+MUSIC_KEYS = ("music", "music_name", "bpm", "music_track", "music_auto", "music_license", "music_credit",
+              "music_genre")
+
+
 def _snapshot(prop):
     return {"shots": copy.deepcopy(prop["shots"]), "grade": copy.deepcopy(prop.get("grade")),
             "effects": copy.deepcopy(prop.get("effects")), "title": prop.get("title"),
-            "overlays": copy.deepcopy(prop.get("overlays")), "match": copy.deepcopy(prop.get("match"))}
+            "overlays": copy.deepcopy(prop.get("overlays")), "match": copy.deepcopy(prop.get("match")),
+            "musicinfo": {k: copy.deepcopy(prop.get(k)) for k in MUSIC_KEYS}}
+
+
+def set_music(project, prop, m):
+    """Byter låt i ett förslag men behåller klippen. Klippgränserna flyttas till närmaste taktslag
+    i den nya låten (högst knappt en halv sekund), så att filmen fortfarande klipps i takt."""
+    for k in MUSIC_KEYS:
+        prop.pop(k, None)
+    prop["music"] = m.get("path") if m else None
+    if not m:
+        return prop
+    prop.update(music_name=m.get("name"), bpm=m.get("bpm"), music_track=m.get("track_id"),
+                music_auto=bool(m.get("auto")), music_license=m.get("license"),
+                music_credit=m.get("credit") or "", music_genre=m.get("genre") or "")
+    beats = sorted(float(b) for b in (m.get("beats") or []))
+    if len(beats) > 4:
+        arr = np.asarray(beats)
+        pos = 0.0
+        for s in prop["shots"]:
+            end = pos + float(s["duration"])
+            j = int(abs(arr - end).argmin())
+            b = float(arr[j])
+            if abs(b - end) <= 0.45 and b - pos >= 0.6:
+                s["duration"] = round(b - pos, 3)
+                fx = s.get("fx") or {}
+                if fx.get("freeze"):
+                    fx["freeze"] = round(min(0.9, s["duration"] * 0.4), 2)
+                _fit_source(project, s)
+            pos += float(s["duration"])
+    return prop
 
 
 def _finish(prop):
@@ -110,6 +144,14 @@ def apply(project, prop, op, args):
                 prop.pop("match", None)
             else:
                 prop["match"] = snap["match"]
+        if "musicinfo" in snap:
+            for k, v in snap["musicinfo"].items():
+                if v is None:
+                    prop.pop(k, None)
+                else:
+                    prop[k] = v
+            if "music" not in prop:
+                prop["music"] = None
         return _finish(prop)
 
     hist = prop.setdefault("history", [])
@@ -127,6 +169,23 @@ def apply(project, prop, op, args):
         if fx.get("freeze"):
             fx["freeze"] = round(min(0.9, s["duration"] * 0.4), 2)
         _fit_source(project, s)
+    elif op == "music":
+        from . import musiclib
+        tid = str(args.get("track") or "auto")
+        if tid == "none":
+            m = None
+        elif tid == "auto":
+            st = STYLES.get(prop.get("style")) or {}
+            m = musiclib.pick(prop.get("style"), prop.get("length") or 30, commercial=bool(st.get("promo")),
+                              avoid=[prop.get("music_track")] if prop.get("music_track") else ())
+            if not m:
+                raise EditError("Musikbiblioteket har ingen annan låt som passar. Lägg till fler under Musik.")
+        else:
+            m = musiclib.track_music(tid)
+            if not m:
+                raise EditError("Låten finns inte längre i biblioteket")
+            m["auto"] = False
+        set_music(project, prop, m)
     elif op == "speed":
         i, s = shot_at()
         fx = s.setdefault("fx", {})

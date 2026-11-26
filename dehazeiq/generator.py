@@ -575,7 +575,8 @@ def generate(project, style_key="cinematic", fmt="9:16", length=30.0, seed=None,
         # ingen låt vald i projektet: AI väljer ur musikbiblioteket (tempo, energi, längd, licens)
         try:
             from . import musiclib
-            recent = [p.get("music_track") for p in (project.data.get("proposals") or [])[:4] if p.get("music_track")]
+            # låtar som redan finns i projektets förslag (straffas, utesluts inte)
+            recent = [p.get("music_track") for p in (project.data.get("proposals") or []) if p.get("music_track")]
             music = musiclib.pick(style_key, length, commercial=bool(style.get("promo")), avoid=recent, seed=seed)
         except Exception:  # noqa: BLE001
             music = None
@@ -653,6 +654,7 @@ def generate(project, style_key="cinematic", fmt="9:16", length=30.0, seed=None,
         "music_name": music.get("name") if music else None,
         "bpm": music.get("bpm") if music else None,
         "music_track": music.get("track_id") if music else None,
+        "music_genre": (music.get("genre") if music else "") or "",
         "music_auto": bool(music and music.get("auto")),
         "music_license": (music.get("license") if music else None),
         "music_credit": (music.get("credit") if music else "") or "",
