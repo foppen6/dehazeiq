@@ -17,7 +17,7 @@ import traceback
 import uuid
 from pathlib import Path
 
-from .config import PROJECTS_DIR, VIDEO_EXT
+from .config import HOME, PROJECTS_DIR, VIDEO_EXT
 from .effects import DEFAULT_EFFECTS
 
 _LOCK = threading.RLock()
@@ -317,10 +317,80 @@ class Jobs:
         self._wake = threading.Condition(self._lock)
         self.paused = False
         self._workers = {}
+        self._qfile = None
+        self._load_saved()
+
+    # ---------- sparad kö (överlever omstart) ----------
+    @staticmethod
+    def _fn_ref(fn):
+        """Bara funktioner på modulnivå med JSON-argument kan sparas och köras igen."""
+        mod, name = getattr(fn, "__module__", None), getattr(fn, "__qualname__", "")
+        if not mod or not mod.startswith("dehazeiq.") or "<" in name or "." in name:
+            return None
+        return f"{mod}:{name}"
+
+    def _qpath(self):
+        return self._qfile or (HOME / "queue.json")
+
+    def _save(self):
+        """Anropas med låset taget. Sparar väntande/pågående jobb som går att köra om."""
+        out = []
+        for t in self._tasks:
+            if t["state"] not in ("running", "queued", "interrupted"):
+                continue
+            ref = t.get("ref") or (self._fn_ref(t["fn"]) if t.get("fn") else None)
+            if not ref:
+                continue
+            try:
+                json.dumps(list(t.get("args") or ()))
+            except (TypeError, ValueError):
+                continue
+            out.append({k: t.get(k) for k in ("id", "pid", "kind", "label", "lane", "project", "queued_at")}
+                       | {"ref": ref, "args": list(t.get("args") or ())})
+        try:
+            f = self._qpath()
+            f.parent.mkdir(parents=True, exist_ok=True)
+            tmp = f.with_suffix(".tmp")
+            tmp.write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
+            os.replace(tmp, f)
+        except OSError:
+            pass
+
+    def _load_saved(self):
+        try:
+            saved = json.loads(self._qpath().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        for t in saved if isinstance(saved, list) else []:
+            if not isinstance(t, dict) or not t.get("ref"):
+                continue
+            self._tasks.append(dict(t, state="interrupted", progress=0.0, fn=None, cancel=False,
+                                    args=tuple(t.get("args") or ()),
+                                    message="Avbröts när programmet stängdes", finished=time.time()))
+
+    def retry(self, tid):
+        """Kör ett avbrutet jobb igen (efter omstart)."""
+        import importlib
+        with self._lock:
+            t = next((x for x in self._tasks if x["id"] == tid and x["state"] == "interrupted"), None)
+            if t is None:
+                return None
+            self._tasks.remove(t)
+            self._save()
+        mod, name = t["ref"].split(":", 1)
+        fn = getattr(importlib.import_module(mod), name)
+        return self.start(t["pid"], t["kind"], fn, *t["args"], label=t.get("label"), project_name=t.get("project"))
+
+    def dismiss(self, tid):
+        with self._lock:
+            n = len(self._tasks)
+            self._tasks = [x for x in self._tasks if not (x["id"] == tid and x["state"] == "interrupted")]
+            self._save()
+            return len(self._tasks) != n
 
     # ---------- status ----------
     def _public(self, t, pos=None):
-        out = {k: v for k, v in t.items() if k not in ("fn", "args", "cancel")}
+        out = {k: v for k, v in t.items() if k not in ("fn", "args", "cancel", "ref")}
         if pos is not None:
             out["position"] = pos
         return out
@@ -364,9 +434,11 @@ class Jobs:
     def queue(self):
         with self._lock:
             active = [t for t in self._tasks if t["state"] in ("running", "queued")]
-            done = [t for t in self._tasks if t["state"] not in ("running", "queued")]
+            stopped = [t for t in self._tasks if t["state"] == "interrupted"]
+            done = [t for t in self._tasks if t["state"] not in ("running", "queued", "interrupted")]
             done.sort(key=lambda t: -(t.get("finished") or 0))
             return {"paused": self.paused, "tasks": [self._public(t) for t in active],
+                    "interrupted": [self._public(t) for t in stopped],
                     "done": [self._public(t) for t in done[:12]]}
 
     # ---------- ändra kön ----------
@@ -383,6 +455,7 @@ class Jobs:
             else:
                 self._tasks.append(task)
             self._prune()
+            self._save()
             w = self._workers.get(lane)
             if w is None or not w.is_alive():
                 w = self._workers[lane] = threading.Thread(target=self._run, args=(lane,), daemon=True)
@@ -396,6 +469,7 @@ class Jobs:
                 if t["id"] == tid:
                     if t["state"] == "queued":
                         t.update(state="cancelled", message="Avbrutet", finished=time.time())
+                        self._save()
                     elif t["state"] == "running":
                         t["cancel"] = True
                         t["message"] = "Avbryter …"
@@ -414,6 +488,7 @@ class Jobs:
             a, b = queued[idx], queued[j]
             ia, ib = self._tasks.index(a), self._tasks.index(b)
             self._tasks[ia], self._tasks[ib] = b, a
+            self._save()
             return True
 
     def pause(self, paused):
@@ -424,9 +499,10 @@ class Jobs:
     def clear_done(self):
         with self._lock:
             self._tasks = [t for t in self._tasks if t["state"] in ("running", "queued")]
+            self._save()
 
     def _prune(self):
-        done = [t for t in self._tasks if t["state"] not in ("running", "queued")]
+        done = [t for t in self._tasks if t["state"] not in ("running", "queued", "interrupted")]
         if len(done) > self.KEEP_DONE:
             old = sorted(done, key=lambda t: t.get("finished") or 0)[: len(done) - self.KEEP_DONE]
             self._tasks = [t for t in self._tasks if t not in old]
@@ -465,8 +541,10 @@ class Jobs:
                 with self._lock:
                     task.update(state="error", message=str(exc), finished=time.time())
             finally:
-                task["fn"] = None
-                task["args"] = ()
+                with self._lock:
+                    task["fn"] = None
+                    task["args"] = ()
+                    self._save()
 
 
 JOBS = Jobs()

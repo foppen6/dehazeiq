@@ -1,4 +1,4 @@
 """DeHazeIQ – AI-powered video editing, without the hassle."""
 
-__version__ = "0.22.0"
+__version__ = "0.23.0"
 TAGLINE = "AI-powered video editing, without the hassle"

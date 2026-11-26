@@ -247,7 +247,8 @@ async function onJobFinished(j) {
   } else if (kind[0] === "analyze") {
     toast(`Analys klar: ${(j.result || {}).analyzed || 0} klipp`, true);
   } else if (kind[0] === "render" && kind[1] !== "preview") {
-    toast(`Exporten är klar: ${(j.result || {}).file || ""}`, true);
+    const fb = (j.result || {}).proxy_fallback || [];
+    toast(`Exporten är klar: ${(j.result || {}).file || ""}${fb.length ? `\nOBS: ${fb.length} klipp saknade originalfil och togs från proxyn (lägre kvalitet): ${fb.slice(0, 3).join(", ")}. Anslut disken eller använd Hitta filen i Analys.` : ""}`, true);
   }
   render();
 }
@@ -531,6 +532,8 @@ function renderTop() {
 
 /* ---------- vy: importera ---------- */
 function statusCell(c) {
+  if (c.offline && !remote()) return `<span class="row" style="gap:6px;flex-wrap:nowrap"><span class="st-bad" title="${esc(c.path || "")}">Original saknas</span><button class="btn small" data-relink="${esc(c.id)}" title="Leta upp originalfilen – övriga i samma mapp hittas automatiskt">Hitta filen</button></span>`;
+  if (c.offline) return '<span class="st-bad">Original saknas</span>';
   if (c.is360) return `<span class="st-work" title="${esc(c.note || "")}">360 – exportera platt</span>`;
   if (c.status === "error") return `<span class="st-bad" title="${esc(c.error || "")}">Fel</span>`;
   if (c.status === "analyzed") return '<span class="st-ok">Analyserad</span>';
@@ -972,7 +975,7 @@ function propCard(p, idx) {
       <div class="stack" style="gap:6px"><div class="strip">${strip}</div>
         <div class="strip-legend"><span>Intro</span><span>Uppbyggnad</span><span>Höjdpunkt</span><span>Avslut</span></div></div>
       ${platformSelect(p)}
-      <div class="row" style="flex-wrap:nowrap">
+      <div class="row pactions">
         ${prev ? `<button class="btn primary" style="flex:1 1 auto" data-edit="${p.id}">Redigera</button><button class="btn" data-export="${p.id}">Exportera</button>`
                : `<button class="btn primary" style="flex:1 1 auto" data-preview="${p.id}" ${busyHere ? "disabled" : ""}>Förhandsvisa</button>
                   <button class="btn" data-edit="${p.id}">Redigera</button><button class="btn" data-export="${p.id}">Exportera</button>`}
@@ -1225,6 +1228,16 @@ document.addEventListener("click", async (ev) => {
     return render();
   }
   if (d.rename) return openRename(d.rename);
+  if (d.relink) {
+    const [path] = await choosePaths("file");
+    if (!path) return undefined;
+    try {
+      const r = await api("POST", `/api/p/${state.pid}/clip/${d.relink}/relink`, { path });
+      toast(r.fixed > 1 ? `Hittade ${r.fixed} filer i samma mapp.` : "Klippet är kopplat igen.", true);
+      await loadProject(state.pid); render();
+    } catch (e) { fail(e); }
+    return undefined;
+  }
   if (d.delete) return openDelete(d.delete);
   if (d.delConfirm) return deleteProject(d.delConfirm);
   if (d.format) return saveSettings({ format: d.format });
@@ -1406,4 +1419,22 @@ document.addEventListener("submit", async (ev) => {
   } catch (e) { fail(e); }
   render();
   watchTabs();
+  if (!remote()) setTimeout(checkUpdate, 7000);
 })();
+
+// ny version på GitHub? visas som en diskret rad som går att stänga (per version)
+async function checkUpdate(tries = 0) {
+  try {
+    const u = await api("GET", "/api/update");
+    if (!u.checked) { if (tries < 5) setTimeout(() => checkUpdate(tries + 1), 5000); return; }
+    let seen = ""; try { seen = localStorage.getItem("tv.updseen") || ""; } catch (_) { /* privat läge */ }
+    if (!u.newer || seen === u.latest || document.querySelector(".updbar")) return;
+    const bar = document.createElement("div");
+    bar.className = "updbar"; bar.setAttribute("role", "status");
+    bar.innerHTML = `<span>DeHazeIQ <b>${esc(u.latest)}</b> finns – du har ${esc(u.current)}.</span>
+      <a class="btn small primary" href="${esc(u.url)}" target="_blank" rel="noopener">Hämta</a>
+      <button class="btn icon small" aria-label="Stäng" title="Stäng">×</button>`;
+    bar.querySelector("button").onclick = () => { try { localStorage.setItem("tv.updseen", u.latest); } catch (_) { /* */ } bar.remove(); };
+    document.body.appendChild(bar);
+  } catch (_) { /* tyst */ }
+}

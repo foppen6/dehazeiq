@@ -471,7 +471,7 @@ textarea.field { color: var(--text); height: auto; padding: 10px 12px; line-heig
 .edinsp { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; min-height: 0; overscroll-behavior: contain; }
 .edinsp .edtabs { position: sticky; top: -18px; z-index: 5; margin: -18px -18px 0; padding: 12px 18px; background: var(--panel); border-bottom: 1px solid var(--line); }
 @media (max-width: 980px) {
-  .edgrid { grid-template-columns: 1fr; }
+  .edgrid { grid-template-columns: minmax(0, 1fr); }
   .edmain { --stageh: clamp(220px, 52vh, 620px); }
   .edinsp { position: static; max-height: none; overflow: visible; }
   .edinsp .edtabs { top: 0; }
@@ -522,3 +522,15 @@ textarea.field { color: var(--text); height: auto; padding: 10px 12px; line-heig
 @media (max-width: 700px) { .ptabs { padding: 6px 10px 0; } .ptab { max-width: 160px; padding: 0 10px; } }
 .ptabs .ptab:not(.active) { background: transparent; border-color: transparent; }
 .ptabs .ptab.active { box-shadow: inset 0 2px 0 var(--accent); color: var(--text, #fff); }
+
+/* uppdateringsrad */
+.updbar{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:60;display:flex;align-items:center;gap:10px;
+  max-width:calc(100vw - 24px);padding:8px 8px 8px 14px;border-radius:12px;background:var(--raised);color:var(--text);
+  border:1px solid var(--line-2);box-shadow:0 8px 24px rgba(0,0,0,.35);font-size:14px}
+.updbar span{min-width:0}
+.pactions { flex-wrap: nowrap; }
+@media (max-width: 440px) { .pactions { flex-wrap: wrap; } .pactions .btn.primary { flex-basis: 100% !important; } }
+.updbar { width: max-content; min-width: min(340px, calc(100vw - 24px)); }
+.updbar span { flex: 1 1 auto; }
+.updbar .btn { flex: none; white-space: nowrap; }
+.drow .btn { white-space: nowrap; flex: none; }

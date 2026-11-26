@@ -17,7 +17,13 @@ def _redirect_output():
     """En fönsterapp har ingen terminal – skriv utskrifter till en loggfil."""
     from .config import HOME
     HOME.mkdir(parents=True, exist_ok=True)
-    log = open(HOME / "dehazeiq.log", "a", encoding="utf-8", buffering=1)
+    path = HOME / "dehazeiq.log"
+    try:  # håll loggen liten: över 5 MB → spara som .1 (förra) och börja om
+        if path.exists() and path.stat().st_size > 5 * 1024 * 1024:
+            os.replace(path, path.with_suffix(".log.1"))
+    except OSError:
+        pass
+    log = open(path, "a", encoding="utf-8", buffering=1)
     log.write(f"\n===== Start {time.strftime('%Y-%m-%d %H:%M:%S')} =====\n")
     sys.stdout = log
     sys.stderr = log

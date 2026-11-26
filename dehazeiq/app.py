@@ -70,7 +70,12 @@ def _lean(o, depth=0):
 
 def _project_view(p: Project) -> dict:
     d = dict(p.data)
-    d["clips"] = p.clips()
+    cl = []
+    for c in p.clips():  # originalfil som saknas (minneskort urtaget, disk bortkopplad)
+        if c.get("path") and not c.get("parent360") and not c.get("photo") and not Path(c["path"]).exists():
+            c = dict(c, offline=True)
+        cl.append(c)
+    d["clips"] = cl
     d.pop("order", None)
     d["job"] = JOBS.status(p.id)
     return d
@@ -94,6 +99,7 @@ _PS_FILTERS = {
     "music": "Ljud|*.mp3;*.m4a;*.aac;*.wav;*.aif;*.aiff;*.flac;*.ogg|Alla filer|*.*",
     "divelog": "Dykloggar|*.ssrf;*.xml;*.uddf;*.udcf;*.sml;*.csv|Alla filer|*.*",
     "image": "Logga|*.png;*.jpg;*.jpeg|Alla filer|*.*",
+    "file": "Video|*.mp4;*.mov;*.m4v;*.mts;*.m2ts;*.avi;*.mkv;*.insv;*.lrv|Alla filer|*.*",
 }
 
 
@@ -105,7 +111,7 @@ def _powershell(kind: str):
     else:
         multi = "$true" if kind == "files" else "$false"
         title = {"files": "Välj filmklipp och bilder", "music": "Välj musik", "divelog": "Välj dyklogg",
-                 "image": "Välj logga"}[kind]
+                 "image": "Välj logga", "file": "Hitta originalfilen"}[kind]
         body = ("$d=New-Object System.Windows.Forms.OpenFileDialog;"
                 f"$d.Multiselect={multi};$d.Title='{title}';$d.Filter='{_PS_FILTERS[kind]}';"
                 "if($d.ShowDialog($owner) -eq 'OK'){$d.FileNames -join \"`n\"}")
@@ -129,7 +135,7 @@ def _zenity(kind: str):
 
 
 def choose(kind: str):
-    if kind not in ("folder", "files", "music", "divelog", "image"):
+    if kind not in ("folder", "files", "music", "divelog", "image", "file"):
         raise ApiError("Okänd dialog")
     if sys.platform == "darwin":
         if kind == "folder":
@@ -142,6 +148,8 @@ def choose(kind: str):
                 'return out')
         if kind == "divelog":
             return _osascript('POSIX path of (choose file with prompt "Välj dyklogg (Subsurface, UDDF, Suunto, CSV)")')
+        if kind == "file":
+            return _osascript('POSIX path of (choose file with prompt "Hitta originalfilen för klippet")')
         if kind == "image":
             return _osascript('POSIX path of (choose file with prompt "Välj logga (PNG med genomskinlig bakgrund är bäst)" '
                               'of type {"public.png", "public.jpeg"})')
@@ -514,6 +522,8 @@ class Handler(BaseHTTPRequestHandler):
             if self.is_remote:
                 raise ApiError("Bara från datorn", HTTPStatus.FORBIDDEN)
             return self._json(lan_status())
+        if api == ["update"]:
+            return self._json(dict(UPDATE, current=__version__))
         if api == ["info"]:
             return self._json({
                 "version": __version__, "tagline": TAGLINE, "platform": sys.platform,
@@ -637,6 +647,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(JOBS.queue())
         if api == ["queue", "clear"]:
             JOBS.clear_done()
+            return self._json(JOBS.queue())
+        if len(api) == 3 and api[0] == "queue" and api[2] in ("retry", "dismiss"):
+            ok = JOBS.retry(api[1]) if api[2] == "retry" else JOBS.dismiss(api[1])
+            if not ok:
+                raise ApiError("Jobbet finns inte längre", HTTPStatus.NOT_FOUND)
             return self._json(JOBS.queue())
         if len(api) == 3 and api[0] == "queue" and api[2] in ("cancel", "move"):
             ok = JOBS.cancel(api[1]) if api[2] == "cancel" else JOBS.move(api[1], int(body.get("dir", 1)))
@@ -856,6 +871,32 @@ class Handler(BaseHTTPRequestHandler):
                 p.save()
             save_default_settings(s)
             return self._json({"settings": s})
+        if len(action) == 3 and action[0] == "clip" and action[2] == "relink":
+            # originalet har flyttats: peka om klippet till den nya platsen (samma längd krävs)
+            cid = action[1]
+            c = p.data["clips"].get(cid)
+            if not c:
+                raise ApiError("Okänt klipp", HTTPStatus.NOT_FOUND)
+            src = Path(str(body.get("path") or "")).expanduser()
+            if not src.is_file():
+                raise ApiError("Filen finns inte")
+            from .media import probe
+            try:
+                info = probe(src)
+            except Exception as e:  # noqa: BLE001
+                raise ApiError(f"Kunde inte läsa filen: {e}") from None
+            if abs(float(info.get("duration") or 0) - float(c.get("duration") or 0)) > 1.0:
+                raise ApiError(f"Fel fil: {src.name} är {info.get('duration', 0):.0f} s, klippet är {c.get('duration', 0):.0f} s")
+            p.update_clip(cid, path=str(src))
+            # leta efter fler saknade klipp i samma mapp
+            fixed = 1
+            for o in p.clips():
+                if o["id"] != cid and o.get("path") and not Path(o["path"]).exists():
+                    cand = src.parent / re.split(r"[\\/]", o["path"])[-1]  # även Windows-sökvägar på Mac
+                    if cand.is_file():
+                        p.update_clip(o["id"], path=str(cand))
+                        fixed += 1
+            return self._json({"fixed": fixed})
         if len(action) == 2 and action[0] == "clip":
             cid = action[1]
             if cid not in p.data["clips"]:
@@ -1032,6 +1073,9 @@ def start_server(port: int, lan: bool = False):
     if lan:
         st = start_lan(port + 1)
         print("Mobil via wifi:", ", ".join(st["urls"]) or f"port {st['port']}", "· kod:", st["key"])
+    upd = threading.Timer(4.0, check_update)
+    upd.daemon = True
+    upd.start()
     try:  # första starten: hämta gratis musik i bakgrunden så att AI:n har något att välja
         if musiclib.needs_starter():
             JOBS.start("_music", "music-starter", lambda progress: musiclib.starter_pack(progress),
@@ -1039,6 +1083,39 @@ def start_server(port: int, lan: bool = False):
     except Exception:  # noqa: BLE001
         pass
     return server, url
+
+
+UPDATE = {"checked": False}
+RELEASES_API = "https://api.github.com/repos/foppen6/dehazeiq/releases/latest"
+
+
+def _vtuple(v):
+    return tuple(int(x) for x in re.findall(r"\d+", str(v))[:3]) or (0,)
+
+
+def check_update():
+    """Tittar en gång om en nyare version finns på GitHub. Tyst vid fel (offline, proxy)."""
+    if os.environ.get("DEHAZEIQ_NO_UPDATE_CHECK"):
+        UPDATE.update(checked=True)
+        return
+    import ssl
+    import urllib.request
+    try:
+        ctx = ssl.create_default_context()
+        try:
+            import certifi  # finns i den paketerade appen
+            ctx.load_verify_locations(certifi.where())
+        except Exception:  # noqa: BLE001
+            pass
+        req = urllib.request.Request(RELEASES_API, headers={"Accept": "application/vnd.github+json",
+                                                            "User-Agent": f"DeHazeIQ/{__version__}"})
+        with urllib.request.urlopen(req, timeout=8, context=ctx) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        tag = str(data.get("tag_name") or "").lstrip("v")
+        UPDATE.update(checked=True, latest=tag, url=data.get("html_url") or "",
+                      newer=bool(tag) and _vtuple(tag) > _vtuple(__version__))
+    except Exception as e:  # noqa: BLE001
+        UPDATE.update(checked=True, error=str(e)[:200])
 
 
 def main(argv=None):

@@ -47,7 +47,11 @@ state.queue = { paused: false, tasks: [], done: [] };
 async function loadQueue() {
   try {
     state.queue = await api("GET", "/api/queue");
-    const n = state.queue.tasks.length;
+    const n = state.queue.tasks.length + (state.queue.interrupted || []).length;
+    if (!state.queueWarned && (state.queue.interrupted || []).length) {
+      state.queueWarned = true;
+      toast(`${state.queue.interrupted.length} jobb avbröts när programmet stängdes. Öppna Kö och tryck Kör igen.`);
+    }
     const b = document.querySelector("[data-qbadge]");
     if (b) { b.textContent = n; b.hidden = !n; }
     if (state.view === "queue") $("#view").innerHTML = viewQueue();
@@ -56,7 +60,7 @@ async function loadQueue() {
 setInterval(loadQueue, 2500);
 
 function queueButton() {
-  const n = (state.queue.tasks || []).length;
+  const n = (state.queue.tasks || []).length + (state.queue.interrupted || []).length;
   return `<button class="btn small" data-act="queue" title="Jobbkö">${svgi(ICO.list, 15)}Kö<span class="qbadge num" data-qbadge ${n ? "" : "hidden"}>${n}</span></button>`;
 }
 
@@ -83,10 +87,14 @@ function viewQueue() {
       <span class="grow"><b style="font-weight:600">${esc(t.label)}</b><span class="muted"> · ${esc(t.project)}</span>${!ok ? `<br><small class="muted">${esc(t.message || "")}</small>` : ""}</span>
       <span class="muted num" style="font-size:13px">${when}</span>${t.pid.startsWith("_") ? `<button class="btn small" data-act="music-view">Musik</button>` : `<button class="btn small" data-qopen="${esc(t.pid)}">Öppna</button>`}</div>`;
   }).join("");
+  const stopped = (q.interrupted || []).map((t) => `<div class="drow"><span style="color:var(--warn)">${svgi(ICO.pause, 16)}</span>
+      <span class="grow"><b style="font-weight:600">${esc(t.label)}</b><span class="muted"> · ${esc(t.project)}</span><br><small class="muted">${esc(t.message || "")}</small></span>
+      <button class="btn small primary" data-qretry="${t.id}">Kör igen</button><button class="btn icon small" data-qdismiss="${t.id}" aria-label="Glöm jobbet" title="Glöm jobbet">${svgi(ICO.x, 15)}</button></div>`).join("");
   return `<main class="main wide" style="max-width:1000px">
     <div class="spread"><div class="head"><h1>Jobbkö</h1><p class="lead">Ett jobb i taget i bakgrunden – du kan stänga fönstret eller jobba med annat. Ordningen går att ändra.</p></div>
       <div class="row"><button class="btn" data-act="qpause">${svgi(q.paused ? '<path d="M8 5v14l11-7z"/>' : ICO.pause, 16)}${q.paused ? "Fortsätt kön" : "Pausa kön"}</button>
       ${P() ? `<button class="btn primary" data-act="setup-project">Nya filmer av ${esc(P().name)}</button>` : ""}</div></div>
+    ${stopped ? `<section class="stack" style="gap:4px"><span class="eyebrow">Avbrutet vid avstängning</span>${stopped}</section>` : ""}
     <section class="stack" style="gap:10px"><span class="eyebrow">Pågår och väntar</span>${rows || '<div class="empty">Kön är tom.</div>'}</section>
     ${done ? `<section class="stack" style="gap:4px"><div class="spread"><span class="eyebrow">Klart</span><button class="btn small" data-act="qclear">Rensa listan</button></div>${done}</section>` : ""}
   </main>`;
@@ -851,6 +859,8 @@ document.addEventListener("click", async (ev) => {
     return edit("center", { i: state.ed.i, cx, cy }, { quiet: true });
   }
   if (d.qmove) { state.queue = await api("POST", `/api/queue/${d.qmove}/move`, { dir: Number(d.dir) }); return render(); }
+  if (d.qretry) { try { state.queue = await api("POST", `/api/queue/${d.qretry}/retry`, {}); state.expectJob = true; toast("Jobbet ligger i kön igen.", true); } catch (e) { fail(e); } loadQueue(); return render(); }
+  if (d.qdismiss) { state.queue = await api("POST", `/api/queue/${d.qdismiss}/dismiss`, {}); return render(); }
   if (d.qcancel) { state.queue = await api("POST", `/api/queue/${d.qcancel}/cancel`, {}); loadQueue(); return render(); }
   if (d.qopen) {
     await loadProject(d.qopen);
@@ -1327,7 +1337,19 @@ document.addEventListener("keydown", async (ev) => {
   if (state.view !== "edit" || !state.ed || ev.target.closest("input, textarea, select")) return;
   const p = edProp();
   if (!p) return;
-  if (ev.key === "Delete" || ev.key === "Backspace") { ev.preventDefault(); if (p.shots.length > 1) await edit("delete", { i: state.ed.i }); state.ed.i = Math.min(state.ed.i, edProp().shots.length - 1); render(); }
+  if (ev.key === "Delete" || ev.key === "Backspace") {
+    ev.preventDefault();
+    if (p.shots.length <= 1) return;
+    // två tryck inom två sekunder – ett tangenttryck av misstag ska inte ta bort en scen
+    const now = Date.now();
+    if (!state.ed.delArm || state.ed.delArm.i !== state.ed.i || now - state.ed.delArm.t > 2000) {
+      state.ed.delArm = { i: state.ed.i, t: now };
+      toast(`Tryck ${ev.key === "Delete" ? "Delete" : "⌫"} igen för att ta bort scen ${state.ed.i + 1} (går att ångra).`);
+      return;
+    }
+    state.ed.delArm = null;
+    await edit("delete", { i: state.ed.i }); state.ed.i = Math.min(state.ed.i, edProp().shots.length - 1); render();
+  }
   else if (ev.altKey && (ev.key === "ArrowLeft" || ev.key === "ArrowRight")) { ev.preventDefault(); const dir = ev.key === "ArrowLeft" ? -1 : 1; const j = state.ed.i + dir; if (j < 0 || j >= p.shots.length) return; await edit("move", { i: state.ed.i, dir }); state.ed.i = j; render(); }
   else if (ev.key === "ArrowLeft" || ev.key === "ArrowRight") { state.ed.i = Math.max(0, Math.min(p.shots.length - 1, state.ed.i + (ev.key === "ArrowLeft" ? -1 : 1))); state.ed.alts = null; render(); }
   else if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "z") { ev.preventDefault(); await edit("undo"); render(); }

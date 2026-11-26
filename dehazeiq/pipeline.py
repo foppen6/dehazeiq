@@ -365,6 +365,9 @@ def render_proposal(progress, pid, prop_id, resolution="preview", lang="sv"):
     renders[key] = out.name
     renders["v"] = int(time.time())  # versionsnummer i adressen: alltid den nya videon, aldrig en gammal ur cachen
     result = {"file": out.name, "path": str(out)}
+    if prop.get("_proxy_fallback") and resolution != "preview":
+        result["proxy_fallback"] = prop["_proxy_fallback"]
+    prop.pop("_proxy_fallback", None)
     if resolution != "preview":
         otio = out.with_suffix(".otio")
         timeline.write_otio(proj, prop, otio)

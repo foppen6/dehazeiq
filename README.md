@@ -114,6 +114,14 @@ användes de senaste gångerna, så att du får variation.
   till flera plattformar på en gång.
 - **Jobbkö:** import, analys, förslag, förhandsvisningar och exporter körs ett i taget i bakgrunden,
   även från flera projekt. Ordningen kan ändras, jobb kan avbrytas och kön pausas.
+  Förhandsvisningar och exporter har en egen fil och väntar inte bakom en lång analys.
+  Kön sparas: stängs programmet mitt i ett jobb visas det under *Avbrutet vid avstängning*
+  med knappen **Kör igen**.
+- **Flyttade originalfiler:** saknas en originalfil visas *Original saknas* med knappen
+  **Hitta filen**. Övriga saknade filer i samma mapp kopplas automatiskt. Exporten använder
+  proxyn så länge (lägre kvalitet) och säger till.
+- **Ny version:** programmet tittar på GitHub om en nyare version finns och visar en rad med länk.
+  Stäng av med miljövariabeln `DEHAZEIQ_NO_UPDATE_CHECK=1`.
 
 ## Redigera i programmet
 

@@ -901,6 +901,8 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
         return out
 
     vignette = bool(on["vignette"] and plan.get("vignette"))
+    proxy_fallback = []
+    proposal["_proxy_fallback"] = proxy_fallback  # läses av export för att varna
     try:
         seg_paths = []
         for i, shot in enumerate(shots):
@@ -911,6 +913,12 @@ def render(project, proposal, resolution="preview", out_path=None, progress=None
             else:
                 src = Path(clip["path"])
                 sw, sh = clip["width"], clip["height"]
+                if not src.exists() and project.proxy_path(clip["id"]).exists():
+                    # originalet saknas (minneskortet urtaget, disken bortkopplad): ta proxyn hellre än att avbryta
+                    print("Originalet saknas, använder proxyn:", clip.get("name"))
+                    proxy_fallback.append(clip.get("name") or clip["id"])
+                    src = project.proxy_path(clip["id"])
+                    sw, sh = clip.get("proxy_width") or clip["width"], clip.get("proxy_height") or clip["height"]
             pano_pre, pano_two, fshot = None, False, shot
             cam = shot.get("cam360") or {}
             if cam and not cam.get("manual") and not on.get("cam360", True):
