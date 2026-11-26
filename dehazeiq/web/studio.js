@@ -363,7 +363,8 @@ function edTimeline(p) {
   const n = p.shots.length, i = state.ed.i;
   return `<section class="tl" id="edTimeline" aria-label="Tidslinje">
     <div class="tltools">
-      <span class="muted" style="font-size:12px">Klipp ${i + 1} av ${n} · dra i klippen för att ändra ordning</span><span class="grow"></span>
+      <button class="btn small ${state.ed.playing ? "primary" : ""}" data-act="ed-play" id="edPlayBtn" title="Spela/pausa (mellanslag)" aria-label="${state.ed.playing ? "Pausa" : "Spela"}">${state.ed.playing ? svgi(ICO.pause, 14) : icon("play", 13)}</button>
+      <span class="muted" style="font-size:12px">Klipp ${i + 1} av ${n} · mellanslag spelar · dra i klippen för att ändra ordning</span><span class="grow"></span>
       <button class="btn small" data-edmove="-1" ${i <= 0 ? "disabled" : ""} title="Flytta åt vänster (Alt+←)">${svgi(ICO.left, 14)}Flytta</button>
       <button class="btn small" data-edmove="1" ${i >= n - 1 ? "disabled" : ""} title="Flytta åt höger (Alt+→)">Flytta${svgi(ICO.right, 14)}</button>
       <button class="btn small danger" data-act="ed-delete" ${n <= 1 ? "disabled" : ""} title="Ta bort klippet (Delete)">${icon("trash", 14)}Ta bort klipp</button>
@@ -509,6 +510,128 @@ function setPlayhead(t, { final = false } = {}) {
   scrubStage(p, t, final);
 }
 
+/* ---------- uppspelning från markören (mellanslag) ----------
+   Finns en förhandsvisning av hela filmen spelas den (med ljud och effekter). Annars spelas
+   klippens förhandsvisningar där de finns, stillbilder däremellan, och låten från rätt ställe. */
+let play = null;
+function playBtnUpdate() {
+  const b = document.getElementById("edPlayBtn");
+  if (!b) return;
+  b.classList.toggle("primary", !!play);
+  b.setAttribute("aria-label", play ? "Pausa" : "Spela");
+  b.innerHTML = play ? svgi(ICO.pause, 14) : icon("play", 13);
+}
+function stageBox() { return document.querySelector(".edstage .edstill"); }
+function overlay(tag) {
+  const box = stageBox();
+  if (!box) return null;
+  let el = box.querySelector(".edplay");
+  if (el && el.tagName.toLowerCase() !== tag) { el.remove(); el = null; }
+  if (!el) {
+    el = document.createElement(tag);
+    el.className = "edplay";
+    if (tag === "video") { el.playsInline = true; el.setAttribute("playsinline", ""); }
+    box.appendChild(el);
+  }
+  return el;
+}
+function startPlayback() {
+  const p = edProp();
+  if (!p || play) return;
+  let t0 = curT(p);
+  if (t0 >= filmLen(p) - 0.15) t0 = 0;
+  const film = document.querySelector(".edvideo");
+  if (film) {  // läget Hela filmen: spela den direkt
+    try { film.currentTime = t0; } catch (_) { /* */ }
+    film.play().catch(() => {});
+    play = { kind: "native", v: film };
+    film.addEventListener("pause", () => { if (play && play.v === film) stopPlayback(); }, { once: true });
+    return playBtnUpdate();
+  }
+  const prev = p.renders && p.renders.preview;
+  if (prev && !running(`render:preview:${p.id}`)) {
+    const v = overlay("video");
+    if (!v) return;
+    v.muted = false;
+    v.src = `${mediaUrl("renders", prev)}?v=${p.renders.v || 0}`;
+    v.addEventListener("loadedmetadata", () => { try { v.currentTime = t0; } catch (_) { /* */ } v.play().catch(() => {}); }, { once: true });
+    play = { kind: "film", v, clock: () => v.currentTime };
+    v.addEventListener("ended", () => stopPlayback(), { once: true });
+  } else {
+    const start = performance.now();
+    let audio = null;
+    if (p.music && p.music_track && !(p.style === "ambient")) {
+      audio = new Audio(`/api/music/file?id=${encodeURIComponent(p.music_track)}`);
+      audio.addEventListener("loadedmetadata", () => { try { audio.currentTime = t0; } catch (_) { /* */ } audio.play().catch(() => {}); }, { once: true });
+    }
+    play = { kind: "shots", audio, shown: -1, lastImg: 0,
+             clock: () => (audio && !audio.paused && audio.currentTime > 0 ? audio.currentTime : t0 + (performance.now() - start) / 1000) };
+    if (!state.ed.playHint) { state.ed.playHint = true; toast("Tryck Förhandsvisa filmen för uppspelning med alla effekter och jämn bild.", true); }
+  }
+  playBtnUpdate();
+  const tick = () => {
+    if (!play || play.kind === "native") return;
+    if (state.view !== "edit") return stopPlayback({ quiet: true });
+    const p2 = edProp();
+    if (!p2) return stopPlayback();
+    const t = play.clock();
+    if (t >= filmLen(p2) - 0.02) { state.ed.t = filmLen(p2) - 0.01; return stopPlayback(); }
+    state.ed.t = t; state.ed.tProp = p2.id;
+    placePlayhead(t);
+    const k = shotIndexAt(p2, t);
+    if (k !== state.ed.i) {
+      state.ed.i = k;
+      document.querySelectorAll("#edTimeline .tlblock").forEach((b, j) => b.classList.toggle("sel", j === k));
+    }
+    if (play.kind === "shots") {
+      const st = shotStarts(p2), local = t - st[k];
+      const sp = (state.ed.shotPrev || {})[k];
+      if (sp && sp.stamp === state.ed.stamp && sp.file) {  // klippets färdiga förhandsvisning
+        if (play.shown !== k) {
+          const v = overlay("video");
+          if (v) { v.muted = true; v.src = mediaUrl("shots", sp.file); v.addEventListener("loadedmetadata", () => { try { v.currentTime = local; } catch (_) { /* */ } v.play().catch(() => {}); }, { once: true }); }
+          play.shown = k;
+        }
+      } else {
+        const now = performance.now();
+        if (play.shown !== k || now - play.lastImg > 160) {
+          const im = overlay("img");
+          if (im && !im.dataset.busy) {
+            const at = Math.max(0.02, Math.min(0.98, local / (p2.shots[k].duration || 1)));
+            const url = `/api/p/${state.pid}/proposal/${p2.id}/still?i=${k}&at=${at.toFixed(2)}&w=360&graded=1&s=${state.ed.stamp}`;
+            const pre = new Image();
+            im.dataset.busy = "1";
+            pre.onload = pre.onerror = () => { delete im.dataset.busy; if (play && pre.naturalWidth) im.src = url; };
+            pre.src = url;
+            play.lastImg = now; play.shown = k;
+          }
+        }
+      }
+    }
+    play.raf = requestAnimationFrame(tick);
+  };
+  play.raf = requestAnimationFrame(tick);
+}
+function stopPlayback({ quiet = false } = {}) {
+  if (!play) return;
+  const pl = play;
+  play = null;
+  cancelAnimationFrame(pl.raf);
+  if (pl.audio) pl.audio.pause();
+  const p = edProp();
+  if (pl.kind === "native") {
+    if (!pl.v.paused) pl.v.pause();
+    if (p) { state.ed.t = Math.min(pl.v.currentTime, filmLen(p) - 0.01); state.ed.tProp = p.id; state.ed.i = shotIndexAt(p, state.ed.t); placePlayhead(state.ed.t); }
+    return playBtnUpdate();
+  }
+  if (pl.kind === "film" && p) { state.ed.t = Math.min(pl.v.currentTime || state.ed.t || 0, filmLen(p) - 0.01); state.ed.tProp = p.id; }
+  if (pl.v) pl.v.pause();
+  if (p) state.ed.i = shotIndexAt(p, state.ed.t || 0);
+  if (quiet) return;
+  render(); requestShotPreview(150);  // scenen visar bilden där markören stannade
+}
+function togglePlayback() { if (play) stopPlayback(); else startPlayback(); }
+
 let scrubbing = null;
 document.addEventListener("pointerdown", (ev) => {
   const el = ev.target.closest && ev.target.closest("[data-scrub]");
@@ -516,6 +639,8 @@ document.addEventListener("pointerdown", (ev) => {
   ev.preventDefault();
   const p = edProp();
   if (!p) return;
+  if (play) stopPlayback({ quiet: true });
+  document.querySelectorAll(".edstage .edplay").forEach((x) => x.remove());
   scrubbing = { id: ev.pointerId, el };
   state.ed.scrubMoved = false;
   try { el.setPointerCapture(ev.pointerId); } catch (_) { /* */ }
@@ -917,6 +1042,7 @@ function lyricsForm(p) {
 }
 
 function viewEdit() {
+  if (play && play.kind !== "native") stopPlayback({ quiet: true });
   const p = edProp() || propById(state.shown[0]) || ((P() && P().proposals) || [])[0];
   if (!p) return `<main class="main"><div class="empty">Skapa ett filmförslag först.</div></main>`;
   state.ed.prop = p.id;
@@ -1200,6 +1326,7 @@ document.addEventListener("click", async (ev) => {
     case "setup-go": return setupGo();
     case "export-queue": return exportQueued();
     case "ed-undo": return edit("undo");
+    case "ed-play": return togglePlayback();
     case "ed-delete": await edit("delete", { i: state.ed.i }); state.ed.i = Math.min(state.ed.i, edProp().shots.length - 1); return render();
     case "ed-autocenter": return edit("auto_center", { i: state.ed.i });
     case "ed-grade-reset": return edit("grade_reset_shot", { i: state.ed.i });
@@ -1576,6 +1703,19 @@ document.addEventListener("pointerup", async () => {
 });
 document.addEventListener("click", (ev) => {
   if (state.ed && state.ed.suppressClick && ev.target.closest("[data-drag]")) { ev.stopImmediatePropagation(); ev.preventDefault(); state.ed.suppressClick = false; }
+}, true);
+document.addEventListener("keydown", (ev) => {
+  if (state.view !== "edit" || !state.ed || ev.repeat) return;
+  if (!(ev.code === "Space" || ev.key === " " || ev.key === "k" || ev.key === "K") || ev.ctrlKey || ev.metaKey || ev.altKey) return;
+  const tg = ev.target;
+  if (tg.closest && (tg.closest("textarea, select, [contenteditable=''], [contenteditable='true']")
+      || (tg.closest("input") && !["range", "checkbox", "radio", "button"].includes(tg.type)))) return;
+  if (tg.tagName === "VIDEO" || (tg.closest && tg.closest(".edvideo"))) { ev.preventDefault(); return togglePlayback(); }
+  ev.preventDefault(); ev.stopPropagation();
+  togglePlayback();
+}, true);
+document.addEventListener("keyup", (ev) => {  // mellanslag på en knapp ska inte klicka den när vi spelar
+  if (state.view === "edit" && (ev.code === "Space" || ev.key === " ") && ev.target.closest && ev.target.closest("button")) ev.preventDefault();
 }, true);
 document.addEventListener("keydown", async (ev) => {
   if (state.view !== "edit" || !state.ed || ev.target.closest("input, textarea, select")) return;

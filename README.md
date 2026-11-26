@@ -142,6 +142,9 @@ klippet (även Delete, Alt+←/→ och Ctrl/Cmd+Z).
 (eller i markören) för att spola – bilden följer med, och klippet under markören väljs. Klicka i ett
 klipp för att ställa markören där. Med linjalen markerad: ←/→ flyttar en tiondel, Skift+←/→ en
 sekund, Home/End till början och slutet. Markören följer med när filmen eller klippet spelas.
+**Mellanslag** (eller K, eller spelknappen) startar och stoppar uppspelning från markören. Finns en
+förhandsvisning av hela filmen spelas den med ljud och alla effekter; annars spelas klippens
+förhandsvisningar och stillbilder i takt med låten. Där du stoppar stannar markören.
 
 **Se ändringen direkt:** varje ändring visas på någon sekund som en kort video av just det klippet,
 precis som i filmen (effekter, färg, inpassning, texter och musiken på rätt ställe). Överst väljer man
