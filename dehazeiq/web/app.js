@@ -133,6 +133,7 @@ function icon(name, size = 18) {
 async function loadProjects() { state.projects = await api("GET", "/api/projects"); }
 
 async function loadProject(pid) {
+  if (state.pid !== pid) { state.lastJob = null; state.expectJob = false; state.fresh = null; state.oldOpen = false; }
   state.pid = pid;
   localStorage.setItem("tv.pid", pid);
   state.project = await api("GET", `/api/p/${pid}`);
@@ -170,6 +171,13 @@ function handleJob(j, initial = false) {
   if (!P()) return;
   P().job = j;
   const bar = $("#jobbar");
+  // ett annat jobb i projektet tog över (förhandsvisningen blev klar medan analysen fortsätter)
+  if (j.state === "running" && state.lastJob && state.lastJob !== j.id && state.lastJobObj && !initial
+      && !(j.active || []).includes(state.lastJob)) {
+    const prev = Object.assign({}, state.lastJobObj, { state: "done" });
+    state.lastJob = null;
+    onJobFinished(prev);
+  }
   if (j.state === "running") {
     bar.hidden = false;
     const titles = { import: "Importerar", analyze: "Analyserar material", auto: "Skapar filmer automatiskt", deep: "Djupanalys", plans: "Skapar filmförslag" };
@@ -188,7 +196,7 @@ function handleJob(j, initial = false) {
       onJobFinished(j);
     }
   }
-  if (j.state === "running") state.lastJob = j.id;
+  if (j.state === "running") { state.lastJob = j.id; state.lastJobObj = j; }
 }
 
 async function pollJob() {
@@ -204,6 +212,7 @@ async function pollJob() {
 }
 
 async function onJobFinished(j) {
+  if (j.pid && j.pid !== state.pid) return;  // ett jobb i ett annat projekt: rör inte den här sidan
   const kind = (j.kind || "").split(":");
   await loadProject(state.pid);
   await loadProjects();
@@ -216,7 +225,7 @@ async function onJobFinished(j) {
   if (kind[0] === "auto") {
     const r = j.result || {};
     const ex = (r.analysis || {}).excluded || 0;
-    if (r.proposals && r.proposals.length) { state.shown = r.proposals.slice(0, 3); saveShown(); state.planTab = null; }
+    if (r.proposals && r.proposals.length) { state.shown = r.proposals.slice(0, 3); saveShown(); state.planTab = "all"; state.fresh = new Set(r.proposals); }
     loadThemes();
     toast(`Klart! ${r.proposals ? r.proposals.length : 0} filmförslag är klara.${ex ? ` ${ex} svaga klipp valdes bort automatiskt.` : ""}`, true);
     state.view = "proposals";
@@ -230,8 +239,9 @@ async function onJobFinished(j) {
       state.autoAnalyze = false;
       return startAnalyze();
     }
-  } else if (kind[0] === "plans") {
-    state.planTab = null;
+  } else if (kind[0] === "plans" || kind[0] === "variants") {
+    state.planTab = "all";
+    state.fresh = new Set(Array.isArray(j.result) ? j.result : []);
     toast(`Klart! ${((j.result || []).length) || ""} nya filmförslag.`, true);
     state.view = "proposals";
   } else if (kind[0] === "analyze") {
@@ -454,7 +464,7 @@ async function generate() {
     state.shown = r.proposals.map((p) => p.id);
     saveShown();
     state.view = "proposals";
-    state.planTab = "custom";  // de nya förslagen i egen flik, så att de syns direkt
+    state.planTab = "all";  // alla förslag, de nya överst
     state.fresh = new Set(state.shown);
     window.scrollTo({ top: 0, behavior: "smooth" });
     toast(`${r.proposals.length} nya förslag: ${r.proposals.map((p) => p.title || p.style_label).join(", ")}`, true);
@@ -996,9 +1006,7 @@ function viewProposals() {
   const planList = planProposals();
   const nFav = props.filter((p) => p.favorite).length;
   if (!nFav) state.favOnly = false;
-  let shown = state.favOnly ? props.filter((p) => p.favorite) : (planList || state.shown.map(propById).filter(Boolean));
-  const older = planList || state.favOnly ? [] : props.filter((p) => !state.shown.includes(p.id));
-  if (!state.favOnly) shown = shown.filter((p) => p.favorite).concat(shown.filter((p) => !p.favorite));  // favoriter först
+  const shown = state.favOnly ? props.filter((p) => p.favorite) : (planList || props);
   const favBar = nFav ? `<div class="chips"><button class="chip" data-favonly="1" aria-pressed="${!!state.favOnly}">${icon("star", 13)} Bara favoriter · ${nFav}</button></div>` : "";
   const favs = clips().filter((c) => c.favorite).length;
   const fmt = FORMAT_INFO.find((f) => f.id === s.format);
@@ -1022,7 +1030,7 @@ function viewProposals() {
     </div>
     ${promptBar()}
     <div class="row" style="gap:10px;align-items:center;flex-wrap:wrap">${planTabs() || `<div class="chips"><button class="chip" data-act="setup-project">+ Välj filmtyper: dykfilm, reklam, musikvideo, trailer …</button></div>`}${favBar}</div>
-    <div class="props">${shown.map(propCard).join("") || '<div class="empty">Beskriv filmen ovan, välj filmtyper eller klicka på "Generera nya förslag".</div>'}</div>
+    ${proposalGroups(shown)}
     <details class="more" ${state.moreOpen !== false ? "open" : ""} data-more>
       <summary>Stilar, berättelse och effekter för "Generera nya förslag"</summary>
       <div class="stack" style="gap:18px;padding-top:14px">
@@ -1033,8 +1041,38 @@ function viewProposals() {
         <a href="#" data-step-link="import" style="font-size:13px">Ändra format, längd eller musik</a>
       </div>
     </details>
-    ${older.length ? `<section class="older"><h2>Tidigare förslag</h2>${older.slice(0, 9).map((p) => `<div class="older-row"><b>${esc(p.title || p.style_label)}</b><span class="muted">${esc(p.style_label)}</span><span class="muted num">${p.n_shots} klipp · ${fmtDur(p.length)} · ${esc(p.format)}</span><span class="grow"></span><button class="btn small" data-show="${p.id}">Visa</button></div>`).join("")}</section>` : ""}
+    ${props.length > 8 && !remote() ? `<div class="row" style="justify-content:center;margin-top:18px"><button class="btn small" data-act="prune">${icon("trash", 14)}Rensa gamla förslag</button>
+      <span class="muted" style="font-size:12px">Favoriter, redigerade och de 6 senaste behålls.</span></div>` : ""}
   </main>`;
+}
+
+/* Förslagen i omgångar, nyast först. Inget försvinner när nya skapas. */
+function batchLabel(t) {
+  if (!t) return "Tidigare";
+  const d = new Date(t * 1000), now = new Date();
+  const hm = d.toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
+  const days = Math.round((new Date(now.toDateString()) - new Date(d.toDateString())) / 864e5);
+  return days === 0 ? `Idag ${hm}` : days === 1 ? `Igår ${hm}` : `${d.toLocaleDateString("sv-SE", { day: "numeric", month: "short" })} ${hm}`;
+}
+function proposalGroups(list) {
+  if (!list.length) return '<div class="props"><div class="empty">Beskriv filmen ovan, välj filmtyper eller klicka på "Generera nya förslag".</div></div>';
+  const groups = [];
+  list.forEach((p) => {
+    const key = p.batch || p.created || 0;
+    const k = Math.round(key / 30);  // samma omgång (inom en halv minut)
+    let g = groups.find((x) => x.k === k);
+    if (!g) { g = { k, t: key, items: [] }; groups.push(g); }
+    g.items.push(p);
+  });
+  groups.sort((a, b) => b.t - a.t);
+  const open = state.oldOpen ? groups.length : 3;
+  const plansOf = (g) => [...new Set(g.items.map((p) => (filmTypes()[p.plan] || {}).label || (p.plan === "custom" ? "Egna förslag" : p.style_label)))].slice(0, 3).join(", ");
+  const html = groups.slice(0, open).map((g, gi) => `<section class="pgroup">
+      <div class="pgroup-head"><b>${esc(batchLabel(g.t))}</b><span class="muted">${esc(plansOf(g))} · ${g.items.length} förslag</span>
+        ${g.items.some((p) => state.fresh && state.fresh.has(p.id)) ? '<span class="badge newbadge">Ny</span>' : ""}</div>
+      <div class="props">${g.items.map(propCard).join("")}</div></section>`).join("");
+  const rest = groups.length - open;
+  return html + (rest > 0 ? `<div class="row" style="justify-content:center;margin:14px 0"><button class="btn" data-act="old-open">Visa äldre omgångar (${rest})</button></div>` : "");
 }
 
 /* ---------- vy: exportera ---------- */
@@ -1098,8 +1136,49 @@ async function setLan(enable) {
 }
 
 /* ---------- render ---------- */
+/* Projektflikar: ett projekt per flik, som i en webbläsare. Varje projekt minns var man var. */
+function renderTabs() {
+  const nav = $("#ptabs");
+  if (!nav) return;
+  const ps = (state.projects || []).slice().sort((a, b) => (a.created || 0) - (b.created || 0));  // fast ordning
+  if (!ps.length) { nav.hidden = true; return; }
+  nav.hidden = false;
+  const dup = (n) => ps.filter((x) => x.name === n).length > 1;
+  nav.innerHTML = ps.map((p) => `<button class="ptab ${p.id === state.pid ? "active" : ""}" data-ptab="${esc(p.id)}" title="${esc(p.name)} · ${p.clips} klipp">
+      ${p.busy ? '<span class="pdot" aria-label="arbetar"></span>' : ""}<span class="ptname">${esc(p.name)}${dup(p.name) ? ` <span class="muted">· ${p.clips} klipp</span>` : ""}</span></button>`).join("")
+    + (remote() ? "" : `<button class="ptab add" data-act="new-import" title="Nytt projekt: välj en mapp med klipp" ${running() ? "" : ""}>+ Nytt projekt</button>`);
+  const act = nav.querySelector(".active");
+  if (act && act.scrollIntoView && !state.tabsScrolled) { act.scrollIntoView({ block: "nearest", inline: "nearest" }); state.tabsScrolled = true; }
+}
+async function switchProject(pid) {
+  if (pid === state.pid) return;
+  state.viewBy = state.viewBy || {};
+  if (state.pid) state.viewBy[state.pid] = state.view === "edit" || state.view === "setup" ? "proposals" : state.view;
+  try {
+    await loadProject(pid);
+    const has = (P().proposals || []).length;
+    state.view = state.viewBy[pid] || (has ? "proposals" : running() ? "import" : "import");
+    state.tabsScrolled = false;
+    render();
+    pollJob();
+  } catch (e) { fail(e); }
+}
+let tabsTimer = null;
+function watchTabs() {  // uppdatera "arbetar"-pricken på flikarna
+  clearInterval(tabsTimer);
+  tabsTimer = setInterval(async () => {
+    if (document.hidden) return;
+    try {
+      const ps = await api("GET", "/api/projects");
+      const before = JSON.stringify((state.projects || []).map((p) => [p.id, p.busy, p.name, p.clips]));
+      if (JSON.stringify(ps.map((p) => [p.id, p.busy, p.name, p.clips])) !== before) { state.projects = ps; renderTabs(); }
+    } catch (e) { /* tyst */ }
+  }, 4000);
+}
+
 function render() {
   renderTop();
+  renderTabs();
   const v = $("#view");
   if (state.view === "setup" && state.setup) { v.innerHTML = viewSetup(); return; }
   if (state.view === "queue") { v.innerHTML = viewQueue(); return; }
@@ -1177,7 +1256,19 @@ document.addEventListener("click", async (ev) => {
   if (d.ex) return toggleClip(d.ex, "excluded");
   if (d.preview) return renderProp(d.preview, "preview");
   if (d.regen) return regenerate(d.regen);
+  if (d.ptab) return switchProject(d.ptab);
   if (d.favonly) { state.favOnly = !state.favOnly; return render(); }
+  if (d.act === "old-open") { state.oldOpen = true; return render(); }
+  if (d.act === "prune") {
+    if (state.pruneAsk !== state.pid) { state.pruneAsk = state.pid; toast("Tryck en gång till för att rensa. Favoriter, redigerade och de 6 senaste behålls.", true); setTimeout(() => { state.pruneAsk = null; }, 4000); return undefined; }
+    state.pruneAsk = null;
+    try {
+      const r = await api("POST", `/api/p/${state.pid}/prune`, { keep: 6 });
+      P().proposals = r.proposals;
+      toast(`${r.removed} gamla förslag togs bort.`, true);
+    } catch (e) { fail(e); }
+    return render();
+  }
   if (d.propfav) {
     const pr = propById(d.propfav);
     try {
@@ -1314,4 +1405,5 @@ document.addEventListener("submit", async (ev) => {
     }
   } catch (e) { fail(e); }
   render();
+  watchTabs();
 })();

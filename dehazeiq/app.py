@@ -25,7 +25,7 @@ import cv2
 from . import (TAGLINE, __version__, ai, cliptext, divelog, editor, effects, generator, i18n, media, musiclib,
                pipeline, prompt, render, search, tagging, vlm, whisper)
 from .config import FILM_TYPES, FORMATS, HOME, LOOKS, PLATFORMS, PROJECTS_DIR, STYLES
-from .project import JOBS, Project, auto_name, save_default_settings
+from .project import JOBS, Project, auto_name, project_lock, save_default_settings
 
 WEB = Path(__file__).parent / "web"
 MEDIA_DIRS = {"proxies", "renders", "shots"}
@@ -44,6 +44,28 @@ def _project(pid) -> Project:
         return Project(pid)
     except FileNotFoundError:
         raise ApiError("Projektet finns inte", HTTPStatus.NOT_FOUND)
+
+
+def _lean(o, depth=0):
+    """Ångra-historiken och översättningscachen behövs inte i webbläsaren: skicka bara antalet
+    ångra-steg. Gör svaren mycket mindre när ett projekt har många förslag."""
+    if depth > 3:
+        return o
+    if isinstance(o, list):
+        return [_lean(x, depth + 1) for x in o]
+    if isinstance(o, dict):
+        if "shots" in o and "history" in o:
+            o = dict(o)
+            o["undo_n"] = len(o.pop("history") or [])
+            return o
+        if "proposals" in o or "proposal" in o:
+            o = dict(o)
+            o.pop("i18n_cache", None)
+            for k in ("proposals", "proposal"):
+                if k in o:
+                    o[k] = _lean(o[k], depth + 1)
+        return o
+    return o
 
 
 def _project_view(p: Project) -> dict:
@@ -332,7 +354,7 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
     def _json(self, obj, status=HTTPStatus.OK):
-        self._send(status, json.dumps(obj, ensure_ascii=False).encode("utf-8"))
+        self._send(status, json.dumps(_lean(obj), ensure_ascii=False).encode("utf-8"))
 
     def _body(self):
         n = int(self.headers.get("Content-Length") or 0)
@@ -600,12 +622,13 @@ class Handler(BaseHTTPRequestHandler):
             p = Project.create(name)
             plans = _clean_plans(body.get("plans"))
             if plans or "previews" in body:
-                p.reload()
-                st = p.data.setdefault("settings", {})
-                if plans:
-                    st["plans"] = plans
-                st["previews"] = bool(body.get("previews", True))
-                p.save()
+                with project_lock():  # läs, ändra och spara i ett svep
+                    p.reload()
+                    st = p.data.setdefault("settings", {})
+                    if plans:
+                        st["plans"] = plans
+                    st["previews"] = bool(body.get("previews", True))
+                    p.save()
             JOBS.start(p.id, "auto", pipeline.auto, p.id, paths, label=_auto_label(plans),
                        project_name=p.data["name"])
             return self._json(_project_view(p), HTTPStatus.CREATED)
@@ -732,11 +755,15 @@ class Handler(BaseHTTPRequestHandler):
             JOBS.start(p.id, "auto", pipeline.auto, p.id, None, label="Analys och förslag",
                        project_name=p.data["name"])
             return self._json({"ok": True})
+        if action == ["prune"]:
+            n = p.prune_proposals(int(body.get("keep", 6)))
+            return self._json({"removed": n, "proposals": p.data.get("proposals", [])})
         if action == ["plans"]:
             plans = _clean_plans(body.get("plans"))
-            p.reload()
-            p.data.setdefault("settings", {})["plans"] = plans
-            p.save()
+            with project_lock():  # läs, ändra och spara i ett svep
+                p.reload()
+                p.data.setdefault("settings", {})["plans"] = plans
+                p.save()
             if body.get("run") and plans:
                 JOBS.start(p.id, "plans", pipeline.generate_plans, p.id, plans, bool(body.get("previews", True)),
                            label="Förslag: " + ", ".join(FILM_TYPES[x["type"]]["label"].lower() for x in plans),
@@ -799,32 +826,34 @@ class Handler(BaseHTTPRequestHandler):
             except divelog.DiveLogError as e:
                 raise ApiError(str(e))
         if action == ["divelog", "remove"]:
-            p.reload()
-            p.data.pop("divelog", None)
-            p.save()
+            with project_lock():  # läs, ändra och spara i ett svep
+                p.reload()
+                p.data.pop("divelog", None)
+                p.save()
             return self._json({"ok": True})
         if action == ["music"]:
             info = pipeline.set_music(p.id, body.get("path"), body.get("track"))
             return self._json({"music": info})
         if action == ["settings"]:
-            p.reload()
-            s = p.data.setdefault("settings", {})
-            for k in ("format", "length", "style"):
-                if k in body:
-                    s[k] = body[k]
-            if body.get("units") in ("metric", "imperial"):
-                s["units"] = body["units"]
-                for prop in p.data.get("proposals", []):
-                    (prop.get("renders") or {}).pop("preview", None)
-            if isinstance(body.get("effects"), dict):
-                eff = effects.enabled(s)
-                eff.update({k: bool(v) for k, v in body["effects"].items() if k in effects.EFFECTS})
-                if eff != effects.enabled(s):
-                    # förhandsvisningarna gjordes med andra effekter: gör om dem vid nästa uppspelning
+            with project_lock():  # läs, ändra och spara i ett svep
+                p.reload()
+                s = p.data.setdefault("settings", {})
+                for k in ("format", "length", "style"):
+                    if k in body:
+                        s[k] = body[k]
+                if body.get("units") in ("metric", "imperial"):
+                    s["units"] = body["units"]
                     for prop in p.data.get("proposals", []):
                         (prop.get("renders") or {}).pop("preview", None)
-                s["effects"] = eff
-            p.save()
+                if isinstance(body.get("effects"), dict):
+                    eff = effects.enabled(s)
+                    eff.update({k: bool(v) for k, v in body["effects"].items() if k in effects.EFFECTS})
+                    if eff != effects.enabled(s):
+                        # förhandsvisningarna gjordes med andra effekter: gör om dem vid nästa uppspelning
+                        for prop in p.data.get("proposals", []):
+                            (prop.get("renders") or {}).pop("preview", None)
+                    s["effects"] = eff
+                p.save()
             save_default_settings(s)
             return self._json({"settings": s})
         if len(action) == 2 and action[0] == "clip":

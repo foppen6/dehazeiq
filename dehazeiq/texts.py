@@ -162,7 +162,7 @@ def _label(s):
 def suggest_rules(prop, tone, rng=None):
     rng = rng or random.Random()
     shots = prop.get("shots", [])
-    style = TONE_STYLE.get(tone, "caption")
+    pass
     items, seen = [], set()
     import datetime
     t_first = min([s["time"] for s in shots if s.get("time")] or [0])

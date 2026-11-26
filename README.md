@@ -174,6 +174,15 @@ mot klipp N*, ändra styrkan, stänga av för ett klipp eller helt. Färgsticket
 ljusheten bara delvis, så att mörka scener inte blir brusiga. Ordning: AI:ns vitbalans →
 matchning → bildförbättring → valt utseende. På som standard (Effekter › Färgmatchning).
 
+**Projektflikar:** varje projekt har en flik överst, med en pulserande prick när något körs i kön.
+En ny import öppnas som en ny flik, och varje projekt minns var man var.
+
+**Förslagen försvinner aldrig:** alla förslag visas i omgångar, nyast först (*Idag 11:06 · Egna
+förslag · 3 förslag · Ny*). Filmtypsflikarna är filter. Inget gallras automatiskt – *Rensa gamla
+förslag* tar bort allt utom favoriter, redigerade och de 6 senaste.
+
+**Förhandsvisning och export i egen fil:** de väntar inte på en pågående analys eller import.
+
 **Favoriter och ta bort:** varje förslag har en stjärna och en papperskorg. Favoriter hamnar först,
 gallras aldrig bort och kan visas för sig med *Bara favoriter* – bra när man gör många varianter.
 Ta bort frågar en gång till; exporterade filmer ligger kvar.

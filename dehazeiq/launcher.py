@@ -225,7 +225,7 @@ def main(argv=None) -> int:
     if getattr(sys, "frozen", False):
         _redirect_output()
 
-    from . import app, media
+    from . import app
     try:
         server, url = app.start_server(args.port, args.lan)
     except media.MediaError as e:

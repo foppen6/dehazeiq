@@ -37,6 +37,12 @@ def clip_id_for(path: Path) -> str:
     return hashlib.sha1(key.encode("utf-8")).hexdigest()[:12]
 
 
+def project_lock():
+    """Lås för att läsa, ändra och spara projektfilen i ett svep (så att två samtidiga ändringar,
+    t.ex. ett jobb i kön och en redigering, inte skriver över varandra)."""
+    return _LOCK
+
+
 class Project:
     def __init__(self, pid: str):
         self.id = pid
@@ -46,6 +52,7 @@ class Project:
             raise FileNotFoundError(pid)
         with _LOCK:
             self.data = json.loads(self.file.read_text("utf-8"))
+            self.data["id"] = pid  # mappens namn gäller (en kopierad mapp)
 
     # ---------- skapa / lista ----------
     @staticmethod
@@ -80,8 +87,10 @@ class Project:
                 except (OSError, json.JSONDecodeError):
                     continue
                 clips = data.get("clips", {}).values()
+                pid = d.name  # mappens namn: en kopierad projektmapp får inte samma id som originalet
                 out.append({
-                    "id": data["id"], "name": data.get("name", data["id"]),
+                    "id": pid, "name": data.get("name", pid),
+                    "busy": JOBS.busy(pid),
                     "created": data.get("created", 0),
                     "clips": len(data.get("clips", {})),
                     "duration": round(sum(c.get("duration", 0) for c in clips), 1),
@@ -113,6 +122,7 @@ class Project:
     def reload(self):
         with _LOCK:
             self.data = json.loads(self.file.read_text("utf-8"))
+            self.data["id"] = self.id
 
     def update_clip(self, cid: str, **fields):
         with _LOCK:
@@ -156,18 +166,45 @@ class Project:
                 return p
         return None
 
-    def add_proposals(self, props, keep=40):
-        """Nya förslag först. Redigerade förslag sparas alltid; övriga gallras till keep st."""
+    def add_proposals(self, props, keep=None):
+        """Nya förslag först. Inget gallras automatiskt (Rensa gamla förslag gör det på begäran).
+        Varje anrop är en omgång: förslagen får samma batch-tid så att de kan visas tillsammans."""
+        now = time.time()
+        for p in props:
+            p.setdefault("batch", now)
         with _LOCK:
             self.reload()
             allp = props + self.data.get("proposals", [])
-            out, n = [], 0
-            for p in allp:
-                if p.get("edited") or p.get("favorite") or n < keep:
-                    out.append(p)
-                    n += 0 if p.get("edited") else 1
-            self.data["proposals"] = out
+            if keep:
+                out, n = [], 0
+                for p in allp:
+                    if p.get("edited") or p.get("favorite") or n < keep:
+                        out.append(p)
+                        n += 0 if p.get("edited") else 1
+                allp = out
+            self.data["proposals"] = allp
             self.save()
+
+    def prune_proposals(self, keep_latest=6):
+        """Rensa gamla förslag: behåller favoriter, redigerade och de senaste keep_latest.
+        Tar också bort deras förhandsvisningar. Returnerar antal borttagna."""
+        with _LOCK:
+            self.reload()
+            ps = self.data.get("proposals", [])
+            keep, gone, n = [], [], 0
+            for p in ps:
+                if p.get("favorite") or p.get("edited") or n < keep_latest:
+                    keep.append(p)
+                    n += 0 if (p.get("favorite") or p.get("edited")) else 1
+                else:
+                    gone.append(p)
+            self.data["proposals"] = keep
+            self.save()
+        for p in gone:
+            prev = (p.get("renders") or {}).get("preview")
+            if prev:
+                (self.dir / "renders" / prev).unlink(missing_ok=True)
+        return len(gone)
 
     def replace_proposal(self, prop):
         with _LOCK:
@@ -279,7 +316,7 @@ class Jobs:
         self._lock = threading.Lock()
         self._wake = threading.Condition(self._lock)
         self.paused = False
-        self._worker = None
+        self._workers = {}
 
     # ---------- status ----------
     def _public(self, t, pos=None):
@@ -289,14 +326,23 @@ class Jobs:
         return out
 
     def status(self, pid):
+        st = self._status(pid)
+        with self._lock:
+            st["active"] = [t["id"] for t in self._tasks if t["pid"] == pid and t["state"] in ("running", "queued")]
+        return st
+
+    def _status(self, pid):
         with self._lock:
             running = [t for t in self._tasks if t["pid"] == pid and t["state"] == "running"]
-            if running:
+            if running:  # förhandsvisning/export först: det är den användaren väntar på
+                running.sort(key=lambda t: t.get("lane") != "media")
                 return self._public(running[0])
             queued = [t for t in self._tasks if t["state"] == "queued"]
             for i, t in enumerate(queued):
                 if t["pid"] == pid:
-                    ahead = sum(1 for x in self._tasks if x["state"] == "running") + i
+                    lane_q = [x for x in queued if x.get("lane") == t.get("lane")]
+                    ahead = sum(1 for x in self._tasks if x["state"] == "running" and x.get("lane") == t.get("lane")) \
+                        + lane_q.index(t)
                     pub = self._public(t, i + 1)
                     pub["state"] = "running"  # för projektet: arbete pågår (väntar i kön)
                     pub["queued"] = True
@@ -325,7 +371,8 @@ class Jobs:
 
     # ---------- ändra kön ----------
     def start(self, pid, kind, fn, *args, label=None, project_name=None, front=False):
-        task = {"id": uuid.uuid4().hex[:8], "pid": pid, "kind": kind, "label": label or kind,
+        lane = "media" if kind.startswith("render:") else "main"  # förhandsvisning/export i egen fil
+        task = {"id": uuid.uuid4().hex[:8], "pid": pid, "kind": kind, "label": label or kind, "lane": lane,
                 "project": project_name or pid, "state": "queued", "progress": 0.0,
                 "message": "Väntar i kön", "queued_at": time.time(), "fn": fn, "args": args,
                 "cancel": False}
@@ -336,9 +383,10 @@ class Jobs:
             else:
                 self._tasks.append(task)
             self._prune()
-            if self._worker is None or not self._worker.is_alive():
-                self._worker = threading.Thread(target=self._run, daemon=True)
-                self._worker.start()
+            w = self._workers.get(lane)
+            if w is None or not w.is_alive():
+                w = self._workers[lane] = threading.Thread(target=self._run, args=(lane,), daemon=True)
+                w.start()
             self._wake.notify_all()
         return task["id"]
 
@@ -384,13 +432,14 @@ class Jobs:
             self._tasks = [t for t in self._tasks if t not in old]
 
     # ---------- arbetaren ----------
-    def _run(self):
+    def _run(self, lane="main"):
         while True:
             with self._lock:
                 task = None
                 while task is None:
                     if not self.paused:
-                        task = next((t for t in self._tasks if t["state"] == "queued"), None)
+                        task = next((t for t in self._tasks if t["state"] == "queued"
+                                     and t.get("lane", "main") == lane), None)
                     if task is None:
                         self._wake.wait(timeout=5)
                 task.update(state="running", started=time.time(), message="Startar …")

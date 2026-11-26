@@ -237,7 +237,7 @@ def cam_filter(mode, out_w, out_h, cmdfile=None, fov=None, yaw=0.0, pitch=0.0, d
         # stereografisk projektion rakt ner, långsam rotation
         return [f"v360@cam=input=e:output=sg:pitch=-90:h_fov=300:v_fov=300:w={big}:h={big}"
                 f":yaw={yaw:.1f}:interp=line:reset_rot=1",
-                f"rotate=a='0.35*t':fillcolor=black",
+                "rotate=a='0.35*t':fillcolor=black",
                 f"crop={out_w}:{out_h}"]
     if mode == "ball":
         return [f"v360@cam=input=e:output=sg:pitch=90:h_fov=290:v_fov=290:w={big}:h={big}"

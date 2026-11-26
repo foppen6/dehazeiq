@@ -457,7 +457,7 @@ def style_filters(look_fx, out_w, out_h, beat_flash=False):
     """Stileffekter: filmkorn, svarta kanter (bredbild), glöd, blixt på takt, Super 8-fladder."""
     out = []
     if look_fx.get("weave"):  # lite ojämn bild som i en gammal projektor
-        out += [f"crop=iw-8:ih-8:4+3*sin(t*11):4+3*cos(t*13)", f"scale={out_w}:{out_h}"]
+        out += ["crop=iw-8:ih-8:4+3*sin(t*11):4+3*cos(t*13)", f"scale={out_w}:{out_h}"]
     if look_fx.get("glow"):
         out.append("split[g0][g1];[g1]gblur=sigma=18[g2];[g0][g2]blend=all_mode=screen:all_opacity=0.28")
     if look_fx.get("rgbshift"):  # glitch: färgkanalerna glider isär en kort stund i början av klippet

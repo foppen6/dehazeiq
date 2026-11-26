@@ -307,22 +307,26 @@ def import_log(project, path):
     dives = parse_file(path)
     clips = [c for c in project.clips() if c.get("analysis")]
     off, fit = auto_offset(dives, clips)
-    project.reload()
-    project.data["divelog"] = {"dives": dives, "offset": off, "fit": fit, "source": Path(path).name,
-                               "imported": time.time()}
-    project.save()
+    from .project import project_lock
+    with project_lock():  # läs, ändra och spara i ett svep
+        project.reload()
+        project.data["divelog"] = {"dives": dives, "offset": off, "fit": fit, "source": Path(path).name,
+                                   "imported": time.time()}
+        project.save()
     return summary(project)
 
 
 def set_offset(project, offset=None, auto=False):
-    project.reload()
-    log = project.data.get("divelog") or {}
-    if not log.get("dives"):
-        raise DiveLogError("Ingen dyklogg importerad")
-    if auto:
-        log["offset"], log["fit"] = auto_offset(log["dives"], [c for c in project.clips() if c.get("analysis")])
-    else:
-        log["offset"] = float(offset)
-    project.data["divelog"] = log
-    project.save()
+    from .project import project_lock
+    with project_lock():  # läs, ändra och spara i ett svep
+        project.reload()
+        log = project.data.get("divelog") or {}
+        if not log.get("dives"):
+            raise DiveLogError("Ingen dyklogg importerad")
+        if auto:
+            log["offset"], log["fit"] = auto_offset(log["dives"], [c for c in project.clips() if c.get("analysis")])
+        else:
+            log["offset"] = float(offset)
+        project.data["divelog"] = log
+        project.save()
     return summary(project)

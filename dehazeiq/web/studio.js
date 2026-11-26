@@ -179,10 +179,10 @@ function planTabs() {
   const plans = [];
   props.forEach((p) => { if (p.plan && !plans.includes(p.plan)) plans.push(p.plan); });
   if (!plans.length) return "";
-  if (!state.planTab || (state.planTab !== "all" && !plans.includes(state.planTab))) state.planTab = plans[0];
+  if (!state.planTab || (state.planTab !== "all" && !plans.includes(state.planTab))) state.planTab = "all";
   const n = (k) => props.filter((p) => p.plan === k).length;
-  return `<div class="chips" role="tablist" aria-label="Filmtyp">${plans.map((k) => `<button class="chip" role="tab" data-plantab="${k}" aria-pressed="${state.planTab === k}">${esc((filmTypes()[k] || {}).label || (k === "custom" ? "Egna förslag" : k))} <span class="muted">· ${n(k)}</span></button>`).join("")}
-    <button class="chip" data-plantab="all" aria-pressed="${state.planTab === "all"}">Alla</button>
+  return `<div class="chips" role="tablist" aria-label="Filmtyp"><button class="chip" data-plantab="all" aria-pressed="${state.planTab === "all"}">Alla <span class="muted">· ${props.length}</span></button>
+    ${plans.map((k) => `<button class="chip" role="tab" data-plantab="${k}" aria-pressed="${state.planTab === k}">${esc((filmTypes()[k] || {}).label || (k === "custom" ? "Egna förslag" : k))} <span class="muted">· ${n(k)}</span></button>`).join("")}
     <button class="chip" data-act="setup-project">+ Fler filmtyper</button></div>`;
 }
 
@@ -293,6 +293,7 @@ async function edit(op, args = {}, { quiet = false } = {}) {
     if (op === "swap" || op === "delete" || op === "move" || op === "undo") state.ed.alts = null;
     if (["swap", "delete", "move", "undo", "trim"].includes(op) && state.ed.matchInfo) loadMatchInfo();
     if (!quiet) { render(); requestShotPreview(); } else refreshStill();
+    document.querySelectorAll("[data-act=ed-undo]").forEach((b) => { b.disabled = !(r.proposal.undo_n || (r.proposal.history || []).length); });
   } catch (e) { fail(e); }
 }
 
@@ -697,7 +698,7 @@ function viewEdit() {
   return `<main class="main wide edmain">
     <div class="spread edhead"><div class="head"><h1>${esc(p.title || p.style_label)}</h1>
       <p class="lead">${esc(p.style_label)} · ${p.platform ? `${esc(platformLabel(p.platform))} · ` : ""}${p.format} · ${fmtDur(p.length)}</p></div>
-      <div class="row">${platformSelect(p)}${lengthSelect(p)}<button class="btn" data-act="ed-undo" ${(p.history || []).length ? "" : "disabled"}>${svgi(ICO.undo, 16)}Ångra</button>
+      <div class="row">${platformSelect(p)}${lengthSelect(p)}<button class="btn" data-act="ed-undo" ${(p.undo_n || (p.history || []).length) ? "" : "disabled"}>${svgi(ICO.undo, 16)}Ångra</button>
         ${prev ? "" : `<button class="btn" data-preview="${p.id}" ${busyHere ? "disabled" : ""}>${icon("play", 14)}${busyHere ? "Renderar …" : "Förhandsvisa filmen"}</button>`}
         <button class="btn primary" data-export="${p.id}">Exportera</button></div></div>
     <div class="edgrid">

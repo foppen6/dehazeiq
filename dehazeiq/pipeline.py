@@ -7,7 +7,7 @@ import numpy as np
 
 from . import ai, analysis, generator, media, music, pano, photo, quality, render, timeline
 from .config import AUDIO_EXT, FORMATS
-from .project import Project, clip_id_for, collect_video_files, save_default_settings
+from .project import Project, clip_id_for, collect_video_files, project_lock, save_default_settings
 
 
 def import_media(progress, pid, paths):
@@ -51,10 +51,11 @@ def import_media(progress, pid, paths):
         if info["is360"]:
             info["layout360"] = pano.detect(f, info) or "equirect"
             info["note"] = "360-film: AI väljer vyer"
-        proj.reload()
-        proj.data["clips"][cid] = info
-        proj.data["order"].append(cid)
-        proj.save()
+        with project_lock():  # läs, ändra och spara i ett svep
+            proj.reload()
+            proj.data["clips"][cid] = info
+            proj.data["order"].append(cid)
+            proj.save()
         added.append(cid)
 
     # 360-film: AI väljer vart kameran tittar, och vyerna blir vanliga klipp
@@ -107,11 +108,12 @@ def make_360_views(progress, proj, cid):
                     has_audio=info.get("has_audio", False))
         if mode == "split":
             info["portrait_only"] = True
-        proj.reload()
-        proj.data["clips"][vid] = info
-        if vid not in proj.data["order"]:
-            proj.data["order"].append(vid)
-        proj.save()
+        with project_lock():  # läs, ändra och spara i ett svep
+            proj.reload()
+            proj.data["clips"][vid] = info
+            if vid not in proj.data["order"]:
+                proj.data["order"].append(vid)
+            proj.save()
         new.append(vid)
     proj.update_clip(cid, note="360-film: AI-vy och delad bild skapade", status="proxy")
     return new
@@ -167,9 +169,10 @@ def analyze(progress, pid, redo=False):
 def assess(pid):
     """Automatiskt bortval av svaga klipp (suddiga, skakiga, felexponerade, klart sämre)."""
     proj = Project(pid)
-    proj.reload()
-    n = quality.assess(list(proj.data["clips"].values()))
-    proj.save()
+    with project_lock():  # läs, ändra och spara i ett svep
+        proj.reload()
+        n = quality.assess(list(proj.data["clips"].values()))
+        proj.save()
     return n
 
 
@@ -181,23 +184,26 @@ def set_music(pid, path, track=None):
         if not info:
             raise RuntimeError("Låten finns inte i biblioteket längre")
         info["auto"] = False
-        proj.reload()
-        proj.data["music"] = info
-        proj.save()
+        with project_lock():  # läs, ändra och spara i ett svep
+            proj.reload()
+            proj.data["music"] = info
+            proj.save()
         return info
     if not path:
-        proj.reload()
-        proj.data["music"] = None
-        proj.save()
+        with project_lock():  # läs, ändra och spara i ett svep
+            proj.reload()
+            proj.data["music"] = None
+            proj.save()
         return None
     p = Path(path).expanduser()
     if not p.is_file() or p.suffix.lower() not in AUDIO_EXT:
         raise RuntimeError("Välj en ljudfil (MP3, M4A, WAV, AIFF, FLAC).")
     info = music.analyze(p)
     info["name"] = p.stem
-    proj.reload()
-    proj.data["music"] = info
-    proj.save()
+    with project_lock():  # läs, ändra och spara i ett svep
+        proj.reload()
+        proj.data["music"] = info
+        proj.save()
     return info
 
 
@@ -213,9 +219,10 @@ def generate(pid, style, fmt, length, favorites=(), theme=None):
     for pr in props:  # egen flik bland filmtyperna, så att de nya förslagen syns direkt
         pr.setdefault("plan", "custom")
         pr.setdefault("plan_label", "Egna förslag")
-    proj.reload()
-    proj.data.setdefault("settings", {}).update(format=fmt, length=length, style=style)
-    proj.save()
+    with project_lock():  # läs, ändra och spara i ett svep
+        proj.reload()
+        proj.data.setdefault("settings", {}).update(format=fmt, length=length, style=style)
+        proj.save()
     save_default_settings(proj.data["settings"])
     proj.add_proposals(props)
     return props
@@ -269,15 +276,16 @@ def edit_proposal(pid, prop_id, op, args):
     prop = editor.apply(proj, prop, op, args or {})
     proj.replace_proposal(prop)
     if op == "promo":
-        proj.reload()
-        proj.data["promo_last"] = prop["promo"]
-        if (args or {}).get("all"):
-            for other in proj.data.get("proposals") or []:
-                same_kind = (other.get("style") == "trailer") == (prop.get("style") == "trailer")
-                if other["id"] != prop["id"] and "promo" in other and same_kind:
-                    other["promo"] = dict(prop["promo"])
-                    other["renders"] = {}
-        proj.save()
+        with project_lock():  # läs, ändra och spara i ett svep
+            proj.reload()
+            proj.data["promo_last"] = prop["promo"]
+            if (args or {}).get("all"):
+                for other in proj.data.get("proposals") or []:
+                    same_kind = (other.get("style") == "trailer") == (prop.get("style") == "trailer")
+                    if other["id"] != prop["id"] and "promo" in other and same_kind:
+                        other["promo"] = dict(prop["promo"])
+                        other["renders"] = {}
+            proj.save()
     return prop
 
 
@@ -345,9 +353,10 @@ def render_proposal(progress, pid, prop_id, resolution="preview", lang="sv"):
             progress(0.01, "Översätter texterna")
             got = i18n.translate_free(missing, lang)
             if got:
-                proj.reload()
-                proj.data.setdefault("i18n_cache", {}).setdefault(lang, {}).update(got)
-                proj.save()
+                with project_lock():  # läs, ändra och spara i ett svep
+                    proj.reload()
+                    proj.data.setdefault("i18n_cache", {}).setdefault(lang, {}).update(got)
+                    proj.save()
                 cache = dict(cache, **got)
         free = cache
     render.render(proj, prop, resolution, out, progress, lang=lang, free=free)
@@ -585,7 +594,6 @@ def auto(progress, pid, paths=None):
 def diagnostics(pid):
     """Liten rapport (utan filmerna) för att kunna justera AI:ns gränser:
     projektdata, analysvärden och en bild per klipp från dess bästa sekvens."""
-    import io
     import json
     import time
     import zipfile
