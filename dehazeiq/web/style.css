@@ -524,7 +524,7 @@ textarea.field { color: var(--text); height: auto; padding: 10px 12px; line-heig
 .ptabs .ptab.active { box-shadow: inset 0 2px 0 var(--accent); color: var(--text, #fff); }
 
 /* uppdateringsrad */
-.updbar{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:60;display:flex;align-items:center;gap:10px;
+.updbar{position:fixed;left:50%;bottom:84px;transform:translateX(-50%);z-index:60;display:flex;align-items:center;gap:10px;
   max-width:calc(100vw - 24px);padding:8px 8px 8px 14px;border-radius:12px;background:var(--raised);color:var(--text);
   border:1px solid var(--line-2);box-shadow:0 8px 24px rgba(0,0,0,.35);font-size:14px}
 .updbar span{min-width:0}
@@ -551,3 +551,77 @@ textarea.field { color: var(--text); height: auto; padding: 10px 12px; line-heig
 #tlTime { font-variant-numeric: tabular-nums; color: var(--text); }
 body.scrubbing, body.scrubbing * { cursor: ew-resize !important; user-select: none; }
 .edstill .edplay { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 3; background: #000; }
+
+/* förslagskortets rubrik under stjärna/papperskorg */
+.pcard .plabel { display: block; padding-right: 124px; }
+/* exportruta och mallar */
+.xmodal { width: min(620px, 100%); gap: 16px; }
+.xmlist { display: flex; flex-wrap: wrap; gap: 6px; max-height: 120px; overflow: auto; }
+.tplbox { gap: 10px; }
+.tplrow { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); }
+.tplrow .grow { display: flex; flex-direction: column; min-width: 0; }
+.tplrow small { font-size: 12px; }
+
+dl.kbd { display: grid; grid-template-columns: auto 1fr; gap: 8px 14px; margin: 0; align-items: center; }
+dl.kbd dd { margin: 0; color: var(--text-2); font-size: 14px; }
+kbd { font: 600 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 4px 7px; border-radius: 6px; border: 1px solid var(--line-2); background: var(--raised); white-space: nowrap; }
+@media (max-width: 700px) { .tlhint { display: none; } }
+
+/* klippbank */
+.tlbank { margin-top: 6px; border-top: 1px solid var(--line); padding-top: 8px; }
+.tlbank summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--text-2); }
+.bankrow { display: flex; gap: 8px; overflow-x: auto; padding: 8px 0 4px; }
+.bankitem { flex: 0 0 132px; display: flex; flex-direction: column; gap: 4px; border: 1px solid var(--line-2); border-radius: 10px; padding: 6px; background: var(--raised); cursor: grab; }
+.bankitem img { width: 100%; height: 70px; object-fit: cover; border-radius: 6px; display: block; background: #000; }
+.bankmeta { display: flex; justify-content: space-between; gap: 6px; font-size: 11px; min-width: 0; }
+.bankmeta b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bankbtns { display: flex; gap: 4px; }
+.bankbtns .btn { flex: 1; min-height: 26px; }
+.tlblock.dropl { box-shadow: inset 4px 0 0 var(--accent); }
+.tlblock.dropr { box-shadow: inset -4px 0 0 var(--accent); }
+.tlblock.dropswap { outline: 2px dashed var(--accent); outline-offset: -2px; }
+
+.cardbar { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 61; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  width: min(920px, calc(100vw - 24px)); padding: 10px 12px; border-radius: 12px; background: var(--raised); border: 1px solid var(--accent);
+  box-shadow: 0 10px 30px rgba(0,0,0,.45); font-size: 14px; }
+.cardbar .grow { min-width: 200px; }
+.cardbar .cbico { color: var(--accent); display: flex; }
+.cardbar .selfield { max-width: 220px; }
+.bankmeta .num { white-space: nowrap; }
+
+/* analysvy: markera flera, kompakt */
+.ccard { position: relative; }
+.ccard:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ccard.picked { box-shadow: 0 0 0 2px var(--accent); }
+.ccsel { position: absolute; left: 10px; bottom: 10px; width: 26px; height: 26px; border-radius: 7px; border: 1.5px solid #ffffffaa; background: #0009;
+  display: flex; align-items: center; justify-content: center; color: #001; cursor: pointer; opacity: 0; transition: opacity .12s; z-index: 2; }
+.ccard:hover .ccsel, .ccard:focus-within .ccsel, .ccsel[aria-pressed="true"] { opacity: 1; }
+.ccsel[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); }
+@media (hover: none) { .ccsel { opacity: 1; } }
+.grid.compact { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+.grid.compact .ccard .body { padding: 8px; gap: 6px; }
+.grid.compact .ccard .img { height: 100px; }
+.grid.compact .ccard .meters, .grid.compact .ccard .tags, .grid.compact .ccard label, .grid.compact .ccard .body > .stack:first-child { display: none; }
+.grid.compact .card-actions { gap: 4px; }
+.grid.compact .card-actions .toggle { font-size: 11px; padding: 0 5px; min-height: 28px; white-space: nowrap; gap: 3px; }
+.bulkbar { position: sticky; bottom: 12px; z-index: 20; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 12px; margin-top: 12px;
+  border-radius: 12px; background: var(--raised); border: 1px solid var(--accent); box-shadow: 0 8px 26px rgba(0,0,0,.4); }
+
+/* kompakt förslagslista */
+.prows { display: flex; flex-direction: column; gap: 6px; }
+.prow { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.prow.fav { box-shadow: 0 0 0 1.5px #FFD84A88; }
+.prow img { width: 54px; height: 54px; object-fit: cover; border-radius: 8px; flex: none; background: #000; }
+.prinfo { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
+.prinfo b, .prinfo small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.practs { gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+@media (max-width: 700px) { .prow { flex-wrap: wrap; } .practs { width: 100%; justify-content: flex-start; } }
+.cmpbtn[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+/* jämför sida vid sida */
+.cmpmodal { width: min(1100px, 100%); max-height: calc(100vh - 32px); overflow: auto; gap: 14px; }
+.cmpgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.cmpcol { display: flex; flex-direction: column; gap: 6px; min-width: 0; align-items: flex-start; }
+.cmpframe { height: min(60vh, 640px); width: auto; max-width: 100%; align-self: center; background: #000; border-radius: 12px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+.cmpframe video { width: 100%; height: 100%; object-fit: contain; display: block; }
+.cmpwait { display: flex; flex-direction: column; align-items: center; gap: 10px; color: var(--text-2); font-size: 13px; }
+@media (max-width: 640px) { .cmpgrid { gap: 8px; } .cmpcol small { display: none; } }

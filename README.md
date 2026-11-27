@@ -80,6 +80,29 @@ Automatiskt urval:
 
 Format, längd, stil och musik ställs in under **Importera** och gäller även nästa import.
 
+## Snabbare arbetsflöde
+
+- **Minneskort och kameror:** sätt i SD-kortet (eller koppla in Insta360/GoPro) – programmet
+  ser det, räknar de nya klippen (de som inte redan finns i något projekt) och frågar om de ska
+  bli ett nytt projekt eller läggas till i det öppna. Välj gärna en mall direkt.
+- **Mallar:** "Spara valen som mall" sparar filmtyper, format, längd, effekter och (valfritt)
+  automatisk export till dina plattformar. **Kör** på mallen gör import, analys, förslag och
+  export i ett svep.
+- **Exportera direkt:** knappen Exportera på förslagskortet och i redigeraren öppnar en liten ruta
+  med plattformar, upplösning och språk – valen kommer ihåg till nästa gång. **Exportera
+  favoriter** exporterar alla stjärnmärkta förslag på en gång.
+- **Notis när det är klart:** ett ljud och en systemnotis när analys, förslag eller exporter är
+  klara, så att du kan göra annat under tiden.
+- **Analysen:** peka på ett klipp och tryck **F** (måste med), **X** (välj bort) eller **A** (låt AI
+  avgöra). Markera flera med rutan i hörnet (Skift-klick för flera i rad, ⌘A/Ctrl+A för alla) och
+  ändra alla på en gång. **Kompakt** visar fler klipp per skärm.
+- **Förslagen:** **Kompakt lista** visar ett förslag per rad. **Jämför** två förslag sida vid sida
+  och spela dem samtidigt (mellanslag spelar/pausar).
+- **Redigeraren:** **S** delar klippet vid markören, **Q/W** kapar början/slutet, **T** lägger en
+  text vid markören, **J/K/L** spolar bakåt/pausar/spelar (L igen = 2×, 4×), **,/.** en bildruta.
+  **?** visar alla kortkommandon. **Klippbanken** under tidslinjen visar bra sekvenser som inte
+  används – dra in dem i videospåret (mellan två klipp = lägg in, mitt på ett klipp = byt ut).
+
 ## Berättelser
 
 Filmerna byggs kring ett tema i stället för att bara samla de bästa klippen:

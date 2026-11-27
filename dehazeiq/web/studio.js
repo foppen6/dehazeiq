@@ -47,6 +47,7 @@ state.queue = { paused: false, tasks: [], done: [] };
 async function loadQueue() {
   try {
     state.queue = await api("GET", "/api/queue");
+    if (typeof watchFinished === "function") watchFinished(state.queue);
     const n = state.queue.tasks.length + (state.queue.interrupted || []).length;
     if (!state.queueWarned && (state.queue.interrupted || []).length) {
       state.queueWarned = true;
@@ -133,6 +134,7 @@ function viewSetup() {
     <div class="head"><h1>Vad vill du göra av materialet?</h1>
       <p class="lead">Välj en eller flera. AI:n ${isNew ? "analyserar först och " : ""}gör förslag av varje sort. Allt läggs i kön och körs i bakgrunden.</p></div>
     ${isNew ? "" : promptBar()}
+    ${templatesBar(isNew ? "new" : "setup")}
     <div class="stack" style="gap:8px"><b>Hur ska förslagen skilja sig åt?</b>${varietyToggle("setup")}</div>
     <div class="ftgrid">${cards}</div>
     ${opts ? `<section class="box stack" style="gap:14px">${opts}</section>` : ""}
@@ -275,7 +277,12 @@ state.exportPlats = null;
 function exportPlatforms(p) {
   const pfs = platforms();
   const cur = p.platform || Object.keys(pfs).find((k) => pfs[k].format === p.format);
-  if (!state.exportPlats || state.exportPlatsFor !== p.id) { state.exportPlats = cur ? [cur] : []; state.exportPlatsFor = p.id; }
+  if (!state.exportPlats || state.exportPlatsFor !== p.id) {
+    const pr = exportPrefs();
+    state.exportPlats = pr.platforms.length ? pr.platforms : (cur ? [cur] : []);
+    state.exportPlatsFor = p.id;
+    if (!state.exportLangs) state.exportLangs = pr.langs;
+  }
   return `<section class="stack"><h2>Plattformar</h2>
     <p class="muted" style="margin:0;font-size:13px">Välj en eller flera. Filmen anpassas automatiskt (format, längd och beskärning) och varje export läggs i kön.</p>
     <div class="chips">${Object.entries(pfs).map(([k, pf]) => `<button class="chip" data-explat="${k}" aria-pressed="${state.exportPlats.includes(k)}">${esc(pf.label)} <span class="muted">· ${pf.format}</span></button>`).join("")}</div></section>
@@ -288,6 +295,8 @@ async function exportQueued() {
   const p = propById(state.exportProp);
   if (!p) return;
   try {
+    saveExportPrefs({ platforms: state.exportPlats, resolution: state.exportRes, langs: state.exportLangs || ["sv"] });
+    askNotify();
     const r = await api("POST", `/api/p/${state.pid}/proposal/${p.id}/export`, { platforms: state.exportPlats, resolution: state.exportRes, langs: state.exportLangs || ["sv"] });
     toast(`${r.queued} export${r.queued === 1 ? "" : "er"} lagda i kön.`, true);
     state.expectJob = true;
@@ -364,7 +373,11 @@ function edTimeline(p) {
   return `<section class="tl" id="edTimeline" aria-label="Tidslinje">
     <div class="tltools">
       <button class="btn small ${state.ed.playing ? "primary" : ""}" data-act="ed-play" id="edPlayBtn" title="Spela/pausa (mellanslag)" aria-label="${state.ed.playing ? "Pausa" : "Spela"}">${state.ed.playing ? svgi(ICO.pause, 14) : icon("play", 13)}</button>
-      <span class="muted" style="font-size:12px">Klipp ${i + 1} av ${n} · mellanslag spelar · dra i klippen för att ändra ordning</span><span class="grow"></span>
+      <button class="btn small icon" data-cut="s" title="Dela vid markören (S)" aria-label="Dela vid markören">${svgi('<path d="M12 3v18"/><path d="m8 7-3 5 3 5M16 7l3 5-3 5"/>', 15)}</button>
+      <button class="btn small icon" data-cut="q" title="Kapa början fram till markören (Q)" aria-label="Kapa början">${svgi('<path d="M9 4v16"/><path d="M13 12h7M16 9l-3 3 3 3"/>', 15)}</button>
+      <button class="btn small icon" data-cut="w" title="Kapa slutet från markören (W)" aria-label="Kapa slutet">${svgi('<path d="M15 4v16"/><path d="M11 12H4M8 9l3 3-3 3"/>', 15)}</button>
+      <button class="btn small icon" data-act="ed-keys" title="Kortkommandon (?)" aria-label="Kortkommandon">?</button>
+      <span class="muted tlhint" style="font-size:12px">Klipp ${i + 1} av ${n} · mellanslag spelar · dra i klippen för att ändra ordning</span><span class="grow"></span>
       <button class="btn small" data-edmove="-1" ${i <= 0 ? "disabled" : ""} title="Flytta åt vänster (Alt+←)">${svgi(ICO.left, 14)}Flytta</button>
       <button class="btn small" data-edmove="1" ${i >= n - 1 ? "disabled" : ""} title="Flytta åt höger (Alt+→)">Flytta${svgi(ICO.right, 14)}</button>
       <button class="btn small danger" data-act="ed-delete" ${n <= 1 ? "disabled" : ""} title="Ta bort klippet (Delete)">${icon("trash", 14)}Ta bort klipp</button>
@@ -375,8 +388,87 @@ function edTimeline(p) {
     <div class="tltrack"><span class="tllab">Byte</span><div class="tlrow">${trRow}</div></div>
     <div class="tltrack"><span class="tllab">Ljud</span><div class="tlrow"><span class="tlaudio">${p.music_name ? `${esc(p.music_name)} · ${dec(p.bpm, 0)} BPM` : "Originalljud"}</span></div></div>
     <div class="muted num" style="font-size:12px;text-align:right">${p.shots.length} klipp · ${fmtDur(total)}</div>
-    <div class="tlplayhead" id="tlPlayhead" data-scrub aria-hidden="true"><span class="tlphead"></span></div></section>`;
+    <div class="tlplayhead" id="tlPlayhead" data-scrub aria-hidden="true"><span class="tlphead"></span></div>
+    ${clipBank(p)}</section>`;
 }
+
+/* ---------- klippbank: dra in bra sekvenser i filmen ---------- */
+function clipBank(p) {
+  const open = !!state.ed.bankOpen;
+  const b = state.ed.bankFor === p.id ? state.ed.bank : null;
+  if (open && !b && !state.ed.bankLoading) loadBank(p.id);
+  const tiles = (b || []).map((a, k) => `<div class="bankitem" draggable="true" data-bank="${k}" title="${esc(a.desc || a.label || a.name)} – dra in i filmen">
+      <img alt="" loading="lazy" draggable="false" src="${frameUrl(a.clip_id, a.thumb_t, 200)}">
+      <span class="bankmeta"><b>${esc(a.label || a.name)}</b><span class="num">${dec(a.end - a.start)} s</span></span>
+      <span class="bankbtns"><button class="btn icon small" data-bankins="${k}" title="Lägg in efter valt klipp" aria-label="Lägg in efter valt klipp">+</button><button class="btn icon small" data-bankswap="${k}" title="Byt ut valt klipp mot den här" aria-label="Byt ut valt klipp">⇄</button></span></div>`).join("");
+  return `<details class="tlbank" ${open ? "open" : ""} data-bankdetails><summary>Klippbank – bra sekvenser som inte används${b ? ` (${b.length})` : ""}</summary>
+    ${open ? (b ? (b.length ? `<div class="bankrow">${tiles}</div><p class="muted" style="margin:4px 0 0;font-size:12px">Dra en sekvens till videospåret: mellan två klipp läggs den in, mitt på ett klipp byts det ut. Eller använd + och ⇄.</p>` : '<p class="muted">Allt bra material används redan.</p>') : '<p class="muted">Hämtar …</p>') : ""}</details>`;
+}
+async function loadBank(pid) {
+  state.ed.bankLoading = true;
+  try { state.ed.bank = (await api("POST", `/api/p/${state.pid}/proposal/${pid}/bank`, {})).bank; state.ed.bankFor = pid; }
+  catch (e) { state.ed.bank = []; state.ed.bankFor = pid; }
+  state.ed.bankLoading = false;
+  if (state.view === "edit") render();
+}
+async function bankUse(k, mode, at) {
+  const p = edProp(), a = (state.ed.bank || [])[k];
+  if (!p || !a) return;
+  try {
+    if (mode === "swap") await edit("swap", { i: at, alt: { clip_id: a.clip_id, start: a.start } });
+    else { await edit("insert", { at, alt: a }); state.ed.i = at; }
+  } catch (e) { return; }
+  state.ed.bank = null; state.ed.bankFor = null;  // listan ändras när sekvensen används
+  state.ed.t = null;
+  render(); requestShotPreview(150);
+}
+document.addEventListener("toggle", (ev) => {
+  if (ev.target.matches && ev.target.matches("[data-bankdetails]")) {
+    const o = ev.target.open;
+    if (o !== !!state.ed.bankOpen) { state.ed.bankOpen = o; render(); }
+  }
+}, true);
+let bankDrag = null;
+document.addEventListener("dragstart", (ev) => {
+  const it = ev.target.closest && ev.target.closest("[data-bank]");
+  if (!it) return;
+  bankDrag = Number(it.dataset.bank);
+  ev.dataTransfer.effectAllowed = "copy";
+  try { ev.dataTransfer.setData("text/plain", `bank:${bankDrag}`); } catch (_) { /* */ }
+});
+function bankDropTarget(ev) {
+  const g = tlGeom();
+  if (!g.blocks.length) return null;
+  const track = g.blocks[0].closest(".tltrack").getBoundingClientRect();
+  if (ev.clientY < track.top - 30 || ev.clientY > track.bottom + 30) return null;
+  for (let k = 0; k < g.rects.length; k++) {
+    const r = g.rects[k];
+    if (ev.clientX < r.left + r.width * 0.25) return { mode: "insert", at: k, el: g.blocks[k], side: "l" };
+    if (ev.clientX <= r.right - r.width * 0.25) return { mode: "swap", at: k, el: g.blocks[k] };
+    if (ev.clientX <= r.right) return { mode: "insert", at: k + 1, el: g.blocks[k], side: "r" };
+  }
+  return { mode: "insert", at: g.rects.length, el: g.blocks[g.blocks.length - 1], side: "r" };
+}
+function clearDropMarks() { document.querySelectorAll(".tlblock.dropl, .tlblock.dropr, .tlblock.dropswap").forEach((b) => b.classList.remove("dropl", "dropr", "dropswap")); }
+document.addEventListener("dragover", (ev) => {
+  if (bankDrag == null || state.view !== "edit") return;
+  const t = bankDropTarget(ev);
+  clearDropMarks();
+  if (!t) return;
+  ev.preventDefault();
+  ev.dataTransfer.dropEffect = "copy";
+  t.el.classList.add(t.mode === "swap" ? "dropswap" : t.side === "l" ? "dropl" : "dropr");
+});
+document.addEventListener("drop", (ev) => {
+  if (bankDrag == null) return;
+  const t = bankDropTarget(ev);
+  const k = bankDrag;
+  bankDrag = null; clearDropMarks();
+  if (!t) return;
+  ev.preventDefault();
+  bankUse(k, t.mode, t.at);
+});
+document.addEventListener("dragend", () => { bankDrag = null; clearDropMarks(); });
 
 /* ---------- tidslinjemarkör och scrubbing ---------- */
 function shotStarts(p) {
@@ -1059,7 +1151,7 @@ function viewEdit() {
   return `<main class="main wide edmain">
     <div class="spread edhead"><div class="head"><h1>${esc(p.title || p.style_label)}</h1>
       <p class="lead">${esc(p.style_label)} · ${p.platform ? `${esc(platformLabel(p.platform))} · ` : ""}${p.format} · ${fmtDur(p.length)}</p></div>
-      <div class="row">${platformSelect(p)}${lengthSelect(p)}${musicSelect(p)}<button class="btn" data-act="ed-undo" ${(p.undo_n || (p.history || []).length) ? "" : "disabled"}>${svgi(ICO.undo, 16)}Ångra</button>
+      <div class="row">${platformSelect(p)}${lengthSelect(p)}${musicSelect(p)}<button class="btn" data-edexport title="Exportera den här filmen">${icon("download", 15)}Exportera</button><button class="btn" data-act="ed-undo" ${(p.undo_n || (p.history || []).length) ? "" : "disabled"}>${svgi(ICO.undo, 16)}Ångra</button>
         ${prev ? "" : `<button class="btn" data-preview="${p.id}" ${busyHere ? "disabled" : ""}>${icon("play", 14)}${busyHere ? "Renderar …" : "Förhandsvisa filmen"}</button>`}
         <button class="btn primary" data-export="${p.id}">Exportera</button></div></div>
     <div class="edgrid">
@@ -1214,6 +1306,9 @@ document.addEventListener("click", async (ev) => {
     return edit("center", { i: state.ed.i, cx, cy }, { quiet: true });
   }
   if (d.qmove) { state.queue = await api("POST", `/api/queue/${d.qmove}/move`, { dir: Number(d.dir) }); return render(); }
+  if (d.cut) return cutAtPlayhead(d.cut);
+  if (d.bankins !== undefined) return bankUse(Number(d.bankins), "insert", state.ed.i + 1);
+  if (d.bankswap !== undefined) return bankUse(Number(d.bankswap), "swap", state.ed.i);
   if (d.qretry) { try { state.queue = await api("POST", `/api/queue/${d.qretry}/retry`, {}); state.expectJob = true; toast("Jobbet ligger i kön igen.", true); } catch (e) { fail(e); } loadQueue(); return render(); }
   if (d.qdismiss) { state.queue = await api("POST", `/api/queue/${d.qdismiss}/dismiss`, {}); return render(); }
   if (d.qcancel) { state.queue = await api("POST", `/api/queue/${d.qcancel}/cancel`, {}); loadQueue(); return render(); }
@@ -1327,6 +1422,7 @@ document.addEventListener("click", async (ev) => {
     case "export-queue": return exportQueued();
     case "ed-undo": return edit("undo");
     case "ed-play": return togglePlayback();
+    case "ed-keys": return showShortcuts();
     case "ed-delete": await edit("delete", { i: state.ed.i }); state.ed.i = Math.min(state.ed.i, edProp().shots.length - 1); return render();
     case "ed-autocenter": return edit("auto_center", { i: state.ed.i });
     case "ed-grade-reset": return edit("grade_reset_shot", { i: state.ed.i });
@@ -1737,7 +1833,69 @@ document.addEventListener("keydown", async (ev) => {
   else if (ev.altKey && (ev.key === "ArrowLeft" || ev.key === "ArrowRight")) { ev.preventDefault(); const dir = ev.key === "ArrowLeft" ? -1 : 1; const j = state.ed.i + dir; if (j < 0 || j >= p.shots.length) return; await edit("move", { i: state.ed.i, dir }); state.ed.i = j; render(); }
   else if (ev.key === "ArrowLeft" || ev.key === "ArrowRight") { state.ed.i = Math.max(0, Math.min(p.shots.length - 1, state.ed.i + (ev.key === "ArrowLeft" ? -1 : 1))); state.ed.alts = null; render(); }
   else if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "z") { ev.preventDefault(); await edit("undo"); render(); }
+  else if (!ev.metaKey && !ev.ctrlKey && !ev.altKey) {
+    const k = ev.key.toLowerCase();
+    if (["s", "q", "w", "t"].includes(k)) { ev.preventDefault(); return cutAtPlayhead(k); }
+    if (k === "j") { ev.preventDefault(); const was = !!play; if (was) stopPlayback({ quiet: true }); setPlayhead(curT(p) - 2, { final: true }); if (was) startPlayback(); else syncAfterJump(); }
+    else if (k === "l") { ev.preventDefault(); if (play) cycleRate(); else startPlayback(); }
+    else if (ev.key === "," || ev.key === ".") { ev.preventDefault(); if (play) stopPlayback({ quiet: true }); setPlayhead(curT(p) + (ev.key === "," ? -1 / 30 : 1 / 30), { final: true }); syncAfterJump(); }
+    else if (ev.key === "?") { ev.preventDefault(); showShortcuts(); }
+  }
 });
+
+// efter ett hopp med tangenterna: byt till rätt klipp i inspektören om markören hamnat i ett annat
+let jumpTimer = null;
+function syncAfterJump() {
+  clearTimeout(jumpTimer);
+  jumpTimer = setTimeout(() => { if (state.ed.scrubMoved) { state.ed.scrubMoved = false; render(); requestShotPreview(150); } }, 350);
+}
+function cycleRate() {
+  if (!play) return;
+  const rates = [1, 2, 4];
+  play.rate = rates[(rates.indexOf(play.rate || 1) + 1) % rates.length];
+  if (play.v) play.v.playbackRate = play.rate;
+  if (play.audio) play.audio.playbackRate = play.rate;
+  toast(`Uppspelning ${play.rate}×`, true);
+}
+async function cutAtPlayhead(k) {
+  const p = edProp();
+  if (!p) return;
+  if (play) stopPlayback({ quiet: true });
+  const t = curT(p), i = shotIndexAt(p, t), local = +(t - shotStarts(p)[i]).toFixed(3);
+  state.ed.i = i;
+  if (k === "t") {  // ny text som börjar vid markören
+    const ov0 = (p.overlays || []).length;
+    await edit("overlay_add", { i, text: "Ny text", style: "caption", offset: Math.max(0, local), dur: Math.min(2.6, Math.max(1, p.shots[i].duration - local + 1.5)) });
+    const ov = edProp().overlays || [];
+    if (ov.length > ov0) state.ed.ov = ov[ov.length - 1].id;
+    state.ed.tab = "text";
+    render();
+    setTimeout(() => { const el = document.querySelector(`.ovitem[data-ovid="${state.ed.ov}"] textarea[data-ovf="text"]`); if (el && el.focus) { el.focus(); if (el.select) el.select(); } }, 80);
+    return;
+  }
+  const op = { s: "split", q: "trim_in", w: "trim_out" }[k];
+  try {
+    await edit(op, { i, at: local });
+  } catch (e) { return; }
+  const p2 = edProp();
+  if (op === "split") { state.ed.i = i + 1; state.ed.t = shotStarts(p2)[i + 1] + 0.01; }
+  else if (op === "trim_in") { state.ed.t = shotStarts(p2)[i] + 0.01; }
+  else { state.ed.t = shotStarts(p2)[i] + p2.shots[i].duration - 0.05; }
+  state.ed.tProp = p2.id;
+  toast({ split: `Klipp ${i + 1} delat i två.`, trim_in: "Början kapad vid markören.", trim_out: "Slutet kapat vid markören." }[op] + " Ångra med ⌘Z / Ctrl+Z.", true);
+  render(); requestShotPreview(150);
+}
+function showShortcuts() {
+  const rows = [["Mellanslag / K", "Spela / pausa"], ["L", "Spela – tryck igen för 2× och 4×"], ["J", "Två sekunder bakåt"], [", / .", "En bildruta bakåt / framåt"],
+    ["S", "Dela klippet vid markören"], ["Q", "Kapa början fram till markören"], ["W", "Kapa slutet från markören"], ["T", "Ny text vid markören"],
+    ["← / →", "Föregående / nästa klipp"], ["Alt + ← / →", "Flytta klippet"], ["Delete ×2", "Ta bort klippet"], ["⌘Z / Ctrl+Z", "Ångra"]];
+  const m = $("#modal");
+  m.innerHTML = `<div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="kbTitle" style="max-width:460px">
+    <h2 id="kbTitle" style="font-size:18px">Kortkommandon i redigeraren</h2>
+    <dl class="kbd">${rows.map(([k, v]) => `<dt><kbd>${esc(k)}</kbd></dt><dd>${esc(v)}</dd>`).join("")}</dl>
+    <div class="row" style="justify-content:flex-end"><button class="btn primary" data-act="modal-close">Stäng</button></div></div>`;
+  m.hidden = false;
+}
 
 async function speechEdit(clipId, k, text, del = false) {
   await edit("speech_text", { clip_id: clipId, k, text, delete: del });

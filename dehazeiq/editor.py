@@ -214,6 +214,49 @@ def apply(project, prop, op, args):
             fx["zoom"] = 0.06
         elif eff == "punch":
             fx["punch"] = 0.09
+    elif op in ("split", "trim_in", "trim_out"):
+        # vid tidslinjemarkören: dela klippet (S), kapa början (Q) eller slutet (W)
+        i, s = shot_at()
+        from .texts import ensure_uids
+        ensure_uids(prop)
+        dur = float(s["duration"])
+        at = round(float(args.get("at", dur / 2)), 3)
+        if not 0.25 <= at <= dur - 0.25:
+            raise EditError("Ställ markören minst en kvarts sekund in i klippet")
+        fx = s.setdefault("fx", {})
+        speed = float(fx.get("speed", 1.0))
+        path = [list(k) for k in (s.get("path") or []) if isinstance(k, (list, tuple)) and len(k) >= 3]
+        ovs = [o for o in (prop.get("overlays") or []) if o.get("shot_uid") == s["uid"]]
+        if op == "trim_out":
+            s["duration"] = at
+            fx.pop("freeze", None)
+            s["path"] = [k for k in path if k[0] <= at] or path[:1]
+            _fit_source(project, s)
+        elif op == "trim_in":
+            s["src_start"] = round(float(s["src_start"]) + at * speed, 3)
+            s["duration"] = round(dur - at, 3)
+            s["path"] = [[round(k[0] - at, 3)] + k[1:] for k in path if k[0] >= at] or ([[0.0] + path[-1][1:]] if path else [])
+            for o in ovs:
+                o["offset"] = round(max(0.0, float(o.get("offset", 0)) - at), 3)
+            _fit_source(project, s)
+        else:
+            b = copy.deepcopy(s)
+            b["uid"] = uuid.uuid4().hex[:8]
+            s["duration"] = at
+            s["fx"].pop("freeze", None)
+            s["tr"] = "cut"
+            s["path"] = [k for k in path if k[0] <= at] or path[:1]
+            _fit_source(project, s)
+            b["src_start"] = round(float(b["src_start"]) + at * speed, 3)
+            b["duration"] = round(dur - at, 3)
+            b["path"] = [[round(k[0] - at, 3)] + k[1:] for k in path if k[0] >= at] or ([[0.0] + path[-1][1:]] if path else [])
+            b.pop("edited", None)
+            _fit_source(project, b)
+            for o in ovs:  # texter efter delningen följer med andra halvan
+                if float(o.get("offset", 0)) >= at:
+                    o["shot_uid"] = b["uid"]
+                    o["offset"] = round(float(o["offset"]) - at, 3)
+            shots.insert(i + 1, b)
     elif op == "delete":
         i, s = shot_at()
         if len(shots) <= 1:
@@ -318,6 +361,18 @@ def apply(project, prop, op, args):
     elif op == "swap":
         i, s = shot_at()
         shots[i] = _shot_from_alternative(project, prop, s, args.get("alt") or {})
+    elif op == "insert":  # sekvens från klippbanken in på en plats i filmen
+        j = max(0, min(len(shots), int(args.get("at", len(shots)))))
+        alt = args.get("alt") or {}
+        beat = _beat(prop)
+        avail = float(alt.get("end", 0)) - float(alt.get("start", 0))
+        d = float(args.get("duration") or (beat * 4 if beat else 2.0))
+        if beat:
+            while d > max(avail, 1.0) and d > beat * 2:
+                d -= beat * 2
+        d = round(min(max(0.8, d), max(avail, 0.8), 8.0), 3)
+        new = _shot_from_alternative(project, prop, {"duration": d, "at": 0.0}, alt)
+        shots.insert(j, new)
     elif op == "grade":
         g = clean_grade(args.get("grade"))
         if args.get("scope") == "shot":
@@ -466,7 +521,7 @@ def apply(project, prop, op, args):
     return _finish(prop)
 
 
-SHOT_OPS = {"trim", "speed", "fx", "center", "auto_center", "swap", "grade", "grade_reset_shot", "transition",
+SHOT_OPS = {"trim", "split", "trim_in", "trim_out", "speed", "fx", "center", "auto_center", "swap", "grade", "grade_reset_shot", "transition",
             "text", "cam360", "fit", "overlay_add"}
 
 
@@ -521,6 +576,22 @@ def alternatives(project, prop, i, n=6):
                     "quality": round(c["quality"], 2), "score": round(score, 3),
                     "thumb_t": round((c["start"] + c["end"]) / 2, 1)})
     return res
+
+
+def bank(project, prop, n=60):
+    """Klippbanken: alla bra sekvenser som inte redan finns i filmen, bäst först."""
+    cands = _cands(project, prop)
+    used = [(s["clip_id"], s["src_start"], s["src_end"]) for s in prop["shots"]]
+    out = []
+    for c in sorted(cands, key=lambda c: -(c.get("quality", 0) + 0.25 * c.get("util_n", 0))):
+        if any(cid == c["clip"]["id"] and c["start"] < e and c["end"] > s0 for cid, s0, e in used):
+            continue
+        out.append({"clip_id": c["clip"]["id"], "name": c["clip"]["name"], "start": round(c["start"], 2),
+                    "end": round(c["end"], 2), "label": c.get("label"), "desc": c.get("desc") or "",
+                    "quality": round(c["quality"], 2), "thumb_t": round((c["start"] + c["end"]) / 2, 1)})
+        if len(out) >= n:
+            break
+    return out
 
 
 def _shot_from_alternative(project, prop, old, alt):

@@ -23,7 +23,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 import cv2
 
 from . import (TAGLINE, __version__, ai, cliptext, divelog, editor, effects, generator, i18n, media, musiclib,
-               pipeline, prompt, render, search, tagging, vlm, whisper)
+               cards, pipeline, prompt, render, search, tagging, templates, vlm, whisper)
 from .config import FILM_TYPES, FORMATS, HOME, LOOKS, PLATFORMS, PROJECTS_DIR, STYLES
 from .project import JOBS, Project, auto_name, project_lock, save_default_settings
 
@@ -522,6 +522,12 @@ class Handler(BaseHTTPRequestHandler):
             if self.is_remote:
                 raise ApiError("Bara från datorn", HTTPStatus.FORBIDDEN)
             return self._json(lan_status())
+        if api == ["templates"]:
+            return self._json({"templates": templates.public()})
+        if api == ["cards"]:  # inkopplade minneskort/kameror med nya klipp
+            if self.is_remote:
+                return self._json({"cards": []})
+            return self._json({"cards": [{k: v for k, v in c.items() if k != "new_paths"} for c in cards.cards()]})
         if api == ["update"]:
             return self._json(dict(UPDATE, current=__version__))
         if api == ["info"]:
@@ -629,19 +635,81 @@ class Handler(BaseHTTPRequestHandler):
             if not paths:
                 raise ApiError("Ange en mapp eller filer")
             name = (body.get("name") or "").strip()[:80] or auto_name(paths)
+            tpl = templates.get(str(body.get("template") or "")) if body.get("template") else None
             p = Project.create(name)
             plans = _clean_plans(body.get("plans"))
-            if plans or "previews" in body:
+            if plans or "previews" in body or tpl:
                 with project_lock():  # läs, ändra och spara i ett svep
                     p.reload()
                     st = p.data.setdefault("settings", {})
+                    if tpl:
+                        st.update(tpl.get("settings") or {})
                     if plans:
                         st["plans"] = plans
-                    st["previews"] = bool(body.get("previews", True))
+                    if "previews" in body:
+                        st["previews"] = bool(body.get("previews", True))
                     p.save()
-            JOBS.start(p.id, "auto", pipeline.auto, p.id, paths, label=_auto_label(plans),
+            exp = (tpl or {}).get("export") or {}
+            JOBS.start(p.id, "auto", pipeline.auto, p.id, paths, exp if exp.get("auto") else None,
+                       label=f"Mall: {tpl['name']}" if tpl else _auto_label(plans),
                        project_name=p.data["name"])
             return self._json(_project_view(p), HTTPStatus.CREATED)
+        if api == ["cards", "ignore"]:
+            cards.ignore(body.get("path", ""))
+            return self._json({"ok": True})
+        if api == ["cards", "import"]:  # bara de nya klippen på kortet
+            if self.is_remote:
+                raise ApiError("Det här görs på datorn.", HTTPStatus.FORBIDDEN)
+            c = next((x for x in cards.cards(max_age=0) if x["path"] == body.get("path")), None)
+            if not c or not c["new_paths"]:
+                raise ApiError("Inga nya klipp på kortet")
+            paths = c["new_paths"]
+            to = str(body.get("to") or "new")
+            tpl = templates.get(str(body.get("template") or "")) if body.get("template") else None
+            exp = (tpl or {}).get("export") or {}
+            if to == "new":
+                name = (body.get("name") or "").strip()[:80] or auto_name([c["media"]])
+                if name.startswith("Import"):  # kortets mapp heter DCIM: använd kortets namn och datum
+                    name = name.replace("Import", c["name"], 1)
+                p = Project.create(name)
+                if tpl:
+                    with project_lock():
+                        p.reload()
+                        p.data.setdefault("settings", {}).update(tpl.get("settings") or {})
+                        p.save()
+            else:
+                if not re.fullmatch(r"[\w\-. ]+", to) or to.startswith("."):
+                    raise ApiError("Okänt projekt")
+                try:
+                    p = Project(to)
+                except FileNotFoundError:
+                    raise ApiError("Okänt projekt", HTTPStatus.NOT_FOUND)
+            JOBS.start(p.id, "auto", pipeline.auto, p.id, paths, exp if exp.get("auto") else None,
+                       label=f"Import från {c['name']} ({len(paths)} klipp)", project_name=p.data["name"])
+            cards.forget_cache()
+            return self._json(_project_view(p), HTTPStatus.CREATED if to == "new" else HTTPStatus.OK)
+        if api == ["templates"]:  # spara projektets inställningar (och exportval) som mall
+            if isinstance(body.get("settings"), dict):  # direkt från "Vad vill du göra"-sidan
+                sett = dict(body["settings"])
+                if "plans" in sett:
+                    sett["plans"] = _clean_plans(sett["plans"])
+            else:
+                pid = str(body.get("pid") or "")
+                if not re.fullmatch(r"[\w\-. ]+", pid) or pid.startswith("."):
+                    raise ApiError("Okänt projekt")
+                try:
+                    sett = Project(pid).data.get("settings") or {}
+                except FileNotFoundError:
+                    raise ApiError("Okänt projekt", HTTPStatus.NOT_FOUND)
+            try:
+                t = templates.save(body.get("name"), sett, body.get("export"),
+                                   PLATFORMS, i18n.LANGS, tid=body.get("id"))
+            except ValueError as e:
+                raise ApiError(str(e))
+            return self._json({"template": t, "templates": templates.public()})
+        if len(api) == 3 and api[0] == "templates" and api[2] == "delete":
+            templates.delete(api[1])
+            return self._json({"templates": templates.public()})
         if api == ["queue", "pause"]:
             JOBS.pause(bool(body.get("paused", True)))
             return self._json(JOBS.queue())
@@ -770,6 +838,32 @@ class Handler(BaseHTTPRequestHandler):
             JOBS.start(p.id, "auto", pipeline.auto, p.id, None, label="Analys och förslag",
                        project_name=p.data["name"])
             return self._json({"ok": True})
+        if action == ["exportmany"]:  # t.ex. alla favoriter på en gång
+            res = body.get("resolution", "1080p")
+            plats = [x for x in body.get("platforms") or [] if x in PLATFORMS]
+            ids = [i for i in body.get("ids") or [] if p.proposal(i)]
+            if not plats or not ids:
+                raise ApiError("Välj minst ett förslag och en plattform")
+            n = pipeline.queue_exports(p.id, ids, {"platforms": plats, "resolution": res, "langs": body.get("langs") or ["sv"]})
+            return self._json({"queued": n})
+        if action == ["template"]:  # kör med en mall: sätt inställningarna och kör hela flödet
+            t = templates.get(str(body.get("id") or ""))
+            if not t:
+                raise ApiError("Mallen finns inte längre", HTTPStatus.NOT_FOUND)
+            if any(t.get("pid") == p.id and t.get("kind") == "auto" for t in JOBS.queue()["tasks"]):
+                raise ApiError("Projektet arbetar redan – vänta tills det är klart")
+            with project_lock():
+                p.reload()
+                s = p.data.setdefault("settings", {})
+                for k, v in (t.get("settings") or {}).items():
+                    s[k] = v
+                if "plans" not in (t.get("settings") or {}):
+                    s.pop("plans", None)
+                p.save()
+            exp = t.get("export") or {}
+            JOBS.start(p.id, "auto", pipeline.auto, p.id, None, exp if exp.get("auto") else None,
+                       label=f"Mall: {t['name']}", project_name=p.data["name"])
+            return self._json({"ok": True, "settings": p.data["settings"]})
         if action == ["prune"]:
             n = p.prune_proposals(int(body.get("keep", 6)))
             return self._json({"removed": n, "proposals": p.data.get("proposals", [])})
@@ -960,15 +1054,9 @@ class Handler(BaseHTTPRequestHandler):
                 plats = [x for x in body.get("platforms") or [] if x in PLATFORMS]
                 if not plats:
                     raise ApiError("Välj minst en plattform")
-                prop = p.proposal(prop_id)
-                langs = [x for x in body.get("langs") or ["sv"] if x in i18n.LANGS] or ["sv"]
-                for pf in plats:
-                    for lg in langs:
-                        JOBS.start(p.id, f"render:{res}:{prop_id}", pipeline.export_for, p.id, prop_id, pf, res, lg,
-                                   label=f"Export {PLATFORMS[pf]['label']} · {lg.upper()} · "
-                                         f"{prop.get('title') or prop['style_label']}",
-                                   project_name=p.data["name"])
-                return self._json({"queued": len(plats) * len(langs)})
+                n = pipeline.queue_exports(p.id, [prop_id], {"platforms": plats, "resolution": res,
+                                                              "langs": body.get("langs") or ["sv"]})
+                return self._json({"queued": n})
             if verb == "edit":
                 try:
                     return self._json({"proposal": pipeline.edit_proposal(p.id, prop_id, body.get("op"),
@@ -1022,6 +1110,8 @@ class Handler(BaseHTTPRequestHandler):
                     except Exception as e:  # noqa: BLE001
                         raise ApiError(f"Förhandsvisningen av klippet misslyckades: {e}")
                 return self._json({"file": out.name, "i": i, "proxy": _proxy_name(p, prop["shots"][i])})
+            if verb == "bank":
+                return self._json({"bank": editor.bank(p, p.proposal(prop_id))})
             if verb == "alternatives":
                 try:
                     return self._json({"alternatives": editor.alternatives(p, p.proposal(prop_id),

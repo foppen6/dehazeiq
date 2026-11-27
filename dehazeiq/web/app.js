@@ -110,6 +110,7 @@ const fail = (e) => toast(e.message || String(e));
 function icon(name, size = 18) {
   const p = {
     upload: '<path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>',
+    download: '<path d="M12 4v12"/><path d="m7 11 5 5 5-5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>',
     mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/>',
     spark: '<path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/>',
     music: '<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>',
@@ -623,11 +624,13 @@ function viewImport() {
   else primary = `<button class="btn primary big push" disabled>Importera klipp först</button>`;
 
   const panel = `<aside class="panel" aria-label="Filminställningar">
+    ${clips().length && (state.templates || []).length ? templatesBar("project") : ""}
     <div class="stack"><h2>Vad ska filmen användas till?</h2><div class="fmt-grid">${fmtCards}</div></div>
     <div class="stack"><h2>Längd</h2><div class="seg" role="group" aria-label="Längd" style="grid-template-columns:repeat(4,minmax(0,1fr))">${lens}</div></div>
     <div class="stack"><h2>Stil</h2>${styles}</div>
     <div class="stack"><h2>Musik</h2>${musicBox}</div>
     ${primary}
+    ${clips().length && !(state.templates || []).length ? templatesBar("project") : ""}
   </aside>`;
   return side + main + panel;
 }
@@ -773,8 +776,10 @@ function viewAnalyze() {
     const score = Math.round(a.score * 100);
     const inUse = isUsed(c);
     const why = c.excluded ? ["Bortvald av dig"] : (!c.favorite && c.reasons && c.reasons.length ? c.reasons : []);
-    return `<article class="ccard ${inUse ? "" : "off"}">
+    const picked = (state.anSel || []).includes(c.id);
+    return `<article class="ccard ${inUse ? "" : "off"} ${picked ? "picked" : ""}" data-cid="${c.id}" tabindex="0">
       <div class="img"><img loading="lazy" alt="" src="${frameUrl(c.id, mid, 480)}">
+        <button class="ccsel" data-csel="${c.id}" aria-pressed="${picked}" aria-label="Markera klippet" title="Markera (Skift-klick markerar flera i rad)">${picked ? svgi(ICO.check, 14) : ""}</button>
         <span class="badge" style="left:10px;top:10px">${esc(c.source)}</span>
         <span class="score num ${score >= 70 ? "hi" : "lo"}">${score}</span>
         <span class="badge num" style="right:10px;bottom:10px;font-weight:500">${fmtDur(c.duration)}</span></div>
@@ -802,8 +807,8 @@ function viewAnalyze() {
     <div class="spread"><div class="head"><h1>${busy ? "AI analyserar materialet" : "Analysresultat"}</h1>
       <p class="lead">Bara skarpa, stabila och välexponerade klipp används. Svaga klipp väljs bort automatiskt – du behöver inte gå igenom dem.</p></div>${prog}</div>
     ${searchBar(sr)}
-    ${sr ? searchResults(sr) : `<div class="chips" role="group" aria-label="Filtrera">${chips}</div>
-    <div class="grid">${cards || '<div class="empty">Inga klipp i det här urvalet ännu.</div>'}</div>`}
+    ${sr ? searchResults(sr) : `<div class="spread" style="gap:10px;flex-wrap:wrap"><div class="chips" role="group" aria-label="Filtrera">${chips}</div>${analysisTools(list)}</div>
+    <div class="grid ${state.anCompact ? "compact" : ""}">${cards || '<div class="empty">Inga klipp i det här urvalet ännu.</div>'}</div>${analysisBulkBar()}`}
     ${deepCard()}
     ${diveCard()}
   </main>`;
@@ -952,6 +957,7 @@ function propCard(p, idx) {
   const delAsk = state.delAsk === p.id;
   return `<article class="pcard ${idx === 0 ? "sel" : ""} ${p.favorite ? "fav" : ""}">
     <div class="pcard-tools">
+      <button class="btn small icon cmpbtn" data-cmp="${p.id}" aria-pressed="${(state.cmp || []).includes(p.id)}" title="Jämför med ett annat förslag" aria-label="Jämför">${svgi('<rect x="3" y="4" width="8" height="16" rx="1.5"/><rect x="13" y="4" width="8" height="16" rx="1.5"/>', 15)}</button>
       <button class="btn small favbtn" data-propfav="${p.id}" aria-pressed="${!!p.favorite}" title="${p.favorite ? "Ta bort från favoriter" : "Markera som favorit"}">${icon("star", 15)}${p.favorite ? "Favorit" : ""}</button>
       ${remote() ? "" : `<button class="btn small ${delAsk ? "danger" : "icon"}" data-propdel="${p.id}" aria-label="Ta bort förslaget" title="Ta bort förslaget">${icon("trash", 15)}${delAsk ? "Ta bort?" : ""}</button>`}
     </div>
@@ -979,9 +985,9 @@ function propCard(p, idx) {
         <div class="strip-legend"><span>Intro</span><span>Uppbyggnad</span><span>Höjdpunkt</span><span>Avslut</span></div></div>
       ${platformSelect(p)}
       <div class="row pactions">
-        ${prev ? `<button class="btn primary" style="flex:1 1 auto" data-edit="${p.id}">Redigera</button><button class="btn" data-export="${p.id}">Exportera</button>`
+        ${prev ? `<button class="btn primary" style="flex:1 1 auto" data-edit="${p.id}">Redigera</button><button class="btn" data-qexport="${p.id}">Exportera</button>`
                : `<button class="btn primary" style="flex:1 1 auto" data-preview="${p.id}" ${busyHere ? "disabled" : ""}>Förhandsvisa</button>
-                  <button class="btn" data-edit="${p.id}">Redigera</button><button class="btn" data-export="${p.id}">Exportera</button>`}
+                  <button class="btn" data-edit="${p.id}">Redigera</button><button class="btn" data-qexport="${p.id}">Exportera</button>`}
         <button class="btn icon" data-regen="${p.id}" aria-label="Generera om detta förslag" title="Generera om">${icon("redo", 17)}</button>
       </div>
       <button class="btn small" data-variants="${p.id}" title="Samma berättelse och i stort sett samma klipp – andra stilar, tempo och färger">${icon("layers", 14)}Fler varianter av den här filmen</button>
@@ -1031,6 +1037,8 @@ function viewProposals() {
         <p class="lead">${esc(fmt ? fmt.name : s.format)} · ${fmtLong(s.length)} · samma material, olika urval, tempo och rytm.</p></div>
       <div class="row">
         ${favs ? `<span class="chip-status" style="height:40px;padding:0 14px;border-radius:10px;background:var(--panel-2);border:1px solid var(--line)">${icon("star", 15)} ${favs === 1 ? "1 favoritklipp är låst" : `${favs} favoritklipp är låsta`}</span>` : ""}
+        <button class="btn" data-propcompact aria-pressed="${!!state.propCompact}" title="Visa förslagen som en kompakt lista">${state.propCompact ? "Stora kort" : "Kompakt lista"}</button>
+        ${(P().proposals || []).some((x) => x.favorite) ? `<button class="btn" data-favexport title="Exportera alla förslag du stjärnmärkt">${icon("star", 15)}Exportera favoriter (${(P().proposals || []).filter((x) => x.favorite).length})</button>` : ""}
         <button class="btn" data-act="generate" ${generating || running() ? "disabled" : ""}>${icon("redo", 16)}${generating ? "Skapar …" : "Generera nya förslag"}</button>
       </div>
     </div>
@@ -1076,9 +1084,9 @@ function proposalGroups(list) {
   const html = groups.slice(0, open).map((g, gi) => `<section class="pgroup">
       <div class="pgroup-head"><b>${esc(batchLabel(g.t))}</b><span class="muted">${esc(plansOf(g))} · ${g.items.length} förslag</span>
         ${g.items.some((p) => state.fresh && state.fresh.has(p.id)) ? '<span class="badge newbadge">Ny</span>' : ""}</div>
-      <div class="props">${g.items.map(propCard).join("")}</div></section>`).join("");
+      ${state.propCompact ? `<div class="prows">${g.items.map(propRow).join("")}</div>` : `<div class="props">${g.items.map(propCard).join("")}</div>`}</section>`).join("");
   const rest = groups.length - open;
-  return html + (rest > 0 ? `<div class="row" style="justify-content:center;margin:14px 0"><button class="btn" data-act="old-open">Visa äldre omgångar (${rest})</button></div>` : "");
+  return html + (rest > 0 ? `<div class="row" style="justify-content:center;margin:14px 0"><button class="btn" data-act="old-open">Visa äldre omgångar (${rest})</button></div>` : "") + compareBar();
 }
 
 /* ---------- vy: exportera ---------- */
@@ -1087,11 +1095,11 @@ function viewExport() {
   if (!state.exportProp || !propById(state.exportProp)) state.exportProp = state.shown[0] || (props[0] && props[0].id);
   const p = propById(state.exportProp);
   if (!p) return `<main class="main"><div class="empty">Skapa ett filmförslag först.</div></main>`;
-  const list = state.shown.map(propById).filter(Boolean);
-  if (!list.includes(p)) list.unshift(p);
+  const list = [];
+  [p, ...props.filter((x) => x.favorite), ...state.shown.map(propById)].forEach((x) => { if (x && !list.includes(x)) list.push(x); });
   const choices = list.map((x, i) => `<button class="card-btn" data-pick="${x.id}" aria-pressed="${x.id === p.id}" style="flex-direction:row;align-items:center;gap:14px">
       <img alt="" style="width:46px;height:46px;border-radius:8px;object-fit:cover" src="${x.shots[0] ? frameUrl(x.shots[0].clip_id, x.shots[0].src_start + 1, 120) : ""}">
-      <span class="stack" style="gap:2px"><b>${esc(x.style_label)}</b><small>${x.n_shots} klipp · ${fmtDur(x.length)} · ${esc(x.format)}</small></span></button>`).join("");
+      <span class="stack" style="gap:2px"><b>${x.favorite ? '<span style="color:#FFD84A">★</span> ' : ""}${esc(x.title || x.style_label)}</b><small>${esc(x.style_label)} · ${x.n_shots} klipp · ${fmtDur(x.length)} · ${esc(x.format)}${x.renders && Object.keys(x.renders).some((k) => k !== "preview" && k !== "v") ? " · exporterad" : ""}</small></span></button>`).join("");
   const resBtns = [["720p", "720p"], ["1080p", "1080p"], ["4k", "4K"]].map(([k, l]) => `<button data-res="${k}" aria-pressed="${state.exportRes === k}">${l}</button>`).join("");
   const busy = running("render");
   const j = job();

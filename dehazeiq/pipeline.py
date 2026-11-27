@@ -549,9 +549,10 @@ def _stage(progress, lo, hi, label):
     return sub
 
 
-def auto(progress, pid, paths=None):
+def auto(progress, pid, paths=None, export=None):
     """Hela flödet utan att användaren behöver göra något:
-    import → analys → bortval av svaga klipp → tre filmförslag → förhandsvisningar."""
+    import → analys → bortval av svaga klipp → tre filmförslag → förhandsvisningar.
+    export (från en mall): {"platforms", "resolution", "langs", "which"} – lägger exporter i kön efteråt."""
     result = {}
     if paths:
         result["import"] = import_media(_stage(progress, 0.0, 0.35, "1/4 Läser in"), pid, paths)
@@ -591,7 +592,34 @@ def auto(progress, pid, paths=None):
         hi = 0.78 + 0.22 * (i + 1) / len(props)
         render_proposal(_stage(progress, lo, hi, f"4/4 Förhandsvisning {i + 1} av {len(props)}"),
                         pid, prop["id"], "preview")
+    if export and export.get("platforms") and result["proposals"]:
+        result["exports"] = queue_exports(pid, result["proposals"] if export.get("which") == "all"
+                                          else result["proposals"][:1], export)
     return result
+
+
+def queue_exports(pid, prop_ids, export):
+    """Lägger exporter i jobbkön (egen fil för film), en per förslag × plattform × språk."""
+    from . import i18n
+    from .config import PLATFORMS
+    from .project import JOBS
+    proj = Project(pid)
+    res = export.get("resolution") if export.get("resolution") in ("720p", "1080p", "4k") else "1080p"
+    plats = [x for x in export.get("platforms") or [] if x in PLATFORMS]
+    langs = [x for x in export.get("langs") or ["sv"] if x in i18n.LANGS] or ["sv"]
+    n = 0
+    for prop_id in prop_ids:
+        prop = proj.proposal(prop_id)
+        if not prop:
+            continue
+        for pf in plats:
+            for lg in langs:
+                JOBS.start(pid, f"render:{res}:{prop_id}", export_for, pid, prop_id, pf, res, lg,
+                           label=f"Export {PLATFORMS[pf]['label']} · {lg.upper()} · "
+                                 f"{prop.get('title') or prop['style_label']}",
+                           project_name=proj.data["name"])
+                n += 1
+    return n
 
 
 def diagnostics(pid):
