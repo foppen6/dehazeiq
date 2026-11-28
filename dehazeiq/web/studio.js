@@ -192,7 +192,7 @@ function planTabs() {
   if (!state.planTab || (state.planTab !== "all" && !plans.includes(state.planTab))) state.planTab = "all";
   const n = (k) => props.filter((p) => p.plan === k).length;
   return `<div class="chips" role="tablist" aria-label="Filmtyp"><button class="chip" data-plantab="all" aria-pressed="${state.planTab === "all"}">Alla <span class="muted">· ${props.length}</span></button>
-    ${plans.map((k) => `<button class="chip" role="tab" data-plantab="${k}" aria-pressed="${state.planTab === k}">${esc((filmTypes()[k] || {}).label || (k === "custom" ? "Egna förslag" : k))} <span class="muted">· ${n(k)}</span></button>`).join("")}
+    ${plans.map((k) => `<button class="chip" role="tab" data-plantab="${k}" aria-pressed="${state.planTab === k}">${esc((filmTypes()[k] || {}).label || (k === "custom" ? "Egna förslag" : k === "fromclips" ? "Av valda klipp" : k))} <span class="muted">· ${n(k)}</span></button>`).join("")}
     <button class="chip" data-act="setup-project">+ Fler filmtyper</button></div>`;
 }
 

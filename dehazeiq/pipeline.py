@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 
 from . import ai, analysis, generator, media, music, pano, photo, quality, render, timeline
-from .config import AUDIO_EXT, FORMATS
+from .config import AUDIO_EXT, FORMATS, STYLES
 from .project import Project, clip_id_for, collect_video_files, project_lock, save_default_settings
 
 
@@ -248,6 +248,42 @@ def generate_plans(progress, pid, plans, render_previews=False):
             render_proposal(_stage(progress, i / len(ids), (i + 1) / len(ids), f"Förhandsvisning {i + 1} av {len(ids)}"),
                             pid, pid_, "preview")
     return ids
+
+
+
+def from_clips(progress, pid, clip_ids, fmt=None, length=None, style="auto", render_previews=True, count=3):
+    """Användaren valde klippen – AI:n klipper ihop dem: ordning, längder, takt, musik och texter.
+    Tre förslag i olika stilar (eller tre varianter av vald stil)."""
+    proj = Project(pid)
+    st = proj.data.get("settings") or {}
+    fmt = fmt if fmt in FORMATS else st.get("format", "9:16")
+    by_id = {c["id"]: c for c in proj.clips()}
+    ids = [c for c in clip_ids if c in by_id]
+    if not ids:
+        raise RuntimeError("Välj minst ett analyserat klipp")
+    if not length:  # lagom lång för materialet: ett par sekunder per klipp, 8–60 s
+        total = sum(float(by_id[c].get("duration") or 0) for c in ids)
+        length = float(np.clip(min(len(ids) * 3.2, total * 0.7), 8, 60))
+    length = float(length)
+    if style in STYLES:
+        styles = [style] * 3
+    else:
+        styles = ["cinematic", "action", "documentary"] if len(ids) >= 3 else ["cinematic", "playful", "calm"]
+    styles = styles[:max(1, min(3, int(count or 3)))]
+    made = []
+    for k, s in enumerate(styles):
+        progress(0.05 + 0.25 * k / len(styles), f"Klipper ihop dina {len(ids)} klipp ({STYLES[s]['label']})")
+        pr = generator.generate(proj, s, fmt, length, None, proj.data.get("music"), only_clips=ids)
+        pr["plan"] = "fromclips"
+        pr["plan_label"] = "Av valda klipp"
+        pr["title"] = pr.get("title") or f"Av {len(ids)} valda klipp"
+        made.append(pr)
+    Project(pid).add_proposals(made)
+    if render_previews:
+        for i, p in enumerate(made):
+            render_proposal(_stage(progress, 0.3 + 0.7 * i / len(made), 0.3 + 0.7 * (i + 1) / len(made),
+                                   f"Förhandsvisning {i + 1} av {len(made)}"), pid, p["id"], "preview")
+    return [p["id"] for p in made]
 
 
 def make_variants(progress, pid, prop_id, count=3, render_previews=True):

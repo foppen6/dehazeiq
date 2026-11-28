@@ -93,6 +93,10 @@ Format, längd, stil och musik ställs in under **Importera** och gäller även 
   favoriter** exporterar alla stjärnmärkta förslag på en gång.
 - **Notis när det är klart:** ett ljud och en systemnotis när analys, förslag eller exporter är
   klara, så att du kan göra annat under tiden.
+- **Gör film av valda klipp:** markera klippen du vill ha i Analys (rutan i hörnet, Skift-klick
+  för flera) och tryck **Gör film av de N klippen**. Välj längd, format, stil (eller låt AI välja)
+  och en film eller tre förslag – AI:n väljer bästa delarna, ordningen, klipp i takt, musik och
+  texter. Bara dina klipp används, även sådana AI:n valt bort, och alla kommer med.
 - **Analysen:** peka på ett klipp och tryck **F** (måste med), **X** (välj bort) eller **A** (låt AI
   avgöra). Markera flera med rutan i hörnet (Skift-klick för flera i rad, ⌘A/Ctrl+A för alla) och
   ändra alla på en gång. **Kompakt** visar fler klipp per skärm.

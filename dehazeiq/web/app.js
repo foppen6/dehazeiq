@@ -1081,7 +1081,7 @@ function proposalGroups(list) {
   });
   groups.sort((a, b) => b.t - a.t);
   const open = state.oldOpen ? groups.length : 3;
-  const plansOf = (g) => [...new Set(g.items.map((p) => (filmTypes()[p.plan] || {}).label || (p.plan === "custom" ? "Egna förslag" : p.style_label)))].slice(0, 3).join(", ");
+  const plansOf = (g) => [...new Set(g.items.map((p) => (filmTypes()[p.plan] || {}).label || (p.plan === "custom" ? "Egna förslag" : p.plan === "fromclips" ? "Av valda klipp" : p.style_label)))].slice(0, 3).join(", ");
   const html = groups.slice(0, open).map((g, gi) => `<section class="pgroup">
       <div class="pgroup-head"><b>${esc(batchLabel(g.t))}</b><span class="muted">${esc(plansOf(g))} · ${g.items.length} förslag</span>
         ${g.items.some((p) => state.fresh && state.fresh.has(p.id)) ? '<span class="badge newbadge">Ny</span>' : ""}</div>

@@ -838,6 +838,21 @@ class Handler(BaseHTTPRequestHandler):
             JOBS.start(p.id, "auto", pipeline.auto, p.id, None, label="Analys och förslag",
                        project_name=p.data["name"])
             return self._json({"ok": True})
+        if action == ["fromclips"]:  # användaren valde klippen, AI:n klipper ihop dem
+            ids = [c for c in body.get("clip_ids") or [] if c in p.data["clips"]]
+            if not ids:
+                raise ApiError("Markera minst ett klipp")
+            fmt = body.get("format") if body.get("format") in FORMATS else None
+            try:
+                length = float(body["length"]) if body.get("length") else None
+            except (TypeError, ValueError):
+                length = None
+            style = body.get("style") if body.get("style") in STYLES else "auto"
+            prev = bool((p.data.get("settings") or {}).get("previews", True))
+            count = 1 if str(body.get("count")) == "1" else 3
+            JOBS.start(p.id, "generate", pipeline.from_clips, p.id, ids, fmt, length, style, prev, count,
+                       label=f"Film av {len(ids)} valda klipp", project_name=p.data["name"])
+            return self._json({"ok": True})
         if action == ["exportmany"]:  # t.ex. alla favoriter på en gång
             res = body.get("resolution", "1080p")
             plats = [x for x in body.get("platforms") or [] if x in PLATFORMS]

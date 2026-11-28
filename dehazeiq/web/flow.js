@@ -328,7 +328,8 @@ function analysisBulkBar() {
     <button class="btn small" data-anbulk="excluded">${icon("eyeoff", 14)}Välj bort</button>
     <button class="btn small" data-anbulk="reset">Låt AI avgöra</button>
     <select class="selfield" data-anphase aria-label="Del av dyket" style="width:auto;height:32px"><option value="-">Del av dyket …</option><option value="">AI avgör</option><option value="start">Början</option><option value="mid">Under dyket</option><option value="end">Slutet</option></select>
-    <span class="grow"></span><button class="btn small" data-annone>Avmarkera</button></div>`;
+    <span class="grow"></span><button class="btn small primary" data-fromclips title="AI:n klipper ihop de markerade klippen till färdiga filmer">${icon("spark", 14)}Gör film av ${n === 1 ? "klippet" : `de ${n} klippen`}</button>
+    <button class="btn small" data-annone>Avmarkera</button></div>`;
 }
 async function setClips(ids, patch) {
   const cs = clips();
@@ -548,4 +549,64 @@ document.addEventListener("click", (ev) => {
   document.querySelectorAll("#modal video").forEach((v) => v.pause());
   if (state.cmpWait) { clearInterval(state.cmpWait); state.cmpWait = null; }
   state.cmpOpen = false;
+}, true);
+
+/* ================= gör film av markerade klipp ================= */
+function openFromClips() {
+  const n = state.anSel.length;
+  if (!n) return;
+  const st = (P().settings || {});
+  state.fc = state.fc || { length: "", style: "auto", format: st.format || "9:16", count: 3 };
+  const fc = state.fc;
+  const FL = { "9:16": "Stående 9:16 (Reels, TikTok, Shorts)", "16:9": "Liggande 16:9 (YouTube)", "1:1": "Kvadrat 1:1", "4:5": "Porträtt 4:5 (Instagram-flöde)" };
+  const fmts = Object.fromEntries(((state.info && state.info.formats) || Object.keys(FL)).map((k) => [k, FL[k] || k]));
+  const styles = (state.info && state.info.styles) || {};
+  const m = $("#modal");
+  m.innerHTML = `<div class="modal-card xmodal" role="dialog" aria-modal="true" aria-labelledby="fcTitle">
+    <h2 id="fcTitle" style="font-size:18px">Gör film av ${n} markerade klipp</h2>
+    <p class="muted" style="margin:0;font-size:13px">AI:n väljer de bästa delarna av varje klipp, ordningen, klipplängderna i takt med musiken, låten och texterna. Bara dina klipp används.</p>
+    <div class="stack" style="gap:8px"><b style="font-size:14px">Längd</b>
+      <div class="seg" role="group" aria-label="Längd" style="grid-template-columns:repeat(5,minmax(0,1fr))">${[["", "Lagom"], ["15", "15 s"], ["30", "30 s"], ["60", "60 s"], ["90", "90 s"]].map(([k, l]) => `<button data-fclen="${k}" aria-pressed="${fc.length === k}">${l}</button>`).join("")}</div>
+      <small class="muted">Lagom = ungefär tre sekunder per klipp (${Math.round(Math.max(8, Math.min(60, n * 3.2)))} s). Med få klipp och snabb stil kan filmen bli kortare än vald längd – hellre det än upprepningar.</small></div>
+    <label class="stack" style="gap:6px"><b style="font-size:14px">Format</b><select class="selfield" id="fcFmt">${Object.entries(fmts).map(([k, l]) => `<option value="${k}" ${fc.format === k ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label>
+    <div class="stack" style="gap:8px"><b style="font-size:14px">Stil</b>
+      <div class="chips">${[["auto", "AI väljer"], ...Object.entries(styles).map(([k, v]) => [k, v.label || k])].map(([k, l]) => `<button class="chip" data-fcstyle="${k}" aria-pressed="${fc.style === k}">${esc(l)}</button>`).join("")}</div></div>
+    <div class="stack" style="gap:8px"><b style="font-size:14px">Hur många?</b>
+      <div class="seg" role="group" aria-label="Antal" style="grid-template-columns:repeat(2,minmax(0,1fr));max-width:420px">
+        <button data-fccount="1" aria-pressed="${fc.count === 1}">En film</button><button data-fccount="3" aria-pressed="${fc.count !== 1}">Tre förslag att välja mellan</button></div>
+      <small class="muted">${fc.style === "auto" ? (fc.count === 1 ? "En film – AI:n väljer stil (filmisk)." : "Tre olika stilar: filmisk, action och dokumentär.") : (fc.count === 1 ? "En film i vald stil." : "Tre varianter i vald stil.")}</small></div>
+    <div class="row" style="justify-content:flex-end"><button class="btn" data-act="modal-close">Avbryt</button><button class="btn primary" data-fcgo>${icon("spark", 15)}Klipp ihop</button></div></div>`;
+  m.hidden = false;
+}
+document.addEventListener("click", async (ev) => {
+  const t = ev.target.closest("[data-fromclips], [data-fclen], [data-fcgo], [data-fcstyle], [data-fccount]");
+  if (!t) return;
+  ev.preventDefault(); ev.stopPropagation();
+  const d = t.dataset;
+  if (d.fromclips !== undefined) return openFromClips();
+  if (d.fclen !== undefined || d.fcstyle || d.fccount) {
+    if (d.fclen !== undefined) state.fc.length = d.fclen;
+    if (d.fcstyle) state.fc.style = d.fcstyle;
+    if (d.fccount) state.fc.count = Number(d.fccount);
+    state.fc.format = $("#fcFmt").value;
+    return openFromClips();
+  }
+  if (d.fcgo !== undefined) {
+    const fc = state.fc;
+    fc.format = $("#fcFmt").value;
+    askNotify();
+    try {
+      await api("POST", `/api/p/${state.pid}/fromclips`, { clip_ids: state.anSel, length: fc.length ? Number(fc.length) : null, style: fc.style, format: fc.format, count: fc.count || 3 });
+      $("#modal").hidden = true;
+      state.anSel = [];
+      state.planTab = "fromclips";
+      state.expectJob = true;
+      state.view = "proposals";
+      toast(`AI:n klipper ihop dina klipp – ${fc.count === 1 ? "filmen dyker" : "förslagen dyker"} upp här.`, true);
+      render();
+      state.planTab = "all";
+      await pollJob();
+    } catch (e) { fail(e); }
+  }
+  return undefined;
 }, true);

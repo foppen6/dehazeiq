@@ -500,7 +500,23 @@ def _place(c, dur, fmt):
     return start, cx, cy, keys
 
 
-def _candidates_for(project, style, fmt, favorites):
+def _candidates_for(project, style, fmt, favorites, only=None):
+    if only:  # "Gör film av de här klippen": bara de valda klippen, även om AI valt bort dem
+        by_id = {c["id"]: c for c in project.clips()}
+        sel = [by_id[c] for c in only if c in by_id and by_id[c].get("analysis")]
+        if not sel:
+            raise GenerateError("De valda klippen är inte analyserade än.")
+        try:
+            cands, emb_kind = build_candidates(project, style, fmt, set(only), clips=sel, highlights=False)
+        except GenerateError:
+            cands, emb_kind = build_candidates(project, style, fmt, set(only), use_interest=False,
+                                               clips=sel, highlights=False)
+        story.annotate(cands, by_id)
+        try:
+            divearc.annotate(cands)
+        except Exception as exc:  # noqa: BLE001
+            print("Dykfaser:", exc)
+        return cands, [], emb_kind
     # Höjdpunktsurvalet görs inom varje tema (story.build), inte globalt
     try:
         cands, emb_kind = build_candidates(project, style, fmt, set(favorites), highlights=False)
@@ -562,13 +578,16 @@ def _resolve_theme(theme, cands, project):
 
 
 def generate(project, style_key="cinematic", fmt="9:16", length=30.0, seed=None,
-             music=None, favorites=(), theme=None, avoid_clips=()):
+             music=None, favorites=(), theme=None, avoid_clips=(), only_clips=None):
     if style_key not in STYLES:
         raise GenerateError(f"Okänd stil: {style_key}")
     style = STYLES[style_key]
     seed = int(seed if seed is not None else np.random.SeedSequence().entropy % 2**31)
     rng = np.random.default_rng(seed)
-    cands, ctx, emb_kind = _candidates_for(project, style, fmt, favorites)
+    if only_clips:
+        favorites = list(only_clips)
+        theme = None
+    cands, ctx, emb_kind = _candidates_for(project, style, fmt, favorites, only_clips)
     th = _resolve_theme(theme, cands, project)
     length = float(length)
     if music is None and not style.get("no_music"):
@@ -583,6 +602,8 @@ def generate(project, style_key="cinematic", fmt="9:16", length=30.0, seed=None,
     n = max(3, int(round(length / style["avg_shot"])))
     # Filmen blir hellre kortare än utfylld: aldrig fler klipp än det finns höjdpunkter (+ sammanhang)
     n = min(n, max(1, len({(c["clip"]["id"], c["i0"]) for c in cands})) + 2)
+    if only_clips:  # alla valda klipp ska helst med, så länge filmen inte blir hackig
+        n = max(n, min(len({c["clip"]["id"] for c in cands}), int(length / max(0.6, style["min_shot"]))))
     favs = list(favorites)
     if avoid_clips:
         # "Generera nya förslag": klipp som nyss användes får lägre prioritet, så att det blir nytt
@@ -598,6 +619,25 @@ def generate(project, style_key="cinematic", fmt="9:16", length=30.0, seed=None,
     seq = story.build(th, cands, ctx, n, select)
     if not seq:
         seq = _order(_select(cands, n, style, rng, emb_kind, favs), style_key, emb_kind)
+    if only_clips:  # se till att varje valt klipp kommer med minst en gång
+        have = {c["clip"]["id"] for c in seq}
+        best = {}
+        for c in cands:
+            cid = c["clip"]["id"]
+            if cid not in have and (cid not in best or c["quality"] > best[cid]["quality"]):
+                best[cid] = c
+        if best:
+            for cid, c in best.items():
+                counts = {}
+                for x in seq:
+                    counts[x["clip"]["id"]] = counts.get(x["clip"]["id"], 0) + 1
+                dup = [j for j, x in enumerate(seq) if counts[x["clip"]["id"]] > 1]
+                if dup and len(seq) >= n:  # byt ut den svagaste dubbletten
+                    j = min(dup, key=lambda j: seq[j]["quality"])
+                    seq[j] = c
+                else:
+                    seq.append(c)
+            seq = _order(seq, style_key, emb_kind)
     seq = divearc.arrange(seq, (th or {}).get("kind"), style_key)
     beats = music.get("beats") if music else None
     is_mv = bool(style.get("music_video")) or style_key == "musicvideo"
