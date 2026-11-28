@@ -96,6 +96,8 @@ Format, längd, stil och musik ställs in under **Importera** och gäller även 
 - **Analysen:** peka på ett klipp och tryck **F** (måste med), **X** (välj bort) eller **A** (låt AI
   avgöra). Markera flera med rutan i hörnet (Skift-klick för flera i rad, ⌘A/Ctrl+A för alla) och
   ändra alla på en gång. **Kompakt** visar fler klipp per skärm.
+- **Börja om:** knappen **Börja om** på förslagssidan tar bort alla förslag och deras
+  förhandsvisningar (välj om favoriterna ska behållas). Klipp, analys och exporterade filmer ligger kvar.
 - **Förslagen:** **Kompakt lista** visar ett förslag per rad. **Jämför** två förslag sida vid sida
   och spela dem samtidigt (mellanslag spelar/pausar).
 - **Redigeraren:** **S** delar klippet vid markören, **Q/W** kapar början/slutet, **T** lägger en

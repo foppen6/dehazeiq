@@ -206,6 +206,24 @@ class Project:
                 (self.dir / "renders" / prev).unlink(missing_ok=True)
         return len(gone)
 
+    def clear_proposals(self, keep_favorites=True):
+        """Börja om: tar bort alla förslag (utom favoriter om så önskas) och deras
+        förhandsvisningar. Exporterade filmer ligger kvar. Returnerar antal borttagna."""
+        with _LOCK:
+            self.reload()
+            ps = self.data.get("proposals", [])
+            keep = [p for p in ps if keep_favorites and p.get("favorite")]
+            gone = [p for p in ps if p not in keep]
+            self.data["proposals"] = keep
+            self.save()
+        for p in gone:  # förhandsvisningar (även språkvarianter), inte exporterade filmer
+            for f in (self.dir / "renders").glob(f"{p['id']}_preview*.mp4"):
+                f.unlink(missing_ok=True)
+        if not keep:  # inga förslag kvar: gamla förhandsvisningar och klippförhandsvisningar
+            for f in list((self.dir / "renders").glob("*_preview*.mp4")) + list((self.dir / "shots").glob("*.mp4")):
+                f.unlink(missing_ok=True)
+        return len(gone)
+
     def replace_proposal(self, prop):
         with _LOCK:
             self.reload()

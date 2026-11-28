@@ -1037,6 +1037,7 @@ function viewProposals() {
         <p class="lead">${esc(fmt ? fmt.name : s.format)} · ${fmtLong(s.length)} · samma material, olika urval, tempo och rytm.</p></div>
       <div class="row">
         ${favs ? `<span class="chip-status" style="height:40px;padding:0 14px;border-radius:10px;background:var(--panel-2);border:1px solid var(--line)">${icon("star", 15)} ${favs === 1 ? "1 favoritklipp är låst" : `${favs} favoritklipp är låsta`}</span>` : ""}
+        ${props.length && !remote() ? `<button class="btn" data-act="clear-ask" title="Ta bort alla förslag och börja om">${icon("trash", 15)}Börja om</button>` : ""}
         <button class="btn" data-propcompact aria-pressed="${!!state.propCompact}" title="Visa förslagen som en kompakt lista">${state.propCompact ? "Stora kort" : "Kompakt lista"}</button>
         ${(P().proposals || []).some((x) => x.favorite) ? `<button class="btn" data-favexport title="Exportera alla förslag du stjärnmärkt">${icon("star", 15)}Exportera favoriter (${(P().proposals || []).filter((x) => x.favorite).length})</button>` : ""}
         <button class="btn" data-act="generate" ${generating || running() ? "disabled" : ""}>${icon("redo", 16)}${generating ? "Skapar …" : "Generera nya förslag"}</button>
@@ -1283,6 +1284,29 @@ document.addEventListener("click", async (ev) => {
   if (d.ptab) return switchProject(d.ptab);
   if (d.favonly) { state.favOnly = !state.favOnly; return render(); }
   if (d.act === "old-open") { state.oldOpen = true; return render(); }
+  if (d.act === "clear-ask") {
+    const all = P().proposals || [], fav = all.filter((x) => x.favorite).length;
+    const m = $("#modal");
+    m.innerHTML = `<div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="clrTitle">
+      <h2 id="clrTitle" style="font-size:18px">Ta bort alla förslag?</h2>
+      <p class="muted" style="margin:0">${all.length} förslag och deras förhandsvisningar tas bort. Klippen, analysen och filmer du redan exporterat ligger kvar – du kan skapa nya förslag direkt.</p>
+      ${fav ? `<label class="row" style="gap:10px"><input type="checkbox" id="clrKeepFav" checked style="width:18px;height:18px;accent-color:var(--accent)">${fav === 1 ? "Behåll min favorit" : `Behåll mina ${fav} favoriter`}</label>` : ""}
+      <div class="row" style="justify-content:flex-end"><button class="btn" data-act="modal-close">Avbryt</button>
+        <button class="btn danger" data-act="clear-go">${icon("trash", 15)}Ta bort förslagen</button></div></div>`;
+    m.hidden = false;
+    return undefined;
+  }
+  if (d.act === "clear-go") {
+    const keepFav = $("#clrKeepFav") ? $("#clrKeepFav").checked : false;
+    try {
+      const r = await api("POST", `/api/p/${state.pid}/clear`, { keep_favorites: keepFav });
+      P().proposals = r.proposals;
+      state.shown = r.proposals.map((x) => x.id); state.fresh = new Set(); state.cmp = []; state.oldOpen = false;
+      $("#modal").hidden = true;
+      toast(`${r.removed} förslag borttagna${r.proposals.length ? `, ${r.proposals.length} favoriter kvar` : ""}. Välj filmtyper eller beskriv filmen för att börja om.`, true);
+    } catch (e) { fail(e); }
+    return render();
+  }
   if (d.act === "prune") {
     if (state.pruneAsk !== state.pid) { state.pruneAsk = state.pid; toast("Tryck en gång till för att rensa. Favoriter, redigerade och de 6 senaste behålls.", true); setTimeout(() => { state.pruneAsk = null; }, 4000); return undefined; }
     state.pruneAsk = null;

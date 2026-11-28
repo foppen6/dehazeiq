@@ -864,6 +864,9 @@ class Handler(BaseHTTPRequestHandler):
             JOBS.start(p.id, "auto", pipeline.auto, p.id, None, exp if exp.get("auto") else None,
                        label=f"Mall: {t['name']}", project_name=p.data["name"])
             return self._json({"ok": True, "settings": p.data["settings"]})
+        if action == ["clear"]:  # börja om från början
+            n = p.clear_proposals(bool(body.get("keep_favorites", True)))
+            return self._json({"removed": n, "proposals": p.data.get("proposals", [])})
         if action == ["prune"]:
             n = p.prune_proposals(int(body.get("keep", 6)))
             return self._json({"removed": n, "proposals": p.data.get("proposals", [])})
