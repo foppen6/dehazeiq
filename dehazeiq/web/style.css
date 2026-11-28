@@ -626,3 +626,20 @@ kbd { font: 600 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 
 .cmpwait { display: flex; flex-direction: column; align-items: center; gap: 10px; color: var(--text-2); font-size: 13px; }
 @media (max-width: 640px) { .cmpgrid { gap: 8px; } .cmpcol small { display: none; } }
 @media (max-width: 640px) { .pcard .info { padding-top: 0; } }
+
+/* analys: förhandsgranska klipp */
+[data-cprev] { cursor: pointer; }
+[data-cprev] .cplay { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 44px; height: 44px; border-radius: 50%;
+  background: #000a; display: flex; align-items: center; justify-content: center; color: #fff; opacity: 0; transition: opacity .15s; pointer-events: none; }
+[data-cprev]:hover .cplay { opacity: .9; }
+[data-cprev].scrubbing .cplay { opacity: 0; }
+[data-cprev].scrubbing::after { content: ""; position: absolute; left: var(--scrub, 0); top: 0; bottom: 0; width: 2px; background: #FF4D5E; pointer-events: none; }
+@media (hover: none) { [data-cprev] .cplay { opacity: .8; width: 36px; height: 36px; } }
+.cpvmodal { width: min(980px, 100%); max-height: calc(100vh - 24px); overflow: auto; gap: 12px; }
+.cpvframe { background: #000; border-radius: 12px; overflow: hidden; display: flex; justify-content: center; }
+.cpvframe video, .cpvframe img { width: 100%; max-height: 58vh; object-fit: contain; display: block; }
+.cpvbar { position: relative; height: 18px; border-radius: 6px; background: var(--raised); cursor: pointer; overflow: hidden; }
+.cpvseg { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--accent) 28%, transparent); }
+.cpvbest { position: absolute; top: 3px; bottom: 3px; border-radius: 4px; background: var(--accent); }
+.cpvhead { position: absolute; top: 0; bottom: 0; width: 2px; background: #FF4D5E; left: 0; }
+.cpvmodal .toggle.on { color: var(--accent); border-color: var(--accent); }

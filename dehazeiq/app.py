@@ -74,6 +74,9 @@ def _project_view(p: Project) -> dict:
     for c in p.clips():  # originalfil som saknas (minneskort urtaget, disk bortkopplad)
         if c.get("path") and not c.get("parent360") and not c.get("photo") and not Path(c["path"]).exists():
             c = dict(c, offline=True)
+        pf = p.dir / "proxies" / f"{c['id']}.mp4"  # för förhandsvisning i analysen
+        if pf.exists():
+            c = dict(c, proxy=pf.name)
         cl.append(c)
     d["clips"] = cl
     d.pop("order", None)

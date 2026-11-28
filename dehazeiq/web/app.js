@@ -778,7 +778,8 @@ function viewAnalyze() {
     const why = c.excluded ? ["Bortvald av dig"] : (!c.favorite && c.reasons && c.reasons.length ? c.reasons : []);
     const picked = (state.anSel || []).includes(c.id);
     return `<article class="ccard ${inUse ? "" : "off"} ${picked ? "picked" : ""}" data-cid="${c.id}" tabindex="0">
-      <div class="img"><img loading="lazy" alt="" src="${frameUrl(c.id, mid, 480)}">
+      <div class="img" data-cprev="${c.id}" title="Klicka för att spela klippet – dra musen över bilden för att spola"><img loading="lazy" alt="" src="${frameUrl(c.id, mid, 480)}" data-mid="${mid.toFixed(2)}">
+        <span class="cplay" aria-hidden="true">${icon("play", 18)}</span>
         <button class="ccsel" data-csel="${c.id}" aria-pressed="${picked}" aria-label="Markera klippet" title="Markera (Skift-klick markerar flera i rad)">${picked ? svgi(ICO.check, 14) : ""}</button>
         <span class="badge" style="left:10px;top:10px">${esc(c.source)}</span>
         <span class="score num ${score >= 70 ? "hi" : "lo"}">${score}</span>

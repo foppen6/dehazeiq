@@ -610,3 +610,148 @@ document.addEventListener("click", async (ev) => {
   }
   return undefined;
 }, true);
+
+/* ================= förhandsgranska klippen i analysen ================= */
+// dra musen över bilden: spola genom klippet (stillbilder, senaste vinner)
+let hoverScrub = { el: null, busy: false, want: null };
+document.addEventListener("mousemove", (ev) => {
+  if (state.view !== "analyze") return;
+  const box = ev.target.closest && ev.target.closest("[data-cprev]");
+  if (!box || ev.target.closest(".ccsel")) return;
+  const c = clips().find((x) => x.id === box.dataset.cprev);
+  if (!c || !c.duration) return;
+  const r = box.getBoundingClientRect();
+  const f = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
+  const t = Math.round(f * (c.duration - 0.1) * 4) / 4;  // kvartssekunder: färre förfrågningar
+  box.style.setProperty("--scrub", `${(f * 100).toFixed(1)}%`);
+  box.classList.add("scrubbing");
+  const img = box.querySelector("img");
+  const url = frameUrl(c.id, t, 480);
+  if (img.dataset.cur === url) return;
+  hoverScrub.want = { img, url };
+  if (hoverScrub.busy) return;
+  const load = () => {
+    const w = hoverScrub.want;
+    if (!w) return;
+    hoverScrub.want = null; hoverScrub.busy = true;
+    const im = new Image();
+    im.onload = im.onerror = () => { hoverScrub.busy = false; if (im.naturalWidth && w.img.isConnected) { w.img.src = w.url; w.img.dataset.cur = w.url; } load(); };
+    im.src = w.url;
+  };
+  load();
+});
+document.addEventListener("mouseout", (ev) => {
+  const box = ev.target.closest && ev.target.closest("[data-cprev]");
+  if (!box || (ev.relatedTarget && box.contains(ev.relatedTarget))) return;
+  box.classList.remove("scrubbing");
+  const c = clips().find((x) => x.id === box.dataset.cprev), img = box.querySelector("img");
+  if (c && img && img.dataset.mid) { const u = frameUrl(c.id, Number(img.dataset.mid), 480); img.src = u; img.dataset.cur = u; }
+  hoverScrub.want = null;
+});
+
+// klick: spela klippet i en ruta – bästa sekvensen markerad, pilar för nästa/föregående, F/X
+function openClipPreview(cid) {
+  const list = state.anList && state.anList.includes(cid) ? state.anList : clips().map((c) => c.id);
+  const c = clips().find((x) => x.id === cid);
+  if (!c) return;
+  state.cpv = { cid, list };
+  const a = c.analysis || {}, best = a.best || [0, c.duration || 0];
+  const k = list.indexOf(cid);
+  const dur = c.duration || 1;
+  const segs = [];
+  const tags = (a.tags || []).slice(0, 6).map((t) => `<span class="tag">${esc(t)}</span>`).join("");
+  const whats = ((c.vlm && c.vlm.frames) || []).map((f) => f.what).filter(Boolean);
+  const desc = [...new Set(whats)].slice(0, 3).join(" … ");
+  const why = c.auto_excluded && !c.favorite && (c.reasons || []).length ? `AI:n valde bort klippet: ${(c.reasons || []).join(", ")}.` : "";
+  const speech = c.speech && c.speech.segments && c.speech.segments.length ? c.speech.segments.map((s) => s.text || s[2] || "").join(" ").slice(0, 220) : "";
+  const m = $("#modal");
+  m.innerHTML = `<div class="modal-card cpvmodal" role="dialog" aria-modal="true" aria-labelledby="cpvTitle">
+    <div class="spread" style="gap:10px"><h2 id="cpvTitle" style="font-size:17px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.name)}</h2>
+      <span class="muted num" style="font-size:13px;flex:none">${k + 1} av ${list.length}</span></div>
+    <div class="cpvframe">${c.proxy
+      ? `<video id="cpvVid" src="${mediaUrl("proxies", c.proxy)}" playsinline controls autoplay muted></video>`
+      : `<img id="cpvImg" alt="" src="${frameUrl(c.id, (best[0] + best[1]) / 2, 960)}">`}</div>
+    <div class="cpvbar" id="cpvBar" title="Klicka för att hoppa – markerat = bästa sekvensen">
+      ${segs.map((s) => `<span class="cpvseg" style="left:${(s[0] / dur * 100).toFixed(2)}%;width:${((s[1] - s[0]) / dur * 100).toFixed(2)}%"></span>`).join("")}
+      <span class="cpvbest" style="left:${(best[0] / dur * 100).toFixed(2)}%;width:${(Math.max(0.1, best[1] - best[0]) / dur * 100).toFixed(2)}%"></span>
+      <span class="cpvhead" id="cpvHead"></span></div>
+    <div class="row" style="gap:8px;flex-wrap:wrap;font-size:13px">
+      <span class="muted">Bästa sekvens <b class="num" style="color:var(--text)">${fmtDur(best[0])}–${fmtDur(best[1])}</b> · ${fmtDur(dur)} · ${esc(c.source || "")}</span>${tags}</div>
+    ${desc ? `<p style="margin:0;font-size:14px">${esc(desc)}</p>` : ""}
+    ${why ? `<p style="margin:0;font-size:13px;color:var(--warn)">${esc(why)}</p>` : ""}
+    ${speech ? `<p class="muted" style="margin:0;font-size:13px">Sägs: "${esc(speech)}"</p>` : ""}
+    <div class="row" style="gap:8px;flex-wrap:wrap">
+      <button class="btn small" data-cpvnav="-1" ${k <= 0 ? "disabled" : ""} aria-label="Föregående klipp">←</button>
+      <button class="btn small" data-cpvnav="1" ${k >= list.length - 1 ? "disabled" : ""} aria-label="Nästa klipp">→</button>
+      <button class="btn small" data-cpvbest>${icon("play", 12)}Spela bästa sekvensen</button>
+      <button class="btn small" data-cpvsound>${c.proxy ? "Ljud på" : ""}</button>
+      <span class="grow"></span>
+      <button class="btn small toggle ${c.favorite ? "on" : ""}" data-cpvset="favorite" aria-pressed="${!!c.favorite}">${icon("star", 14)}Måste med <kbd>F</kbd></button>
+      <button class="btn small toggle ${c.excluded ? "on" : ""}" data-cpvset="excluded" aria-pressed="${!!c.excluded}">${icon("eyeoff", 14)}Välj bort <kbd>X</kbd></button>
+      <button class="btn small" data-cpvsel aria-pressed="${state.anSel.includes(c.id)}">${state.anSel.includes(c.id) ? "Markerad ✓" : "Markera"}</button>
+      <button class="btn small primary" data-act="modal-close">Stäng</button></div></div>`;
+  m.hidden = false;
+  const v = document.getElementById("cpvVid");
+  if (!c.proxy) { const sb = m.querySelector("[data-cpvsound]"); if (sb) sb.remove(); }
+  if (v) {
+    v.addEventListener("loadedmetadata", () => { try { v.currentTime = best[0]; } catch (_) { /* */ } }, { once: true });
+    v.addEventListener("timeupdate", () => { const h = document.getElementById("cpvHead"); if (h) h.style.left = `${(v.currentTime / dur * 100).toFixed(2)}%`; });
+  }
+}
+function cpvSeek(t) {
+  const v = document.getElementById("cpvVid"), c = clips().find((x) => state.cpv && x.id === state.cpv.cid);
+  if (v) { v.currentTime = t; v.play().catch(() => {}); }
+  else if (c) { const im = document.getElementById("cpvImg"); if (im) im.src = frameUrl(c.id, t, 960); const h = document.getElementById("cpvHead"); if (h) h.style.left = `${(t / (c.duration || 1) * 100).toFixed(2)}%`; }
+}
+function cpvNav(step) {
+  const s = state.cpv;
+  if (!s) return;
+  const k = s.list.indexOf(s.cid) + step;
+  if (k >= 0 && k < s.list.length) openClipPreview(s.list[k]);
+}
+async function cpvSet(field) {
+  const s = state.cpv;
+  if (!s) return;
+  await bulk(field, [s.cid]);
+  openClipPreview(s.cid);
+}
+document.addEventListener("click", (ev) => {
+  const t = ev.target.closest("[data-cprev], [data-cpvnav], [data-cpvbest], [data-cpvset], [data-cpvsel], [data-cpvsound], #cpvBar");
+  if (!t) return;
+  if (t.matches("[data-cprev]")) {
+    if (ev.target.closest(".ccsel") || state.view !== "analyze") return;
+    ev.preventDefault();
+    return openClipPreview(t.dataset.cprev);
+  }
+  ev.preventDefault();
+  const d = t.dataset, c = clips().find((x) => state.cpv && x.id === state.cpv.cid);
+  if (!c) return;
+  if (t.id === "cpvBar") { const r = t.getBoundingClientRect(); return cpvSeek(Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width)) * (c.duration || 0)); }
+  if (d.cpvnav) return cpvNav(Number(d.cpvnav));
+  if (d.cpvbest !== undefined) return cpvSeek((c.analysis || {}).best ? c.analysis.best[0] : 0);
+  if (d.cpvsound !== undefined) { const v = document.getElementById("cpvVid"); if (v) { v.muted = !v.muted; t.textContent = v.muted ? "Ljud på" : "Ljud av"; } return; }
+  if (d.cpvset) return cpvSet(d.cpvset);
+  if (d.cpvsel !== undefined) {
+    const sel = new Set(state.anSel);
+    if (sel.has(c.id)) sel.delete(c.id); else sel.add(c.id);
+    state.anSel = [...sel];
+    render();
+    return openClipPreview(c.id);
+  }
+});
+document.addEventListener("keydown", (ev) => {
+  if ($("#modal").hidden || !document.querySelector(".cpvmodal") || ev.target.closest("input, textarea, select")) return;
+  const k = ev.key.toLowerCase();
+  if (k === "arrowright" || k === "arrowleft") { ev.preventDefault(); ev.stopPropagation(); cpvNav(k === "arrowright" ? 1 : -1); }
+  else if (k === "f" || k === "x") { ev.preventDefault(); ev.stopPropagation(); cpvSet(k === "f" ? "favorite" : "excluded"); }
+  else if (k === " " || ev.code === "Space") {
+    ev.preventDefault(); ev.stopPropagation();
+    const v = document.getElementById("cpvVid"); if (v) { if (v.paused) v.play().catch(() => {}); else v.pause(); }
+  } else if (k === "escape") { document.querySelectorAll("#modal video").forEach((v) => v.pause()); $("#modal").hidden = true; }
+}, true);
+// Enter på ett fokuserat kort öppnar förhandsvisningen
+document.addEventListener("keydown", (ev) => {
+  if (state.view !== "analyze" || ev.key !== "Enter" || !$("#modal").hidden) return;
+  const card = ev.target.closest && ev.target.closest(".ccard[data-cid]");
+  if (card && ev.target === card) { ev.preventDefault(); openClipPreview(card.dataset.cid); }
+});
