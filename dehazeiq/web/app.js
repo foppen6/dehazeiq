@@ -527,8 +527,8 @@ function renderTop() {
   const info = state.info || {};
   const chip = `<span class="chip-status" title="Videokodning och motivigenkänning"><i style="background:${info.hw_encoder ? "var(--good)" : "var(--warn)"}"></i>${esc(info.encoder || "")} · ${info.clip_ai ? "AI på" : "AI saknas"}</span>`;
   $("#topActions").innerHTML = remote()
-    ? `${queueButton()}<button class="btn small" data-act="music-view">${icon("music", 15)}Musik</button><span class="chip-status"><i></i>Ansluten via wifi</span>`
-    : `${chip}${queueButton()}<button class="btn small" data-act="music-view">${icon("music", 15)}Musik</button><button class="btn small" data-act="lan" title="Styr DeHazeIQ från mobil eller surfplatta">${icon("phone", 15)}Mobil</button>`;
+    ? `${queueButton()}<button class="btn small" data-act="music-view">${icon("music", 15)}Musik</button><button class="btn small" data-act="help" title="Hjälp och kortkommandon (?)">?<span class="hide-sm"> Hjälp</span></button><span class="chip-status"><i></i>Ansluten via wifi</span>`
+    : `${chip}${queueButton()}<button class="btn small" data-act="music-view">${icon("music", 15)}Musik</button><button class="btn small" data-act="lan" title="Styr DeHazeIQ från mobil eller surfplatta">${icon("phone", 15)}Mobil</button><button class="btn small" data-act="help" title="Hjälp och kortkommandon (? eller F1)">?<span class="hide-sm"> Hjälp</span></button>`;
 }
 
 /* ---------- vy: importera ---------- */

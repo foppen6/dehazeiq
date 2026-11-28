@@ -643,3 +643,26 @@ kbd { font: 600 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 
 .cpvbest { position: absolute; top: 3px; bottom: 3px; border-radius: 4px; background: var(--accent); }
 .cpvhead { position: absolute; top: 0; bottom: 0; width: 2px; background: #FF4D5E; left: 0; }
 .cpvmodal .toggle.on { color: var(--accent); border-color: var(--accent); }
+
+/* hjälp */
+.helpmodal { width: min(980px, 100%); height: min(760px, calc(100vh - 32px)); gap: 14px; }
+.helpbody { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 18px; min-height: 0; flex: 1 1 auto; }
+.helpnav { display: flex; flex-direction: column; gap: 2px; overflow: auto; }
+.hnav { text-align: left; padding: 8px 10px; border-radius: 8px; border: 0; background: transparent; color: var(--text-2); font: inherit; font-size: 14px; cursor: pointer; }
+.hnav:hover { background: var(--raised); color: var(--text); }
+.hnav.on { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--text); font-weight: 600; }
+.helpcontent { overflow: auto; padding-right: 6px; font-size: 15px; line-height: 1.55; }
+.helpcontent h3 { margin: 0 0 8px; font-size: 18px; }
+.helpcontent ul, .helpcontent ol { margin: 0 0 10px; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; }
+.helpcontent p { margin: 0 0 10px; }
+.hsec + .hsec { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.hkgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px 24px; }
+.hkgroup h4 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-2); }
+@media (max-width: 700px) {
+  .helpmodal { height: calc(100vh - 24px); padding: 16px; }
+  .helpbody { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); gap: 10px; }
+  .helpnav { flex-direction: row; overflow-x: auto; padding-bottom: 4px; }
+  .hnav { white-space: nowrap; flex: none; }
+  .helpmodal #helpQ { max-width: none; }
+}
+@media (max-width: 520px) { .hide-sm { display: none; } }

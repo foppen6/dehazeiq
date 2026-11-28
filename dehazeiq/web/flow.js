@@ -391,7 +391,7 @@ document.addEventListener("click", async (ev) => {
     m.innerHTML = `<div class="modal-card" role="dialog" aria-modal="true" style="max-width:440px"><h2 style="font-size:18px">Kortkommandon i analysen</h2>
       <p class="muted" style="margin:0;font-size:13px">Gäller klippet du pekar på – eller alla markerade.</p>
       <dl class="kbd">${rows.map(([k, v]) => `<dt><kbd>${esc(k)}</kbd></dt><dd>${esc(v)}</dd>`).join("")}</dl>
-      <div class="row" style="justify-content:flex-end"><button class="btn primary" data-act="modal-close">Stäng</button></div></div>`;
+      <div class="row" style="justify-content:space-between"><button class="btn" data-helpopen="analyze">Hjälp om analysen</button><button class="btn primary" data-act="modal-close">Stäng</button></div></div>`;
     m.hidden = false;
   }
   return undefined;

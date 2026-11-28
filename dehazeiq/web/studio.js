@@ -1893,7 +1893,7 @@ function showShortcuts() {
   m.innerHTML = `<div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="kbTitle" style="max-width:460px">
     <h2 id="kbTitle" style="font-size:18px">Kortkommandon i redigeraren</h2>
     <dl class="kbd">${rows.map(([k, v]) => `<dt><kbd>${esc(k)}</kbd></dt><dd>${esc(v)}</dd>`).join("")}</dl>
-    <div class="row" style="justify-content:flex-end"><button class="btn primary" data-act="modal-close">Stäng</button></div></div>`;
+    <div class="row" style="justify-content:space-between"><button class="btn" data-helpopen="edit">Hjälp om redigeraren</button><button class="btn primary" data-act="modal-close">Stäng</button></div></div>`;
   m.hidden = false;
 }
 

@@ -80,6 +80,12 @@ Automatiskt urval:
 
 Format, längd, stil och musik ställs in under **Importera** och gäller även nästa import.
 
+## Hjälp i appen
+
+Knappen **? Hjälp** uppe till höger (eller tangenten **?** / **F1**) öppnar hjälpen: hur varje steg
+fungerar, tips och felsökning, sökbar, och en sida med alla kortkommandon. Den öppnas på avsnittet
+för sidan du står på.
+
 ## Snabbare arbetsflöde
 
 - **Minneskort och kameror:** sätt i SD-kortet (eller koppla in Insta360/GoPro) – programmet
